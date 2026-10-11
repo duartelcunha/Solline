@@ -77,19 +77,6 @@ export function ToolInput({
       </div>
     );
   }
-  if (name === 'Write') {
-    const content = field(input, 'content') ?? '';
-    const shown = lines ? content.split('\n').slice(0, lines).join('\n') : content;
-    return (
-      <div>
-        {file ? <div className="mb-1.5 font-mono text-[11.5px] text-muted">{file}</div> : null}
-        <pre className="overflow-x-auto font-mono text-[12px] leading-[1.6]">
-          {shown}
-          {shown !== content ? '\n…' : ''}
-        </pre>
-      </div>
-    );
-  }
   const json = prettyJson(input);
   const shown = lines ? json.split('\n').slice(0, lines).join('\n') : json;
   return (

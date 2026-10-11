@@ -6,56 +6,39 @@ import type {
   PermissionAnswer,
   SessionInfo,
 } from '@solline/protocol';
-import type {
-  AgentAdapter,
-  AgentAdapterFactory,
-  AdapterSink,
-  AgentStartOptions,
-} from './adapters/types.ts';
+import type { AgentAdapter, AgentAdapterFactory, AdapterSink } from './adapters/types.ts';
 
 interface Entry {
   info: SessionInfo;
   adapter: AgentAdapter;
-  options: AgentStartOptions;
-}
-
-export interface SessionManagerOptions {
-  emit: (event: EngineEvent) => void;
-  adapters: Record<AgentKind, AgentAdapterFactory>;
-  newId?: () => string;
-  now?: () => number;
 }
 
 /**
  * Todas as conversas vivas do motor. Cada uma tem o seu adaptador; o que o adaptador
  * conta passa a eventos da Ponte com o id da sessão.
+ * shortcut: as sessões só vivem em memória e desaparecem ao fechar a app; o M3 traz o
+ * histórico (listSessions/getSessionMessages).
  */
 export class SessionManager {
   readonly #sessions = new Map<string, Entry>();
-  readonly #options: SessionManagerOptions;
+  readonly #emit: (event: EngineEvent) => void;
+  readonly #adapters: Record<AgentKind, AgentAdapterFactory>;
 
-  constructor(options: SessionManagerOptions) {
-    this.#options = options;
+  constructor(options: {
+    emit: (event: EngineEvent) => void;
+    adapters: Record<AgentKind, AgentAdapterFactory>;
+  }) {
+    this.#emit = options.emit;
+    this.#adapters = options.adapters;
   }
 
-  list(): SessionInfo[] {
-    return [...this.#sessions.values()].map((entry) => ({ ...entry.info }));
-  }
-
-  get size(): number {
-    return this.#sessions.size;
-  }
-
-  async create(
-    payload: CommandPayload<'session.create'>,
-  ): Promise<CommandResult<'session.create'>> {
-    const id = (this.#options.newId ?? (() => crypto.randomUUID()))();
+  create(payload: CommandPayload<'session.create'>): Promise<CommandResult<'session.create'>> {
     const info: SessionInfo = {
-      id,
+      id: crypto.randomUUID(),
       agent: payload.agent,
       cwd: payload.cwd,
+      // O título vem da primeira mensagem, na interface.
       title: 'Nova sessão',
-      createdAt: (this.#options.now ?? Date.now)(),
       state: 'starting',
       settings: {
         model: payload.model ?? null,
@@ -64,14 +47,7 @@ export class SessionManager {
       },
       agentSessionId: null,
     };
-    const options: AgentStartOptions = {
-      cwd: payload.cwd,
-      model: payload.model,
-      effort: payload.effort,
-      mode: payload.mode,
-      resume: payload.resume,
-    };
-    return this.#start(info, options);
+    return this.#start(info);
   }
 
   /** Abre de novo uma sessão que caiu, com resume no agente e as mesmas definições. */
@@ -80,21 +56,11 @@ export class SessionManager {
     const resumeId = entry.adapter.agentSessionId();
     if (!resumeId) throw new Error('Esta sessão ainda não tem histórico no agente para retomar');
     await entry.adapter.close();
-    const { model, effort, mode } = entry.info.settings;
-    const options: AgentStartOptions = {
-      cwd: entry.info.cwd,
-      model: model ?? undefined,
-      effort: effort ?? undefined,
-      mode,
-      resume: resumeId,
-    };
-    return this.#start(entry.info, options);
+    return this.#start(entry.info, resumeId);
   }
 
-  async send(sessionId: string, text: string): Promise<string> {
-    const entry = this.#get(sessionId);
-    if (entry.info.title === 'Nova sessão') entry.info.title = titleFrom(text);
-    return entry.adapter.send(text);
+  send(sessionId: string, text: string): Promise<string> {
+    return this.#get(sessionId).adapter.send(text);
   }
 
   interrupt(sessionId: string): Promise<void> {
@@ -122,43 +88,34 @@ export class SessionManager {
     if (!answered) throw new Error('Este pedido já não está à espera de resposta');
   }
 
-  async close(sessionId: string): Promise<void> {
-    const entry = this.#sessions.get(sessionId);
-    if (!entry) return;
-    this.#sessions.delete(sessionId);
-    await entry.adapter.close();
-  }
-
   async disposeAll(): Promise<void> {
     const entries = [...this.#sessions.values()];
     this.#sessions.clear();
     await Promise.all(entries.map((entry) => entry.adapter.close()));
   }
 
-  async #start(
-    info: SessionInfo,
-    options: AgentStartOptions,
-  ): Promise<CommandResult<'session.create'>> {
-    const factory = this.#options.adapters[info.agent];
-    const adapter = factory(options, this.#sinkFor(info));
-    const entry: Entry = { info, adapter, options };
+  async #start(info: SessionInfo, resume?: string): Promise<CommandResult<'session.create'>> {
+    const { model, effort, mode } = info.settings;
+    const adapter = this.#adapters[info.agent](
+      { cwd: info.cwd, model: model ?? undefined, effort: effort ?? undefined, mode, resume },
+      this.#sinkFor(info),
+    );
     const isNew = !this.#sessions.has(info.id);
-    this.#sessions.set(info.id, entry);
+    this.#sessions.set(info.id, { info, adapter });
     try {
       const started = await adapter.start();
       info.settings = started.settings;
-      info.agentSessionId = adapter.agentSessionId();
       info.state = 'idle';
       return { session: { ...info }, capabilities: started.capabilities };
     } catch (error) {
-      // Uma sessão que nunca arrancou não fica na lista; uma retomada fica, em erro.
+      // Uma sessão que nunca arrancou não fica; uma retomada fica, em erro, para tentar outra vez.
       if (isNew) this.#sessions.delete(info.id);
       throw error;
     }
   }
 
   #sinkFor(info: SessionInfo): AdapterSink {
-    const emit = this.#options.emit;
+    const emit = this.#emit;
     return {
       delta: (delta) => {
         if (delta.type === 'settings') info.settings = { ...info.settings, ...delta.settings };
@@ -186,9 +143,4 @@ export class SessionManager {
     if (!entry) throw new Error('Sessão desconhecida (o motor pode ter reiniciado)');
     return entry;
   }
-}
-
-export function titleFrom(text: string): string {
-  const line = text.replace(/\s+/g, ' ').trim();
-  return line.length > 60 ? `${line.slice(0, 59)}…` : line || 'Nova sessão';
 }

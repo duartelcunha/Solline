@@ -235,7 +235,6 @@ describe('SessionManager', () => {
     const fakes: ReturnType<typeof fakeQuery>[] = [];
     const manager = new SessionManager({
       emit: (event) => events.push(event),
-      newId: () => 's1',
       adapters: {
         claude: (options, sink) => {
           const fake = fakeQuery(loadFixture('plain-answer'));
@@ -254,22 +253,25 @@ describe('SessionManager', () => {
       model: 'haiku',
       effort: 'low',
     });
+    const id = created.session.id;
     expect(created.session).toMatchObject({
-      id: 's1',
       state: 'idle',
       settings: { model: 'haiku', effort: 'low', mode: 'default' },
     });
-    await manager.send('s1', 'O que é um monorepo?');
+    await manager.send(id, 'O que é um monorepo?');
     await waitFor(() =>
       events.some((e) => e.type === 'session.state' && e.state === 'idle' && events.indexOf(e) > 3),
     );
-    expect(manager.list()[0]?.title).toBe('O que é um monorepo?');
-    const agentSessionId = manager.list()[0]?.agentSessionId;
+    const meta = events.find((e) => e.type === 'session.event' && e.delta.type === 'meta');
+    const agentSessionId =
+      meta?.type === 'session.event' && meta.delta.type === 'meta'
+        ? meta.delta.agentSessionId
+        : null;
     expect(agentSessionId).toBeTruthy();
     expect(events.some((e) => e.type === 'session.event' && e.delta.type === 'usage')).toBe(true);
 
     fakes[0]!.crash();
-    await manager.resume('s1');
+    await manager.resume(id);
     expect(fakes[1]!.options().resume).toBe(agentSessionId);
     expect(fakes[1]!.options().model).toBe('claude-haiku-5-5');
     await manager.disposeAll();
@@ -284,6 +286,6 @@ describe('SessionManager', () => {
         },
       },
     });
-    await expect(manager.send('x', 'olá')).rejects.toThrow('Sessão desconhecida');
+    expect(() => manager.send('x', 'olá')).toThrow('Sessão desconhecida');
   });
 });

@@ -43,29 +43,3 @@ export function ModeIcon({ mode, size = 16 }: { mode: string; size?: number }) {
     </svg>
   );
 }
-
-/** Nível de effort como barras que enchem (low = 1 ... max = 5). */
-export function EffortIcon({ level, levels }: { level: string | null; levels: readonly string[] }) {
-  const all = levels.length > 0 ? levels : ['low', 'medium', 'high', 'xhigh', 'max'];
-  const filled = level ? all.indexOf(level) + 1 : 0;
-  return (
-    <svg aria-hidden width={16} height={16} viewBox="0 0 16 16">
-      {all.map((name, i) => {
-        const h = 3 + i * (10 / Math.max(all.length - 1, 1));
-        const x = 1.5 + i * (13 / all.length);
-        return (
-          <rect
-            key={name}
-            x={x}
-            y={14 - h}
-            width={13 / all.length - 1.2}
-            height={h}
-            rx={0.8}
-            fill="currentColor"
-            opacity={i < filled ? 1 : 0.25}
-          />
-        );
-      })}
-    </svg>
-  );
-}

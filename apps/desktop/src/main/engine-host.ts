@@ -19,14 +19,13 @@ interface Pending {
 const DEFAULT_TIMEOUT_MS = 20_000;
 const TIMEOUT_MS: Partial<Record<EngineCommandName, number>> = {
   'engine.ping': 5_000,
-  'engine.sdkCheck': 150_000,
   'session.create': 120_000,
   'session.resume': 120_000,
 };
 
 /**
  * Arranca o motor num utilityProcess e fala com ele por uma MessagePort.
- * Se o motor morrer, avisa a interface e arranca outro.
+ * Se o motor morrer, avisa a interface.
  */
 export class EngineHost {
   #child: UtilityProcess | undefined;
@@ -54,12 +53,12 @@ export class EngineHost {
       this.#child = undefined;
       this.#port = undefined;
       if (this.#stopping) return;
+      // shortcut: sem reiniciar o motor nem recuperar sessões; o M5 trata da recuperação.
       this.#onEvent({
         kind: 'event',
         type: 'engine.error',
-        message: 'O motor reiniciou. As sessões abertas fecharam; podes retomá-las.',
+        message: 'O motor parou. Fecha e volta a abrir a Solline.',
       });
-      this.start();
     });
     this.#child = child;
     this.#port = port1;

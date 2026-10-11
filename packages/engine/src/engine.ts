@@ -11,7 +11,6 @@ import {
 } from '@solline/protocol';
 import { ClaudeSdkAdapter } from './adapters/claude-sdk.ts';
 import type { AgentAdapterFactory } from './adapters/types.ts';
-import { runSdkCheck } from './sdk-check.ts';
 import { SessionManager } from './session-manager.ts';
 import { ENGINE_VERSION } from './version.ts';
 
@@ -21,8 +20,6 @@ export interface EngineOptions {
   emit?: (event: EngineEvent) => void;
   /** Sem definições do utilizador nem do projeto (testes e smoke). */
   isolated?: boolean;
-  /** Para testes: troca a verificação real do SDK. */
-  sdkCheck?: typeof runSdkCheck;
   /** Para testes: troca os adaptadores reais. */
   adapters?: Partial<Record<AgentKind, AgentAdapterFactory>>;
 }
@@ -37,7 +34,6 @@ export class Engine {
   readonly #handlers: Handlers;
 
   constructor(options: EngineOptions = {}) {
-    const sdkCheck = options.sdkCheck ?? runSdkCheck;
     const claude: AgentAdapterFactory = (start, sink) =>
       new ClaudeSdkAdapter(
         { ...start, claudeExecutable: options.claudeExecutable, loadSettings: !options.isolated },
@@ -56,12 +52,10 @@ export class Engine {
         pid: process.pid,
         receivedAt: Date.now(),
       }),
-      'engine.sdkCheck': () => sdkCheck({ claudeExecutable: options.claudeExecutable }),
       'session.create': (p) => s.create(p),
       'session.resume': (p) => s.resume(p.sessionId),
       'session.send': async (p) => ({ turnId: await s.send(p.sessionId, p.text) }),
       'session.interrupt': async (p) => (await s.interrupt(p.sessionId), ok),
-      'session.close': async (p) => (await s.close(p.sessionId), ok),
       'session.setMode': async (p) => (await s.setMode(p.sessionId, p.mode), ok),
       'session.setModel': async (p) => (await s.setModel(p.sessionId, p.model), ok),
       'session.setEffort': async (p) => (await s.setEffort(p.sessionId, p.effort), ok),

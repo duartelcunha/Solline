@@ -23,7 +23,6 @@ const RESULT_ERRORS: Record<string, string> = {
  * Não faz I/O: recebe mensagens, devolve deltas. Testa-se com fixtures reais.
  */
 export class ClaudeNormalizer {
-  readonly #now: () => number;
   readonly #newId: () => string;
   #assistantTurnId: string | null = null;
   /** message.id corrente por contexto (principal ou subagente). */
@@ -35,8 +34,7 @@ export class ClaudeNormalizer {
   readonly #blocks = new Map<string, Block>();
   #interrupted = false;
 
-  constructor(options: { now?: () => number; newId?: () => string } = {}) {
-    this.#now = options.now ?? Date.now;
+  constructor(options: { newId?: () => string } = {}) {
     this.#newId = options.newId ?? (() => crypto.randomUUID());
   }
 
@@ -50,7 +48,6 @@ export class ClaudeNormalizer {
         turn: {
           id: turnId,
           role: 'user',
-          startedAt: this.#now(),
           blocks: [{ kind: 'text', id: `${turnId}:text`, text, parentToolId: null }],
         },
       },
@@ -71,7 +68,7 @@ export class ClaudeNormalizer {
       deltas: [
         {
           type: 'turn.start',
-          turn: { id: turnId, role: 'assistant', startedAt: this.#now(), blocks: [] },
+          turn: { id: turnId, role: 'assistant', blocks: [] },
         },
       ],
     };
@@ -252,7 +249,6 @@ export class ClaudeNormalizer {
         ...base,
         state: part.is_error ? 'error' : 'ok',
         output: toolResultText(part.content),
-        ...(message.tool_use_result !== undefined ? { result: message.tool_use_result } : {}),
       };
       this.#blocks.set(next.id, next);
       out.push({ type: 'block.upsert', turnId, block: next });

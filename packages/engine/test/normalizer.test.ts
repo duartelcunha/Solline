@@ -13,7 +13,7 @@ function run(
   name: string,
   prompt = 'pedido',
 ): { deltas: ConversationDelta[]; normalizer: ClaudeNormalizer } {
-  const normalizer = new ClaudeNormalizer({ newId: ids(), now: () => 0 });
+  const normalizer = new ClaudeNormalizer({ newId: ids() });
   const deltas = [...normalizer.userTurn('user-1', prompt)];
   for (const message of messagesOf(loadFixture(name))) deltas.push(...normalizer.push(message));
   return { deltas, normalizer };
@@ -35,7 +35,6 @@ describe('ClaudeNormalizer com mensagens reais', () => {
       old_string: expect.stringContaining('alpha'),
       new_string: expect.stringContaining('beta'),
     });
-    expect(tools[1]!.result).toMatchObject({ newString: expect.stringContaining('beta') });
     const text = assistant.blocks.filter((b) => b.kind === 'text');
     expect(text).toHaveLength(1);
     expect(text[0]).toMatchObject({ text: expect.stringMatching(/beta/) });

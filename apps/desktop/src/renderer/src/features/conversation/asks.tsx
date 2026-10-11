@@ -202,18 +202,16 @@ export function PermissionCard({
 }
 
 export function PlanCard({ block, onAnswer }: { block: PlanBlock; onAnswer: Answer }) {
-  const [feedback, setFeedback] = useState('');
-  const [asking, setAsking] = useState(false);
   const [sent, setSent] = useState(false);
   const answer = (a: PermissionAnswer) => {
     if (sent) return;
     setSent(true);
     onAnswer(a);
   };
-  const pending = block.status === 'pending';
-  if (!pending) {
+  if (block.status !== 'pending') {
     return <Resolved status={block.status} label="Plano" icon={<ClipboardList size={14} />} />;
   }
+  // shortcut: aprovar ou rejeitar, sem "pedir mudanças" com texto; o cartão completo é do M2.
   return (
     <Card label="Plano para aprovar" testId="plan-card">
       <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold">
@@ -222,54 +220,23 @@ export function PlanCard({ block, onAnswer }: { block: PlanBlock; onAnswer: Answ
       <div className="max-h-96 overflow-auto rounded-md border border-line bg-surface-sunken px-4 py-2 select-text">
         <Markdown text={block.plan || '_O plano veio vazio._'} />
       </div>
-      {asking ? (
-        <textarea
-          autoFocus
-          rows={3}
-          value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
-          placeholder="O que deve mudar no plano?"
-          aria-label="O que deve mudar no plano"
-          className="mt-3 w-full resize-none rounded-md border border-line-strong bg-surface p-2.5 text-[13px] outline-none focus:border-accent"
-        />
-      ) : null}
       <div className="mt-3.5 flex flex-wrap gap-2">
-        {asking ? (
-          <>
-            <button
-              type="button"
-              disabled={sent}
-              className={primary}
-              onClick={() =>
-                answer({
-                  decision: 'deny',
-                  message: feedback.trim()
-                    ? `The user wants changes to the plan: ${feedback.trim()}`
-                    : 'The user wants changes to the plan. Ask what to change.',
-                })
-              }
-            >
-              Enviar pedido
-            </button>
-            <button type="button" className={quiet} onClick={() => setAsking(false)}>
-              Voltar
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              disabled={sent}
-              className={primary}
-              onClick={() => answer({ decision: 'allow-once' })}
-            >
-              <Check size={14} className="mr-1.5" /> Aprovar plano
-            </button>
-            <button type="button" className={secondary} onClick={() => setAsking(true)}>
-              Pedir mudanças
-            </button>
-          </>
-        )}
+        <button
+          type="button"
+          disabled={sent}
+          className={primary}
+          onClick={() => answer({ decision: 'allow-once' })}
+        >
+          <Check size={14} className="mr-1.5" /> Aprovar plano
+        </button>
+        <button
+          type="button"
+          disabled={sent}
+          className={quiet}
+          onClick={() => answer({ decision: 'deny' })}
+        >
+          Rejeitar
+        </button>
       </div>
     </Card>
   );
@@ -277,22 +244,14 @@ export function PlanCard({ block, onAnswer }: { block: PlanBlock; onAnswer: Answ
 
 export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnswer: Answer }) {
   const [picked, setPicked] = useState<Record<string, string[]>>({});
-  const [other, setOther] = useState<Record<string, string>>({});
   const [sent, setSent] = useState(false);
-  const pending = block.status === 'pending';
-  if (!pending) {
+  if (block.status !== 'pending') {
     const summary = block.answers
       ? Object.values(block.answers).join(' · ')
       : (block.questions[0]?.question ?? '');
     return <Resolved status={block.status} label={summary} icon={<HelpCircle size={14} />} />;
   }
-  const answerFor = (question: string) => {
-    const chosen = [...(picked[question] ?? [])];
-    const extra = other[question]?.trim();
-    if (extra) chosen.push(extra);
-    return chosen.join(', ');
-  };
-  const ready = block.questions.every((q) => answerFor(q.question).length > 0);
+  const ready = block.questions.every((q) => (picked[q.question] ?? []).length > 0);
   const toggle = (question: string, label: string, multi: boolean) =>
     setPicked((current) => {
       const now = current[question] ?? [];
@@ -303,27 +262,18 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
         : [label];
       return { ...current, [question]: next };
     });
-  const submit = () => {
-    if (!ready || sent) return;
+  const send = (answer: PermissionAnswer) => {
+    if (sent) return;
     setSent(true);
-    onAnswer({
-      decision: 'answer',
-      answers: Object.fromEntries(block.questions.map((q) => [q.question, answerFor(q.question)])),
-    });
+    onAnswer(answer);
   };
+  // shortcut: só as opções dadas, sem "outra resposta" escrita; o cartão completo é do M2.
   return (
     <Card label="Pergunta do Claude" testId="question-card">
       <div className="space-y-4">
         {block.questions.map((q) => (
           <fieldset key={q.question}>
-            <legend className="mb-2 text-[13.5px] font-semibold">
-              {q.header ? (
-                <span className="mr-2 rounded-sm bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium text-accent-text">
-                  {q.header}
-                </span>
-              ) : null}
-              {q.question}
-            </legend>
+            <legend className="mb-2 text-[13.5px] font-semibold">{q.question}</legend>
             <div className="grid gap-1.5">
               {q.options.map((option) => {
                 const on = (picked[q.question] ?? []).includes(option.label);
@@ -343,29 +293,32 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
                   </button>
                 );
               })}
-              <input
-                value={other[q.question] ?? ''}
-                onChange={(e) => setOther((o) => ({ ...o, [q.question]: e.target.value }))}
-                placeholder="Outra resposta…"
-                aria-label={`Outra resposta para: ${q.question}`}
-                className="rounded-md border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-accent"
-              />
             </div>
           </fieldset>
         ))}
       </div>
       <div className="mt-4 flex gap-2">
-        <button type="button" disabled={!ready || sent} className={primary} onClick={submit}>
+        <button
+          type="button"
+          disabled={!ready || sent}
+          className={primary}
+          onClick={() =>
+            send({
+              decision: 'answer',
+              // Respostas múltiplas vão separadas por vírgulas, como o CLI faz.
+              answers: Object.fromEntries(
+                block.questions.map((q) => [q.question, (picked[q.question] ?? []).join(', ')]),
+              ),
+            })
+          }
+        >
           <CheckCheck size={14} className="mr-1.5" /> Responder
         </button>
         <button
           type="button"
           disabled={sent}
           className={quiet}
-          onClick={() => {
-            setSent(true);
-            onAnswer({ decision: 'deny' });
-          }}
+          onClick={() => send({ decision: 'deny' })}
         >
           <X size={14} className="mr-1.5" /> Não responder
         </button>

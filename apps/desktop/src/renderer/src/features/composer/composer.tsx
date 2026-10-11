@@ -3,9 +3,6 @@ import { ArrowUp, Square } from 'lucide-react';
 import { actions, useSession } from '../../stores/app.ts';
 import { SettingsPills } from './pills.tsx';
 
-/** Rascunho por sessão, para não perder o que escreveste ao mudar de conversa. */
-const drafts = new Map<string, string>();
-
 const money = new Intl.NumberFormat('pt-PT', {
   style: 'currency',
   currency: 'USD',
@@ -62,7 +59,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const capabilities = useSession(sessionId, (s) => s.capabilities);
   const usage = useSession(sessionId, (s) => s.usage);
   const actionError = useSession(sessionId, (s) => s.actionError);
-  const [text, setText] = useState(() => drafts.get(sessionId) ?? '');
+  const [text, setText] = useState('');
   const input = useRef<HTMLTextAreaElement>(null);
 
   // O componente monta de novo por sessão (key), por isso basta focar à entrada.
@@ -74,21 +71,14 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const offline = state === 'starting' || state === 'error';
   const canSend = !busy && !offline && text.trim().length > 0;
 
+  // shortcut: não há fila de mensagens enquanto o Claude trabalha; o envio fica bloqueado
+  // até ao fim do turno. Rever quando fizer falta mandar mensagens a meio (M2).
   async function send() {
     if (!canSend) return;
     const message = text.trim();
     setText('');
-    drafts.delete(sessionId);
     const ok = await actions.send(sessionId, message);
     if (!ok) setText(message);
-  }
-
-  function cycleMode() {
-    const modes = capabilities?.modes ?? [];
-    if (modes.length === 0) return;
-    const index = modes.findIndex((m) => m.id === settings.mode);
-    const next = modes[(index + 1) % modes.length];
-    if (next) void actions.setMode(sessionId, next.id);
   }
 
   return (
@@ -109,17 +99,11 @@ export function Composer({ sessionId }: { sessionId: string }) {
             value={text}
             rows={1}
             disabled={offline}
-            onChange={(e) => {
-              setText(e.target.value);
-              drafts.set(sessionId, e.target.value);
-            }}
+            onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 void send();
-              } else if (e.key === 'Tab' && e.shiftKey) {
-                e.preventDefault();
-                cycleMode();
               }
             }}
             placeholder={

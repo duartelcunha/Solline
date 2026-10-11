@@ -7,51 +7,23 @@ interface Pending {
   cleanup: () => void;
 }
 
-export interface BrokerOptions {
-  /** Desiste sozinho ao fim deste tempo (ms). Sem valor, espera por ti o tempo que for. */
-  timeoutMs?: number;
-}
-
 /**
  * Transforma um pedido do agente (canUseTool no Claude) numa pergunta à interface e
- * espera a resposta. Cancela quando o agente desiste (signal), no timeout, ou quando a
- * sessão para (cancelAll).
+ * espera a resposta, o tempo que for: o Duarte pode estar a almoçar. Cancela quando o agente
+ * desiste (signal) ou quando a sessão para (cancelAll).
  */
 export class PermissionBroker {
   readonly #pending = new Map<string, Pending>();
-  readonly #timeoutMs: number | undefined;
-
-  constructor(options: BrokerOptions = {}) {
-    this.#timeoutMs = options.timeoutMs;
-  }
-
-  get size(): number {
-    return this.#pending.size;
-  }
-
-  has(id: string): boolean {
-    return this.#pending.has(id);
-  }
 
   wait(id: string, signal?: AbortSignal): Promise<BrokerOutcome> {
     if (this.#pending.has(id)) return Promise.reject(new Error(`Pedido repetido: ${id}`));
     if (signal?.aborted) return Promise.resolve({ decision: 'cancelled', reason: 'aborted' });
     return new Promise<BrokerOutcome>((resolve) => {
       const onAbort = () => this.#settle(id, { decision: 'cancelled', reason: 'aborted' });
-      const timer =
-        this.#timeoutMs === undefined
-          ? undefined
-          : setTimeout(
-              () => this.#settle(id, { decision: 'cancelled', reason: 'timeout' }),
-              this.#timeoutMs,
-            );
       signal?.addEventListener('abort', onAbort, { once: true });
       this.#pending.set(id, {
         resolve,
-        cleanup: () => {
-          if (timer) clearTimeout(timer);
-          signal?.removeEventListener('abort', onAbort);
-        },
+        cleanup: () => signal?.removeEventListener('abort', onAbort),
       });
     });
   }

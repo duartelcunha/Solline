@@ -33,13 +33,8 @@ export interface ClaudeSdkOptions extends AgentStartOptions {
   loadSettings?: boolean;
   /** Para testes: troca o query() do SDK. */
   queryFn?: typeof sdkQuery;
-  /** Ambiente de partida (por omissão o process.env), antes de limpo. */
-  env?: NodeJS.ProcessEnv;
-  newId?: () => string;
   /** Para testes: arranca o claude.exe à mão (por exemplo para o matar e provar a supervisão). */
   spawn?: Options['spawnClaudeCodeProcess'];
-  /** Tempo máximo à espera do arranque do claude.exe. */
-  startTimeoutMs?: number;
 }
 
 /** Nomes curtos escolhidos pelo Duarte (Ask, Edits, Plan, Auto); descrições em pt-PT. */
@@ -59,6 +54,7 @@ export const CLAUDE_MODES: readonly ModeOption[] = [
 ];
 
 const CONTROL_TIMEOUT_MS = 15_000;
+const START_TIMEOUT_MS = 90_000;
 const STDERR_LIMIT = 4_000;
 
 export const CRASH_MESSAGE = 'A ligação ao Claude caiu. A conversa está guardada: podes retomar.';
@@ -101,11 +97,6 @@ export function capabilitiesFrom(models: ModelInfo[]): AgentCapabilities {
     })),
     modes: CLAUDE_MODES.filter((mode) => mode.id !== 'auto' || auto),
     effort: models.some((model) => model.supportsEffort),
-    interrupt: true,
-    resume: true,
-    cost: true,
-    context: true,
-    thinking: true,
   };
 }
 
@@ -222,13 +213,11 @@ function statusFor(outcome: BrokerOutcome): AskBlock['status'] {
  * streaming-input, alimentado por uma fila própria.
  */
 export class ClaudeSdkAdapter implements AgentAdapter {
-  readonly agent = 'claude' as const;
   readonly #options: ClaudeSdkOptions;
   readonly #sink: AdapterSink;
   readonly #normalizer: ClaudeNormalizer;
   readonly #broker = new PermissionBroker();
   readonly #asks = new Map<string, AskEntry>();
-  readonly #newId: () => string;
   #queue: AsyncQueue<SDKUserMessage> | undefined;
   #query: Query | undefined;
   #pump: Promise<void> | undefined;
@@ -243,8 +232,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   constructor(options: ClaudeSdkOptions, sink: AdapterSink) {
     this.#options = options;
     this.#sink = sink;
-    this.#newId = options.newId ?? (() => crypto.randomUUID());
-    this.#normalizer = new ClaudeNormalizer({ newId: this.#newId });
+    this.#normalizer = new ClaudeNormalizer();
     this.#agentSessionId = options.resume ?? null;
     this.#settings = {
       model: options.model ?? null,
@@ -273,7 +261,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     try {
       const init = await withTimeout(
         q.initializationResult(),
-        this.#options.startTimeoutMs ?? 90_000,
+        START_TIMEOUT_MS,
         'Arranque do Claude',
       );
       this.#capabilities = capabilitiesFrom(init.models);
@@ -291,7 +279,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   async send(text: string): Promise<string> {
     const queue = this.#queue;
     if (!queue || queue.closed || this.#crashed) throw new Error('A sessão não está ligada');
-    const turnId = this.#newId();
+    const turnId = crypto.randomUUID();
     this.#emit(this.#normalizer.userTurn(turnId, text));
     this.#running = true;
     this.#sink.state('running');
@@ -370,7 +358,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       settingSources: options.loadSettings === false ? [] : ['user', 'project', 'local'],
       canUseTool: this.#canUseTool,
-      env: sanitizedEnv(options.env),
+      env: sanitizedEnv(),
       stderr: (data) => {
         this.#stderr = (this.#stderr + data).slice(-STDERR_LIMIT);
       },

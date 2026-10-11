@@ -1,6 +1,5 @@
 import type {
   AgentCapabilities,
-  AgentKind,
   AskBlock,
   ConversationDelta,
   PermissionAnswer,
@@ -37,7 +36,6 @@ export interface AgentStartResult {
  * implementa isto e traduz para o mesmo modelo de conversa.
  */
 export interface AgentAdapter {
-  readonly agent: AgentKind;
   start(): Promise<AgentStartResult>;
   /** Envia uma mensagem; devolve o id do turno do utilizador. */
   send(text: string): Promise<string>;

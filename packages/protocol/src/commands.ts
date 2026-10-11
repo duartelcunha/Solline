@@ -16,18 +16,6 @@ export const PingResult = z.object({
   receivedAt: z.number(),
 });
 
-export const SdkCheckPayload = z.object({}).strict();
-export const SdkCheckResult = z.object({
-  model: z.string(),
-  apiKeySource: z.string(),
-  result: z.string(),
-  /** true quando a volta acabou num erro da API (por exemplo sessão expirada). */
-  isError: z.boolean(),
-  totalCostUsd: z.number(),
-  durationMs: z.number(),
-  claudeExecutable: z.string().nullable(),
-});
-
 const Empty = z.object({}).strict();
 const SessionRef = z.object({ sessionId: z.string().min(1) }).strict();
 
@@ -46,8 +34,6 @@ export const SessionCreatePayload = z
     model: z.string().min(1).optional(),
     effort: z.string().min(1).optional(),
     mode: z.string().min(1),
-    /** Id da sessão no agente, para continuar uma conversa antiga. */
-    resume: z.string().min(1).optional(),
   })
   .strict();
 
@@ -58,7 +44,6 @@ export const SessionCreateResult = z.object({
 
 export const commandSchemas = {
   'engine.ping': { payload: PingPayload, result: PingResult },
-  'engine.sdkCheck': { payload: SdkCheckPayload, result: SdkCheckResult },
   'session.create': { payload: SessionCreatePayload, result: SessionCreateResult },
   'session.send': {
     payload: SessionRef.extend({ text: z.string().min(1) }).strict(),
@@ -67,7 +52,6 @@ export const commandSchemas = {
   'session.interrupt': { payload: SessionRef, result: Empty },
   /** Volta a abrir uma sessão que caiu, com o mesmo histórico (resume do agente). */
   'session.resume': { payload: SessionRef, result: SessionCreateResult },
-  'session.close': { payload: SessionRef, result: Empty },
   'session.setMode': {
     payload: SessionRef.extend({ mode: z.string().min(1) }).strict(),
     result: Empty,

@@ -1,9 +1,8 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
-import type { Block, ToolBlock } from '@solline/protocol';
-import { Markdown } from '../../components/markdown.tsx';
+import type { ToolBlock } from '@solline/protocol';
 import { ToolStateIcon } from './blocks.tsx';
-import { ToolInput, prettyJson } from './tool-input.tsx';
+import { ToolInput } from './tool-input.tsx';
 
 const STATE_LABEL: Record<ToolBlock['state'], string> = {
   running: 'A correr',
@@ -25,15 +24,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /** A vista detalhada de uma ferramenta: o "ctrl+o" do CLI, com input e output completos. */
-export function ToolDetail({
-  tool,
-  childBlocks,
-  onClose,
-}: {
-  tool: ToolBlock | null;
-  childBlocks: Block[];
-  onClose: () => void;
-}) {
+export function ToolDetail({ tool, onClose }: { tool: ToolBlock | null; onClose: () => void }) {
   return (
     <Dialog.Root open={tool !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
       <Dialog.Portal>
@@ -79,33 +70,6 @@ export function ToolDetail({
                     </pre>
                   )}
                 </Section>
-                {tool.result !== undefined && typeof tool.result !== 'string' ? (
-                  <details className="mt-5">
-                    <summary className="cursor-pointer text-[12px] text-muted hover:text-fg">
-                      Resultado estruturado
-                    </summary>
-                    <pre className="mt-2 max-h-80 overflow-auto rounded-md border border-line bg-surface-sunken p-3 font-mono text-[11.5px] leading-[1.55] select-text">
-                      {prettyJson(tool.result)}
-                    </pre>
-                  </details>
-                ) : null}
-                {childBlocks.length > 0 ? (
-                  <Section title={`Subagente · ${childBlocks.length} passos`}>
-                    <ul className="space-y-1.5 text-[12.5px]">
-                      {childBlocks.map((child) => (
-                        <li key={child.id}>
-                          {child.kind === 'tool' ? (
-                            <span className="flex items-center gap-2">
-                              <ToolStateIcon state={child.state} /> {child.summary}
-                            </span>
-                          ) : child.kind === 'text' ? (
-                            <Markdown text={child.text} />
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  </Section>
-                ) : null}
               </div>
             </>
           ) : null}

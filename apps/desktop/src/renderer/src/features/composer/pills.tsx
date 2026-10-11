@@ -1,7 +1,7 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronDown, Cpu } from 'lucide-react';
+import { Check, ChevronDown, Cpu, Gauge } from 'lucide-react';
 import type { AgentCapabilities, ModelOption, SessionSettings } from '@solline/protocol';
-import { EffortIcon, ModeIcon } from '../../components/icons.tsx';
+import { ModeIcon } from '../../components/icons.tsx';
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -150,7 +150,7 @@ export function SettingsPills({
               aria-label={`Effort: ${settings.effort ?? 'padrão'}. Mudar`}
               className={triggerClass}
             >
-              <EffortIcon level={settings.effort} levels={efforts} />
+              <Gauge aria-hidden size={13} strokeWidth={1.9} />
               {settings.effort ?? 'effort padrão'}
               <ChevronDown aria-hidden size={12} strokeWidth={2} className="opacity-60" />
             </Menu.Trigger>
@@ -158,13 +158,7 @@ export function SettingsPills({
         >
           <Menu.RadioGroup value={settings.effort ?? ''} onValueChange={onEffort}>
             {efforts.map((level) => (
-              <Item
-                key={level}
-                value={level}
-                title={level}
-                icon={<EffortIcon level={level} levels={efforts} />}
-                testId={`effort-${level}`}
-              />
+              <Item key={level} value={level} title={level} testId={`effort-${level}`} />
             ))}
           </Menu.RadioGroup>
         </MenuShell>
@@ -176,7 +170,7 @@ export function SettingsPills({
           <Menu.Trigger
             disabled={disabled}
             data-testid="pill-mode"
-            aria-label={`Modo: ${mode?.label ?? settings.mode}. Mudar (Shift+Tab)`}
+            aria-label={`Modo: ${mode?.label ?? settings.mode}. Mudar`}
             className={triggerClass}
           >
             <ModeIcon mode={settings.mode} size={14} />

@@ -5,10 +5,8 @@ describe('PermissionBroker', () => {
   it('entrega a resposta a quem espera', async () => {
     const broker = new PermissionBroker();
     const waiting = broker.wait('r1');
-    expect(broker.size).toBe(1);
     expect(broker.answer('r1', { decision: 'allow-once' })).toBe(true);
     await expect(waiting).resolves.toEqual({ decision: 'allow-once' });
-    expect(broker.size).toBe(0);
     expect(broker.answer('r1', { decision: 'deny' })).toBe(false);
   });
 
@@ -18,12 +16,7 @@ describe('PermissionBroker', () => {
     const waiting = broker.wait('r1', controller.signal);
     controller.abort();
     await expect(waiting).resolves.toEqual({ decision: 'cancelled', reason: 'aborted' });
-    expect(broker.has('r1')).toBe(false);
-  });
-
-  it('desiste no timeout quando há um', async () => {
-    const broker = new PermissionBroker({ timeoutMs: 10 });
-    await expect(broker.wait('r1')).resolves.toEqual({ decision: 'cancelled', reason: 'timeout' });
+    expect(broker.answer('r1', { decision: 'allow-once' })).toBe(false);
   });
 
   it('cancelAll fecha todos os pedidos', async () => {

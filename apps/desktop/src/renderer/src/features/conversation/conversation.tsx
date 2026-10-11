@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RotateCcw, WifiOff } from 'lucide-react';
-import type { Block, PermissionAnswer, ToolBlock, Turn } from '@solline/protocol';
+import type { PermissionAnswer, ToolBlock, Turn } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
 import { actions, useSession } from '../../stores/app.ts';
 import { PermissionCard, PlanCard, QuestionCard } from './asks.tsx';
@@ -23,22 +23,18 @@ function UserTurn({ turn }: { turn: Turn }) {
 
 function AssistantTurn({
   turn,
-  childrenOf,
   firstPendingId,
   onOpen,
   onAnswer,
 }: {
   turn: Turn;
-  childrenOf: Map<string, Block[]>;
   firstPendingId: string | null;
   onOpen: (tool: ToolBlock) => void;
   onAnswer: (requestId: string, answer: PermissionAnswer) => void;
 }) {
-  const blocks = turn.blocks.filter(
-    (b) =>
-      (!('parentToolId' in b) || b.parentToolId === null) &&
-      !(b.kind === 'tool' && SHOWN_AS_CARD.has(b.name)),
-  );
+  // shortcut: os passos de subagentes (parentToolId) aparecem na mesma lista, sem
+  // sub-conversa dobrável; isso é do M2.
+  const blocks = turn.blocks.filter((b) => !(b.kind === 'tool' && SHOWN_AS_CARD.has(b.name)));
   return (
     <div className="space-y-3" data-testid="assistant-turn">
       {blocks.map((block) => {
@@ -52,14 +48,7 @@ function AssistantTurn({
           case 'thinking':
             return <ThinkingView key={block.id} block={block} />;
           case 'tool':
-            return (
-              <ToolRow
-                key={block.id}
-                block={block}
-                childCount={childrenOf.get(block.id)?.length ?? 0}
-                onOpen={() => onOpen(block)}
-              />
-            );
+            return <ToolRow key={block.id} block={block} onOpen={() => onOpen(block)} />;
           case 'permission':
             return (
               <PermissionCard
@@ -107,24 +96,17 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
-  const { childrenOf, tools, firstPendingId } = useMemo(() => {
-    const childrenOf = new Map<string, Block[]>();
+  const { tools, firstPendingId } = useMemo(() => {
     const tools = new Map<string, ToolBlock>();
     let firstPendingId: string | null = null;
     for (const turn of turns) {
       for (const block of turn.blocks) {
         if (block.kind === 'tool') tools.set(block.id, block);
-        if ('parentToolId' in block && block.parentToolId) {
-          childrenOf.set(block.parentToolId, [
-            ...(childrenOf.get(block.parentToolId) ?? []),
-            block,
-          ]);
-        }
         if (!firstPendingId && 'status' in block && block.status === 'pending')
           firstPendingId = block.id;
       }
     }
-    return { childrenOf, tools, firstPendingId };
+    return { tools, firstPendingId };
   }, [turns]);
 
   // Fica colado ao fundo enquanto o Duarte não subir para ler.
@@ -132,9 +114,6 @@ export function Conversation({ sessionId }: { sessionId: string }) {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [turns]);
-  useEffect(() => {
-    pinned.current = true;
-  }, [sessionId]);
 
   const openTool = openToolId ? (tools.get(openToolId) ?? null) : null;
   const working = state === 'running' && turns.at(-1)?.role === 'user';
@@ -161,7 +140,6 @@ export function Conversation({ sessionId }: { sessionId: string }) {
                 <AssistantTurn
                   key={turn.id}
                   turn={turn}
-                  childrenOf={childrenOf}
                   firstPendingId={firstPendingId}
                   onOpen={(tool) => setOpenToolId(tool.id)}
                   onAnswer={(requestId, answer) =>
@@ -202,11 +180,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
         </div>
       ) : null}
 
-      <ToolDetail
-        tool={openTool}
-        childBlocks={openTool ? (childrenOf.get(openTool.id) ?? []) : []}
-        onClose={() => setOpenToolId(null)}
-      />
+      <ToolDetail tool={openTool} onClose={() => setOpenToolId(null)} />
     </div>
   );
 }

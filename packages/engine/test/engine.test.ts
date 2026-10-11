@@ -39,53 +39,6 @@ describe('Engine', () => {
     expect(response.ok).toBe(false);
   });
 
-  it('valida o resultado do sdkCheck e passa o executável', async () => {
-    const seen: (string | undefined)[] = [];
-    const engine = new Engine({
-      claudeExecutable: 'C:\\app\\resources\\app.asar.unpacked\\claude.exe',
-      sdkCheck: async (options) => {
-        seen.push(options?.claudeExecutable);
-        return {
-          model: 'claude-haiku',
-          apiKeySource: 'none',
-          result: 'ok',
-          isError: false,
-          totalCostUsd: 0.001,
-          durationMs: 10,
-          claudeExecutable: options?.claudeExecutable ?? null,
-        };
-      },
-    });
-    const response = await engine.handle({
-      kind: 'request',
-      id: 'r5',
-      command: 'engine.sdkCheck',
-      payload: {},
-    });
-    expect(response.ok).toBe(true);
-    expect(seen).toEqual(['C:\\app\\resources\\app.asar.unpacked\\claude.exe']);
-  });
-
-  it('devolve o erro do sdkCheck como resposta falhada', async () => {
-    const engine = new Engine({
-      sdkCheck: async () => {
-        throw new Error('sem login');
-      },
-    });
-    const response = await engine.handle({
-      kind: 'request',
-      id: 'r6',
-      command: 'engine.sdkCheck',
-      payload: {},
-    });
-    expect(response).toEqual({
-      kind: 'response',
-      id: 'r6',
-      ok: false,
-      error: { message: 'sem login' },
-    });
-  });
-
   it('cria uma sessão, envia, recebe eventos validados e responde a uma permissão', async () => {
     const events: EngineEvent[] = [];
     const engine = new Engine({

@@ -45,8 +45,6 @@ export const ToolBlock = z.object({
   input: z.unknown(),
   /** Texto devolvido ao modelo. */
   output: z.string().optional(),
-  /** Resultado estruturado da ferramenta, quando o agente o dá (diffs, ficheiros). */
-  result: z.unknown().optional(),
   state: ToolState,
   parentToolId: z.string().nullable(),
 });
@@ -124,7 +122,6 @@ export const Turn = z.object({
   id: z.string(),
   role: z.enum(['user', 'assistant']),
   blocks: z.array(Block),
-  startedAt: z.number(),
 });
 export type Turn = z.infer<typeof Turn>;
 
@@ -183,11 +180,6 @@ export const AgentCapabilities = z.object({
   models: z.array(ModelOption),
   modes: z.array(ModeOption),
   effort: z.boolean(),
-  interrupt: z.boolean(),
-  resume: z.boolean(),
-  cost: z.boolean(),
-  context: z.boolean(),
-  thinking: z.boolean(),
 });
 export type AgentCapabilities = z.infer<typeof AgentCapabilities>;
 
@@ -196,7 +188,6 @@ export const SessionInfo = z.object({
   agent: AgentKind,
   cwd: z.string(),
   title: z.string(),
-  createdAt: z.number(),
   state: SessionState,
   settings: SessionSettings,
   /** Id da sessão no agente (serve para retomar). */

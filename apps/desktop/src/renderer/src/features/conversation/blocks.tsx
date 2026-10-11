@@ -20,15 +20,7 @@ export function ToolStateIcon({ state }: { state: ToolBlock['state'] }) {
   return <X aria-label="Falhou" size={14} strokeWidth={2.25} className="text-danger" />;
 }
 
-export function ToolRow({
-  block,
-  onOpen,
-  childCount,
-}: {
-  block: ToolBlock;
-  onOpen: () => void;
-  childCount: number;
-}) {
+export function ToolRow({ block, onOpen }: { block: ToolBlock; onOpen: () => void }) {
   return (
     <button
       type="button"
@@ -43,9 +35,6 @@ export function ToolRow({
         <ToolStateIcon state={block.state} />
       </span>
       <span className="min-w-0 flex-1 truncate text-[13px]">{block.summary}</span>
-      {childCount > 0 ? (
-        <span className="shrink-0 text-[11px] text-subtle">{childCount} passos</span>
-      ) : null}
       <span className="shrink-0 font-mono text-[11px] text-subtle">{block.name}</span>
       <ChevronRight
         size={14}

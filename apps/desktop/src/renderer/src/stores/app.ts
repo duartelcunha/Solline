@@ -51,7 +51,6 @@ const NONE = createSessionStore(
     agent: 'claude',
     cwd: '',
     title: '',
-    createdAt: 0,
     state: 'idle',
     settings: { model: null, effort: null, mode: 'default' },
     agentSessionId: null,
@@ -207,47 +206,15 @@ export const actions = {
     );
   },
 
-  /** Retoma uma sessão que caiu; se o motor reiniciou e já não a conhece, abre-a de novo com resume. */
+  /** Retoma uma sessão cujo claude.exe caiu (resume do agente, mesmo histórico). */
   async resume(sessionId: string): Promise<void> {
     const store = sessionStores.get(sessionId);
-    if (!store) return;
-    const { info } = store.getState();
-    store.setState({ actionError: null });
+    store?.setState({ actionError: null });
     try {
       const { capabilities } = await request('session.resume', { sessionId });
-      store.setState({ capabilities, error: null });
+      store?.setState({ capabilities });
     } catch (error) {
-      if (!info.agentSessionId || !/desconhecida/i.test(message(error))) {
-        setActionError(sessionId, error);
-        return;
-      }
-      try {
-        const { session, capabilities } = await request('session.create', {
-          agent: info.agent,
-          cwd: info.cwd,
-          mode: info.settings.mode,
-          resume: info.agentSessionId,
-          ...(info.settings.model ? { model: info.settings.model } : {}),
-          ...(info.settings.effort ? { effort: info.settings.effort } : {}),
-        });
-        // O motor deu-lhe um id novo: a conversa muda de chave e fica igual.
-        const data = store.getState();
-        sessionStores.delete(sessionId);
-        const next = createSessionStore(
-          { ...session, title: data.info.title },
-          data.projectId,
-          capabilities,
-        );
-        next.setState({ turns: data.turns, usage: data.usage });
-        sessionStores.set(session.id, next);
-        useApp.setState((s) => ({
-          sessionIds: s.sessionIds.map((id) => (id === sessionId ? session.id : id)),
-          activeSessionId: s.activeSessionId === sessionId ? session.id : s.activeSessionId,
-          notice: null,
-        }));
-      } catch (second) {
-        setActionError(sessionId, second);
-      }
+      setActionError(sessionId, error);
     }
   },
 

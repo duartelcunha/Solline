@@ -1,5 +1,5 @@
 export { Engine, type EngineOptions } from './engine.ts';
-export { SessionManager, titleFrom, type SessionManagerOptions } from './session-manager.ts';
+export { SessionManager } from './session-manager.ts';
 export { PermissionBroker, type BrokerOutcome } from './permission-broker.ts';
 export { ClaudeNormalizer } from './adapters/claude-normalizer.ts';
 export {
@@ -21,7 +21,6 @@ export type {
 } from './adapters/types.ts';
 export { AsyncQueue } from './async-queue.ts';
 export { sanitizedEnv } from './env.ts';
-export { runSdkCheck, SDK_CHECK_PROMPT, type SdkCheckOptions } from './sdk-check.ts';
 export {
   resolveClaudeExecutable,
   toUnpackedPath,
