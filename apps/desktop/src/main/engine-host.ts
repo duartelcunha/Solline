@@ -5,8 +5,8 @@ import {
   EngineEvent,
   ResponseEnvelope,
   commandSchemas,
-  type CommandName,
   type CommandResult,
+  type EngineCommandName,
   type RequestEnvelope,
 } from '@solline/protocol';
 
@@ -16,16 +16,28 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-const TIMEOUT_MS: Record<CommandName, number> = {
+const DEFAULT_TIMEOUT_MS = 20_000;
+const TIMEOUT_MS: Partial<Record<EngineCommandName, number>> = {
   'engine.ping': 5_000,
   'engine.sdkCheck': 150_000,
+  'session.create': 120_000,
+  'session.resume': 120_000,
 };
 
-/** Arranca o motor num utilityProcess e fala com ele por uma MessagePort. */
+/**
+ * Arranca o motor num utilityProcess e fala com ele por uma MessagePort.
+ * Se o motor morrer, avisa a interface e arranca outro.
+ */
 export class EngineHost {
   #child: UtilityProcess | undefined;
   #port: Electron.MessagePortMain | undefined;
+  #stopping = false;
   readonly #pending = new Map<string, Pending>();
+  readonly #onEvent: (event: EngineEvent) => void;
+
+  constructor(onEvent: (event: EngineEvent) => void) {
+    this.#onEvent = onEvent;
+  }
 
   start(): void {
     const child = utilityProcess.fork(join(__dirname, 'engine.js'), [], {
@@ -41,12 +53,19 @@ export class EngineHost {
       this.#failAll(new Error(`O motor parou (código ${code})`));
       this.#child = undefined;
       this.#port = undefined;
+      if (this.#stopping) return;
+      this.#onEvent({
+        kind: 'event',
+        type: 'engine.error',
+        message: 'O motor reiniciou. As sessões abertas fecharam; podes retomá-las.',
+      });
+      this.start();
     });
     this.#child = child;
     this.#port = port1;
   }
 
-  async request<C extends CommandName>(
+  async request<C extends EngineCommandName>(
     command: C,
     payload: unknown = {},
   ): Promise<CommandResult<C>> {
@@ -56,11 +75,12 @@ export class EngineHost {
     const input = schema.payload.parse(payload);
     const id = randomUUID();
     const envelope: RequestEnvelope = { kind: 'request', id, command, payload: input };
+    const timeout = TIMEOUT_MS[command] ?? DEFAULT_TIMEOUT_MS;
     const raw = await new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(new Error(`O motor não respondeu a ${command} a tempo`));
-      }, TIMEOUT_MS[command]);
+      }, timeout);
       this.#pending.set(id, { resolve, reject, timer });
       port.postMessage(envelope);
     });
@@ -68,6 +88,7 @@ export class EngineHost {
   }
 
   stop(): void {
+    this.#stopping = true;
     this.#failAll(new Error('O motor foi desligado'));
     this.#port?.close();
     this.#child?.kill();
@@ -76,13 +97,17 @@ export class EngineHost {
   #onMessage(data: unknown): void {
     const event = EngineEvent.safeParse(data);
     if (event.success) {
-      console.info(
-        `[engine] ${event.data.type} v${event.data.engineVersion} pid ${event.data.pid}`,
-      );
+      if (event.data.type === 'engine.ready') {
+        console.info(`[engine] pronto v${event.data.engineVersion} pid ${event.data.pid}`);
+      }
+      this.#onEvent(event.data);
       return;
     }
     const response = ResponseEnvelope.safeParse(data);
-    if (!response.success) return;
+    if (!response.success) {
+      console.warn('[engine] mensagem inválida ignorada');
+      return;
+    }
     const pending = this.#pending.get(response.data.id);
     if (!pending) return;
     this.#pending.delete(response.data.id);

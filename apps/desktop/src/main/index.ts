@@ -1,15 +1,50 @@
 import { join } from 'node:path';
-import { BrowserWindow, app, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron';
+import {
+  BrowserWindow,
+  app,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  shell,
+  type IpcMainInvokeEvent,
+} from 'electron';
 import { APP_NAME } from '@solline/protocol/app';
 import { IPC, type Theme } from '@solline/protocol/bridge';
-import { CommandNameSchema } from '@solline/protocol';
+import {
+  CommandNameSchema,
+  commandSchemas,
+  isMainCommand,
+  type CommandName,
+  type MainCommandName,
+} from '@solline/protocol';
 import { EngineHost } from './engine-host.ts';
+import { ProjectStore } from './projects.ts';
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId(`app.${APP_NAME.toLowerCase()}`);
+// Testes e smoke usam uma pasta de dados própria para não tocar na do dia a dia.
+if (process.env.SOLLINE_USER_DATA) app.setPath('userData', process.env.SOLLINE_USER_DATA);
 
-const engine = new EngineHost();
 let mainWindow: BrowserWindow | undefined;
+const engine = new EngineHost((event) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.event, event);
+});
+const projects = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
+
+async function handleMain(command: MainCommandName): Promise<unknown> {
+  switch (command) {
+    case 'projects.list':
+      return { projects: await projects.list() };
+    case 'projects.add': {
+      const options = { title: 'Adicionar projeto', properties: ['openDirectory' as const] };
+      const picked = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, options)
+        : await dialog.showOpenDialog(options);
+      const folder = picked.canceled ? undefined : picked.filePaths[0];
+      return { project: folder ? await projects.add(folder) : null };
+    }
+  }
+}
 
 const TITLE_BAR_HEIGHT = 44;
 const titleBarColors: Record<Theme, { color: string; symbolColor: string }> = {
@@ -57,13 +92,19 @@ function createWindow(): void {
   mainWindow = win;
 }
 
-ipcMain.handle(IPC.engineRequest, async (event, raw: unknown) => {
+ipcMain.handle(IPC.request, async (event, raw: unknown) => {
   if (!isTrustedSender(event)) throw new Error('Origem não autorizada');
   const parsed = CommandNameSchema.safeParse((raw as { command?: unknown } | null)?.command);
   if (!parsed.success) return { ok: false, error: { message: 'Comando desconhecido' } };
+  const command: CommandName = parsed.data;
+  const payload = (raw as { payload?: unknown }).payload ?? {};
   try {
-    const result = await engine.request(parsed.data, (raw as { payload?: unknown }).payload ?? {});
-    return { ok: true, result };
+    if (isMainCommand(command)) {
+      commandSchemas[command].payload.parse(payload);
+      const result = commandSchemas[command].result.parse(await handleMain(command));
+      return { ok: true, result };
+    }
+    return { ok: true, result: await engine.request(command, payload) };
   } catch (error) {
     return {
       ok: false,
