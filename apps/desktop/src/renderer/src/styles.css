@@ -1,0 +1,71 @@
+@import 'tailwindcss';
+@import '@solline/ui/fonts.css';
+@import '@solline/ui/tokens.css';
+
+/* Os tokens da Solline passam a utilitários do Tailwind (bg-surface, text-muted, ...). */
+@theme inline {
+  --color-bg: var(--sl-bg);
+  --color-sidebar: var(--sl-sidebar);
+  --color-surface: var(--sl-surface);
+  --color-surface-hover: var(--sl-surface-hover);
+  --color-surface-sunken: var(--sl-surface-sunken);
+  --color-line: var(--sl-border);
+  --color-line-strong: var(--sl-border-strong);
+  --color-fg: var(--sl-text);
+  --color-muted: var(--sl-text-muted);
+  --color-subtle: var(--sl-text-subtle);
+  --color-accent: var(--sl-accent);
+  --color-accent-soft: var(--sl-accent-soft);
+  --color-accent-text: var(--sl-accent-text);
+  --color-success: var(--sl-success);
+  --color-danger: var(--sl-danger);
+  --font-sans: var(--sl-font-sans);
+  --font-mono: var(--sl-font-mono);
+  --radius-sm: var(--sl-radius-sm);
+  --radius-md: var(--sl-radius-md);
+  --radius-lg: var(--sl-radius-lg);
+  --shadow-raised: var(--sl-shadow-raised);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--sl-bg);
+  color: var(--sl-text);
+  font-family: var(--sl-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  /* A troca de tema suaviza em vez de piscar. */
+  transition:
+    background-color var(--sl-duration-base) var(--sl-ease-out),
+    color var(--sl-duration-base) var(--sl-ease-out);
+}
+
+:focus-visible {
+  outline: 2px solid var(--sl-focus);
+  outline-offset: 2px;
+}
+
+.drag {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
