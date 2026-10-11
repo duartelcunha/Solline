@@ -2,7 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { CLIENT_APP_ID, type CommandResult } from '@solline/protocol';
+import type { CommandResult } from '@solline/protocol';
+import { sanitizedEnv } from './env.ts';
 
 export const SDK_CHECK_PROMPT = 'Reply with the single word: ok';
 
@@ -43,7 +44,7 @@ export async function runSdkCheck(
         model: 'haiku',
         effort: 'low',
         permissionMode: 'default',
-        env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP_ID },
+        env: sanitizedEnv(),
         settingSources: [],
         maxTurns: 1,
         cwd,
