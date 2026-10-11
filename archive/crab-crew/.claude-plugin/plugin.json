@@ -1,0 +1,9 @@
+{
+  "name": "crab-crew",
+  "version": "0.7.0",
+  "description": "One mod for both surfaces. Desktop: a control card docked above the prompt (model, effort, mode, the latest \"Próximo passo\"), subagent pets, an orchestrator and sounds. Terminal: the comfort bar (identity, model/effort/ultracode, usage, agent crabs). Both: a calm chat, a task line and a settings pane (/crab).",
+  "author": {
+    "name": "Duarte Cunha"
+  },
+  "types": "./types/index.d.ts"
+}
