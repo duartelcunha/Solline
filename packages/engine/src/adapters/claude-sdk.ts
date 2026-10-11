@@ -36,6 +36,8 @@ export interface ClaudeSdkOptions extends AgentStartOptions {
   /** Ambiente de partida (por omissão o process.env), antes de limpo. */
   env?: NodeJS.ProcessEnv;
   newId?: () => string;
+  /** Para testes: arranca o claude.exe à mão (por exemplo para o matar e provar a supervisão). */
+  spawn?: Options['spawnClaudeCodeProcess'];
   /** Tempo máximo à espera do arranque do claude.exe. */
   startTimeoutMs?: number;
 }
@@ -373,6 +375,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
         this.#stderr = (this.#stderr + data).slice(-STDERR_LIMIT);
       },
       ...(options.resume ? { resume: options.resume } : {}),
+      ...(options.spawn ? { spawnClaudeCodeProcess: options.spawn } : {}),
       ...(options.claudeExecutable ? { pathToClaudeCodeExecutable: options.claudeExecutable } : {}),
     };
   }
