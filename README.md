@@ -5,8 +5,10 @@ Por agora é para uso pessoal, no Windows.
 
 ## Estado
 
-M0 (fundação): janela com tema claro e escuro, motor num processo à parte e instalador NSIS.
-A conversa chega no M1.
+M1 (conversa a andar): projetos e sessões na barra lateral, conversa em streaming com
+Markdown, thinking e ferramentas (com vista detalhada), cartões de permissão, plano e
+pergunta, interromper, modelo, effort e modo por clique, custo e contexto ao vivo.
+Se o Claude cair a meio, a sessão mostra "Retomar".
 
 ## Peças
 
@@ -28,5 +30,10 @@ pnpm test         # testes do motor e smoke da app
 pnpm dist         # instalador em apps/desktop/release
 ```
 
-O teste do motor e o botão "Testar motor" fazem uma chamada curta a Haiku com o login do
-Claude Code desta máquina. Para saltar o teste: `SOLLINE_SKIP_SDK=1 pnpm test`.
+Os testes de integração do motor fazem sessões curtas e reais com Haiku (effort low) com o
+login do Claude Code desta máquina. Para os saltar: `SOLLINE_SKIP_SDK=1 pnpm test`. O smoke
+da app só faz a sessão real com `SOLLINE_E2E_SDK=1`; `SOLLINE_EXE=<caminho>` corre-o na app
+instalada e `SOLLINE_SHOTS=<pasta>` guarda capturas.
+
+Para gravar de novo as mensagens reais que os testes do normalizador usam:
+`pnpm --filter @solline/engine record <cenário>` (os cenários estão no próprio script).

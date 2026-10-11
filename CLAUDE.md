@@ -17,7 +17,13 @@ O plano aprovado está em `~/.claude/plans/can-we-change-the-sequential-horizon.
 
 ## Regras do SDK
 
-- Passar sempre `permissionMode` explícito e `env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP }`.
+- Passar sempre `permissionMode` explícito e o ambiente de `sanitizedEnv()` (tira as variáveis de
+  uma sessão anfitriã do Claude Code e junta `CLAUDE_AGENT_SDK_CLIENT_APP`).
+- O contrato é neutro: cada agente é um `AgentAdapter` (`packages/engine/src/adapters`) que
+  traduz para o modelo de `packages/protocol/src/conversation.ts`. A interface só lê isso e
+  as `capabilities()` do agente.
+- Custo: mostrar o último `total_cost_usd`, nunca somar. A verdade do modelo e do modo vem do
+  `system/init` e do `system/status`.
 - O SDK é só ESM: carregar com `import()` e manter fora do bundle do main.
 - Na app instalada, `pathToClaudeCodeExecutable` aponta para `app.asar.unpacked`.
 
