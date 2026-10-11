@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+
+# O electron-builder empacota melhor a partir de um node_modules plano.
+nodeLinker: hoisted
+
+onlyBuiltDependencies:
+  - esbuild
+
+# Só serve o alvo Squirrel, que não usamos (o instalador é NSIS).
+ignoredBuiltDependencies:
+  - electron-winstaller
