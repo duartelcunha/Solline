@@ -1,0 +1,19 @@
+{
+  "name": "@solline/protocol",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./app": "./src/app.ts",
+    "./bridge": "./src/bridge.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}
