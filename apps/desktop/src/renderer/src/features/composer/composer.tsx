@@ -1,0 +1,194 @@
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUp, Square } from 'lucide-react';
+import { actions, useSession } from '../../stores/app.ts';
+import { SettingsPills } from './pills.tsx';
+
+/** Rascunho por sessão, para não perder o que escreveste ao mudar de conversa. */
+const drafts = new Map<string, string>();
+
+const money = new Intl.NumberFormat('pt-PT', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+});
+const tokens = new Intl.NumberFormat('pt-PT', { notation: 'compact', maximumFractionDigits: 1 });
+
+function ContextMeter({ used, max, percent }: { used: number; max: number; percent: number }) {
+  const r = 6.5;
+  const c = 2 * Math.PI * r;
+  const p = Math.min(Math.max(percent, 0), 100);
+  const tone = p >= 85 ? 'text-danger' : p >= 65 ? 'text-accent-text' : 'text-muted';
+  const label = `Contexto: ${tokens.format(used)} de ${tokens.format(max)} tokens (${p}%)`;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 ${tone}`}
+      title={label}
+      aria-label={label}
+      role="img"
+      data-testid="context-meter"
+    >
+      <svg aria-hidden width="16" height="16" viewBox="0 0 16 16">
+        <circle
+          cx="8"
+          cy="8"
+          r={r}
+          fill="none"
+          stroke="currentColor"
+          strokeOpacity="0.2"
+          strokeWidth="2"
+        />
+        <circle
+          cx="8"
+          cy="8"
+          r={r}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={`${(p / 100) * c} ${c}`}
+          transform="rotate(-90 8 8)"
+          className="meter-arc"
+        />
+      </svg>
+      <span className="tabular-nums">{p}%</span>
+    </span>
+  );
+}
+
+export function Composer({ sessionId }: { sessionId: string }) {
+  const state = useSession(sessionId, (s) => s.info.state);
+  const settings = useSession(sessionId, (s) => s.info.settings);
+  const capabilities = useSession(sessionId, (s) => s.capabilities);
+  const usage = useSession(sessionId, (s) => s.usage);
+  const actionError = useSession(sessionId, (s) => s.actionError);
+  const [text, setText] = useState(() => drafts.get(sessionId) ?? '');
+  const input = useRef<HTMLTextAreaElement>(null);
+
+  // O componente monta de novo por sessão (key), por isso basta focar à entrada.
+  useEffect(() => {
+    input.current?.focus();
+  }, []);
+
+  const busy = state === 'running' || state === 'needs-you';
+  const offline = state === 'starting' || state === 'error';
+  const canSend = !busy && !offline && text.trim().length > 0;
+
+  async function send() {
+    if (!canSend) return;
+    const message = text.trim();
+    setText('');
+    drafts.delete(sessionId);
+    const ok = await actions.send(sessionId, message);
+    if (!ok) setText(message);
+  }
+
+  function cycleMode() {
+    const modes = capabilities?.modes ?? [];
+    if (modes.length === 0) return;
+    const index = modes.findIndex((m) => m.id === settings.mode);
+    const next = modes[(index + 1) % modes.length];
+    if (next) void actions.setMode(sessionId, next.id);
+  }
+
+  return (
+    <div className="shrink-0 px-8 pb-5">
+      <div className="mx-auto max-w-3xl">
+        {actionError ? (
+          <p
+            role="alert"
+            className="mb-2 px-1 text-[12.5px] text-danger"
+            data-testid="action-error"
+          >
+            {actionError}
+          </p>
+        ) : null}
+        <div className="composer rounded-xl border border-line bg-surface shadow-raised transition-[border-color,box-shadow] duration-200 focus-within:border-line-strong">
+          <textarea
+            ref={input}
+            value={text}
+            rows={1}
+            disabled={offline}
+            onChange={(e) => {
+              setText(e.target.value);
+              drafts.set(sessionId, e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void send();
+              } else if (e.key === 'Tab' && e.shiftKey) {
+                e.preventDefault();
+                cycleMode();
+              }
+            }}
+            placeholder={
+              offline
+                ? 'A sessão não está ligada'
+                : busy
+                  ? 'O Claude está a trabalhar…'
+                  : 'Escreve uma mensagem'
+            }
+            aria-label="Mensagem"
+            data-testid="composer-input"
+            className="block max-h-64 min-h-12 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-[1.5] outline-none [field-sizing:content] placeholder:text-subtle disabled:cursor-default"
+          />
+          <div className="flex items-center gap-3 px-2.5 pt-1 pb-2.5">
+            {capabilities ? (
+              <SettingsPills
+                settings={settings}
+                capabilities={capabilities}
+                disabled={offline}
+                onModel={(model) => void actions.setModel(sessionId, model)}
+                onEffort={(effort) => void actions.setEffort(sessionId, effort)}
+                onMode={(mode) => void actions.setMode(sessionId, mode)}
+              />
+            ) : null}
+            <div className="ml-auto flex items-center gap-3 text-[12px] text-muted">
+              {usage.context ? (
+                <ContextMeter
+                  used={usage.context.usedTokens}
+                  max={usage.context.maxTokens}
+                  percent={usage.context.percent}
+                />
+              ) : null}
+              {usage.costUsd !== null ? (
+                <span
+                  className="tabular-nums"
+                  title="Custo estimado desta sessão"
+                  data-testid="session-cost"
+                >
+                  {money.format(usage.costUsd)}
+                </span>
+              ) : null}
+              {busy ? (
+                <button
+                  type="button"
+                  onClick={() => void actions.interrupt(sessionId)}
+                  aria-label="Interromper"
+                  title="Interromper"
+                  data-testid="interrupt"
+                  className="grid size-8 place-items-center rounded-full bg-fg text-bg transition-transform duration-150 active:scale-95"
+                >
+                  <Square size={11} fill="currentColor" strokeWidth={0} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void send()}
+                  disabled={!canSend}
+                  aria-label="Enviar"
+                  title="Enviar (Enter)"
+                  data-testid="send"
+                  className="grid size-8 place-items-center rounded-full bg-fg text-bg transition-[transform,opacity,background-color] duration-150 active:scale-95 disabled:bg-surface-sunken disabled:text-subtle"
+                >
+                  <ArrowUp size={16} strokeWidth={2.25} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

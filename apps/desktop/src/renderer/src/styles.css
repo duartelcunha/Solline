@@ -69,3 +69,257 @@ body {
     animation-duration: 0ms !important;
   }
 }
+
+/* ---------- Conversa ---------- */
+
+.prose-sl {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.prose-sl > :first-child {
+  margin-top: 0;
+}
+.prose-sl > :last-child {
+  margin-bottom: 0;
+}
+.prose-sl p,
+.prose-sl ul,
+.prose-sl ol,
+.prose-sl blockquote,
+.prose-sl table {
+  margin: 0.6em 0;
+}
+.prose-sl h1,
+.prose-sl h2,
+.prose-sl h3,
+.prose-sl h4 {
+  margin: 1.1em 0 0.4em;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+.prose-sl h1 {
+  font-size: 1.3em;
+}
+.prose-sl h2 {
+  font-size: 1.15em;
+}
+.prose-sl h3,
+.prose-sl h4 {
+  font-size: 1em;
+}
+.prose-sl ul {
+  list-style: disc;
+  padding-left: 1.3em;
+}
+.prose-sl ol {
+  list-style: decimal;
+  padding-left: 1.4em;
+}
+.prose-sl li + li {
+  margin-top: 0.2em;
+}
+.prose-sl a {
+  color: var(--sl-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-sl strong {
+  font-weight: 600;
+}
+.prose-sl blockquote {
+  border-left: 2px solid var(--sl-border-strong);
+  padding-left: 0.9em;
+  color: var(--sl-text-muted);
+}
+.prose-sl :not(pre) > code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--sl-surface-sunken);
+  border: 1px solid var(--sl-border);
+}
+.prose-sl pre code {
+  font-family: var(--sl-font-mono);
+  background: none;
+}
+.prose-sl table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+  display: block;
+  overflow-x: auto;
+}
+.prose-sl th,
+.prose-sl td {
+  border: 1px solid var(--sl-border);
+  padding: 0.35em 0.7em;
+  text-align: left;
+}
+.prose-sl th {
+  background: var(--sl-surface-sunken);
+  font-weight: 600;
+}
+.prose-sl hr {
+  border: 0;
+  border-top: 1px solid var(--sl-border);
+  margin: 1.2em 0;
+}
+
+/* Realce de código (classes do highlight.js), com cores que seguem o tema. */
+:root {
+  --hl-keyword: oklch(0.5 0.16 300);
+  --hl-string: oklch(0.5 0.12 150);
+  --hl-number: oklch(0.55 0.14 55);
+  --hl-comment: var(--sl-text-subtle);
+  --hl-title: oklch(0.5 0.14 250);
+  --hl-attr: oklch(0.52 0.12 200);
+  --diff-add-bg: oklch(0.6 0.13 155 / 0.12);
+  --diff-del-bg: oklch(0.6 0.18 27 / 0.1);
+}
+:root[data-theme='dark'] {
+  --hl-keyword: oklch(0.78 0.12 300);
+  --hl-string: oklch(0.8 0.12 150);
+  --hl-number: oklch(0.82 0.12 70);
+  --hl-title: oklch(0.8 0.11 250);
+  --hl-attr: oklch(0.8 0.1 200);
+  --diff-add-bg: oklch(0.7 0.13 155 / 0.14);
+  --diff-del-bg: oklch(0.7 0.17 27 / 0.14);
+}
+.hljs-keyword,
+.hljs-built_in,
+.hljs-literal,
+.hljs-selector-tag,
+.hljs-doctag {
+  color: var(--hl-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-template-tag {
+  color: var(--hl-string);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-variable.constant_ {
+  color: var(--hl-number);
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+.hljs-title,
+.hljs-section,
+.hljs-title.function_ {
+  color: var(--hl-title);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-type,
+.hljs-params {
+  color: var(--hl-attr);
+}
+.hljs-deletion {
+  color: var(--sl-danger);
+}
+
+.diff-add {
+  background: var(--diff-add-bg);
+}
+.diff-del {
+  background: var(--diff-del-bg);
+}
+
+/* Texto selecionável onde faz sentido (o body é user-select: none). */
+.select-text,
+.select-text * {
+  user-select: text;
+}
+
+/* ---------- Movimento: só para mudanças de estado, ≤ 250 ms, ease-out ---------- */
+
+@keyframes sl-appear {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.appear {
+  animation: sl-appear var(--sl-duration-base) var(--sl-ease-out);
+}
+
+@keyframes sl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spinner {
+  animation: sl-spin 0.8s linear infinite;
+}
+
+@keyframes sl-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+.dot-pulse {
+  animation: sl-pulse 1.6s ease-in-out infinite;
+}
+
+.meter-arc {
+  transition: stroke-dasharray var(--sl-duration-base) var(--sl-ease-out);
+}
+
+@keyframes sl-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+.menu-content {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+  animation: sl-pop 160ms var(--sl-ease-out);
+}
+@keyframes sl-fade {
+  from {
+    opacity: 0;
+  }
+}
+.dialog-overlay {
+  animation: sl-fade var(--sl-duration-base) var(--sl-ease-out);
+}
+/* Só opacity e scale: o centro do diálogo vive na propriedade translate do Tailwind. */
+@keyframes sl-dialog {
+  from {
+    opacity: 0;
+    scale: 0.985;
+  }
+}
+.dialog-content {
+  animation: sl-dialog 220ms var(--sl-ease-out);
+}
+
+/* A conversa desvanece por baixo do cabeçalho em vez de uma linha dura. */
+.scroll-fade {
+  mask-image: linear-gradient(to bottom, transparent 0, black 16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appear,
+  .menu-content,
+  .dialog-content {
+    animation-name: sl-fade !important;
+  }
+  .spinner {
+    animation: none !important;
+    border-right-color: currentColor;
+    opacity: 0.6;
+  }
+  .dot-pulse {
+    animation: none !important;
+  }
+}
