@@ -167,6 +167,8 @@ export class SessionManager {
   ): Promise<SessionResult> {
     const { model, effort, mode } = info.settings;
     const entry: Partial<Entry> = {};
+    // Segredos só no arranque e só para este processo (por exemplo a chave de um fornecedor).
+    const secrets = definition.secrets ? await definition.secrets() : {};
     const adapter = definition.create(
       {
         cwd: info.cwd,
@@ -175,7 +177,7 @@ export class SessionManager {
         mode,
         resume,
         projectTrusted: trusted,
-        env: agentEnv(definition.envPolicy),
+        env: { ...agentEnv(definition.envPolicy), ...secrets },
       },
       this.#sinkFor(info, () => entry.adapter),
     );

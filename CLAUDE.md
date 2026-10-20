@@ -28,6 +28,8 @@ O plano em curso (vários agentes num só cliente) está em `docs/plano.md`. As 
   `system/init` e do `system/status`.
 - O SDK é só ESM: carregar com `import()` e manter fora do bundle do main.
 - Na app instalada, `pathToClaudeCodeExecutable` aponta para `app.asar.unpacked`.
+- Cada subida do Agent SDK corre também `SOLLINE_AGENTS=claude,claude:deepseek pnpm test`: o
+  perfil DeepSeek usa o Claude Code com outra API e pode partir sem aviso.
 
 ## Antes de dar por feito
 

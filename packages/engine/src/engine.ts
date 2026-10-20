@@ -15,6 +15,8 @@ import { ENGINE_VERSION } from './version.ts';
 
 export interface EngineOptions {
   claudeExecutable?: string | undefined;
+  /** Pasta de dados da app (perfis de fornecedor guardam lá a config do Claude Code). */
+  dataDir?: string | undefined;
   /** Para onde vão os eventos (no utilityProcess, a MessagePort). */
   emit?: (event: EngineEvent) => void;
   /** Sem definições do utilizador nem do projeto (testes e smoke). */
@@ -37,7 +39,11 @@ export class Engine {
   constructor(options: EngineOptions = {}) {
     const base =
       options.registry ??
-      builtinRegistry({ claudeExecutable: options.claudeExecutable, isolated: options.isolated });
+      builtinRegistry({
+        claudeExecutable: options.claudeExecutable,
+        isolated: options.isolated,
+        dataDir: options.dataDir,
+      });
     const registry = options.adapters ? withFactories(base, options.adapters) : base;
     this.sessions = new SessionManager({ emit: options.emit ?? (() => undefined), registry });
     const s = this.sessions;

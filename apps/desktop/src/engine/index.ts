@@ -10,6 +10,7 @@ let port: MessagePortMain | undefined;
 
 const engine = new Engine({
   claudeExecutable: resolveClaudeExecutable({ packaged: process.env.SOLLINE_PACKAGED === '1' }),
+  dataDir: process.env.SOLLINE_DATA_DIR,
   // Testes e smoke: sem hooks, plugins nem definições do utilizador.
   isolated: process.env.SOLLINE_ISOLATED === '1',
   emit: (event) => {

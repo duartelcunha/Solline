@@ -27,8 +27,19 @@ import { ClaudeNormalizer } from './normalizer.ts';
 import { toolSummary } from './tools.ts';
 import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
 
+/**
+ * O Claude Code a falar com outro fornecedor (ver agents/profiles.ts): os modelos do init
+ * apontam todos para o fornecedor, por isso a lista vem daqui; o custo seria o do Claude e
+ * não aparece; não lê definições do utilizador nem do projeto e o "sempre" fica na sessão.
+ */
+export interface ClaudeProfile {
+  models: readonly { id: string; resolved: string | null; label: string; description: string }[];
+  hideModes: readonly string[];
+}
+
 export interface ClaudeSdkOptions extends AgentStartOptions {
   claudeExecutable?: string | undefined;
+  profile?: ClaudeProfile | undefined;
   /** Lê as definições do utilizador e do projeto, como o CLI. Desligar nos testes. */
   loadSettings?: boolean;
   /** Para testes: troca o query() do SDK. */
@@ -120,20 +131,31 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
   });
 }
 
-export function capabilitiesFrom(models: ModelInfo[]): AgentCapabilities {
+export function capabilitiesFrom(models: ModelInfo[], profile?: ClaudeProfile): AgentCapabilities {
   const auto = models.some((model) => model.supportsAutoMode);
+  const efforts = (model: ModelInfo | undefined) =>
+    model?.supportsEffort ? [...(model.supportedEffortLevels ?? [])] : [];
+  // Num perfil, cada modelo herda o effort do alias com o mesmo id (ou do primeiro).
+  const listed = profile
+    ? profile.models.map((m) => ({
+        ...m,
+        efforts: efforts(models.find((i) => i.value === m.id) ?? models[0]),
+      }))
+    : models.map((model) => ({
+        id: model.value,
+        resolved: model.resolvedModel ?? null,
+        label: model.displayName,
+        description: model.description,
+        efforts: efforts(model),
+      }));
   return {
-    models: models.map((model) => ({
-      id: model.value,
-      resolved: model.resolvedModel ?? null,
-      label: model.displayName,
-      description: model.description,
-      efforts: model.supportsEffort ? [...(model.supportedEffortLevels ?? [])] : [],
-    })),
-    modes: CLAUDE_MODES.filter((mode) => mode.id !== 'auto' || auto),
-    effort: models.some((model) => model.supportsEffort),
+    models: listed,
+    modes: CLAUDE_MODES.filter(
+      (mode) => (mode.id !== 'auto' || auto) && !profile?.hideModes.includes(mode.id),
+    ),
+    effort: listed.some((model) => model.efforts.length > 0),
     effortOrder: [...EFFORT_LEVELS],
-    features: { cost: true, context: true, resume: true },
+    features: { cost: !profile, context: true, resume: true },
   };
 }
 
@@ -312,8 +334,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
         START_TIMEOUT_MS,
         'Arranque do Claude',
       );
-      this.#capabilities = capabilitiesFrom(init.models);
-      if (!this.#settings.model) this.#settings.model = init.models[0]?.value ?? null;
+      this.#capabilities = capabilitiesFrom(init.models, this.#options.profile);
+      if (!this.#settings.model) this.#settings.model = this.#capabilities.models[0]?.id ?? null;
     } catch (error) {
       this.#closing = true;
       queue.close();
@@ -406,7 +428,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       // Sem confiança, só as definições do utilizador: nada do .claude/ nem do CLAUDE.md da pasta.
       settingSources:
-        options.loadSettings === false
+        options.loadSettings === false || options.profile
           ? []
           : options.projectTrusted
             ? ['user', 'project', 'local']
@@ -425,7 +447,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   readonly #canUseTool: CanUseTool = async (toolName, input, options) => {
     const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
     this.#emit(deltas);
-    const trusted = this.#options.projectTrusted === true;
+    // Num perfil de fornecedor não há definições gravadas: o "sempre" fica na sessão.
+    const trusted = this.#options.projectTrusted === true && !this.#options.profile;
     const block = askBlockFor(toolName, input, options, trusted);
     const entry: AskEntry = { turnId, block, input, suggestions: options.suggestions };
     this.#asks.set(block.id, entry);

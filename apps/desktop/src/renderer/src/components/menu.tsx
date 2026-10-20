@@ -7,16 +7,18 @@ export function MenuShell({
   title,
   side = 'top',
   align = 'start',
+  onOpenChange,
   children,
 }: {
   trigger: React.ReactNode;
   title: string;
   side?: 'top' | 'bottom' | 'right' | 'left';
   align?: 'start' | 'center' | 'end';
+  onOpenChange?: (open: boolean) => void;
   children: React.ReactNode;
 }) {
   return (
-    <Menu.Root>
+    <Menu.Root onOpenChange={onOpenChange}>
       {trigger}
       <Menu.Portal>
         <Menu.Content

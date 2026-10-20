@@ -5,8 +5,10 @@ import { describe, expect, it } from 'vitest';
 import type { EngineEvent, ResponseEnvelope } from '@solline/protocol';
 import {
   ClaudeSdkAdapter,
+  DEEPSEEK,
   Engine,
   claudeDefinition,
+  profileDefinition,
   registryOf,
   type AgentDefinition,
 } from '../src/index.ts';
@@ -211,7 +213,11 @@ describe('Engine', () => {
   });
 
   it('agents.list mostra os agentes do registo e o estado de cada um', async () => {
-    const engine = new Engine({ isolated: true });
+    const registry = registryOf([
+      claudeDefinition({ isolated: true }),
+      profileDefinition(DEEPSEEK, { readCredential: async () => false, env: {} }),
+    ]);
+    const engine = new Engine({ registry });
     const listed = await call(engine, 'agents.list', {});
     expect(listed).toMatchObject({
       ok: true,
@@ -224,6 +230,13 @@ describe('Engine', () => {
             experimental: false,
             untrustedProjects: 'allowed',
             status: expect.stringMatching(/^(ready|not-found)$/),
+          },
+          {
+            id: 'claude:deepseek',
+            label: 'DeepSeek',
+            transport: 'claude-sdk',
+            experimental: true,
+            status: expect.stringMatching(/^(needs-key|not-found)$/),
           },
         ],
       },

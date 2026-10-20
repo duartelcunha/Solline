@@ -3,9 +3,10 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { AgentDescriptor, AgentId, ModeOption } from '@solline/protocol';
 import { binaryName, platformPackageName } from '../adapters/claude/executable.ts';
-import { CLAUDE_MODES, ClaudeSdkAdapter } from '../adapters/claude/sdk.ts';
+import { CLAUDE_MODES, ClaudeSdkAdapter, type ClaudeProfile } from '../adapters/claude/sdk.ts';
 import type { AgentAdapterFactory } from '../adapters/types.ts';
 import { CLAUDE_ENV_POLICY, type EnvPolicy } from '../env.ts';
+import { DEEPSEEK, profileDefinition } from './profiles.ts';
 
 type Detected = Pick<AgentDescriptor, 'status' | 'detail'>;
 
@@ -27,6 +28,11 @@ export interface AgentDefinition {
   untrustedProjects: 'allowed' | 'refused';
   /** Estado nesta máquina; não arranca o agente nem lê credenciais. */
   detect(): Promise<Detected>;
+  /**
+   * Segredos lidos só no arranque (por exemplo do Gestor de Credenciais) e juntos ao ambiente
+   * do agente. Lança com uma mensagem calma se faltar algum.
+   */
+  secrets?(): Promise<Record<string, string>>;
   create: AgentAdapterFactory;
 }
 
@@ -56,7 +62,9 @@ export function withFactories(
 export interface BuiltinOptions {
   claudeExecutable?: string | undefined;
   /** Sem definições do utilizador nem do projeto (testes e smoke). */
-  isolated?: boolean;
+  isolated?: boolean | undefined;
+  /** Pasta de dados da app (perfis de fornecedor). */
+  dataDir?: string | undefined;
 }
 
 /** O binário do Claude Code vem no pacote de plataforma do SDK. */
@@ -78,7 +86,9 @@ async function detectClaude(executable: string | undefined): Promise<Detected> {
   }
 }
 
-export function claudeDefinition(options: BuiltinOptions = {}): AgentDefinition {
+export function claudeDefinition(
+  options: BuiltinOptions & { profile?: ClaudeProfile } = {},
+): AgentDefinition {
   return {
     id: 'claude',
     label: 'Claude',
@@ -90,12 +100,17 @@ export function claudeDefinition(options: BuiltinOptions = {}): AgentDefinition 
     detect: () => detectClaude(options.claudeExecutable),
     create: (start, sink) =>
       new ClaudeSdkAdapter(
-        { ...start, claudeExecutable: options.claudeExecutable, loadSettings: !options.isolated },
+        {
+          ...start,
+          claudeExecutable: options.claudeExecutable,
+          loadSettings: !options.isolated,
+          ...(options.profile ? { profile: options.profile } : {}),
+        },
         sink,
       ),
   };
 }
 
 export function builtinRegistry(options: BuiltinOptions = {}): AgentRegistry {
-  return registryOf([claudeDefinition(options)]);
+  return registryOf([claudeDefinition(options), profileDefinition(DEEPSEEK, options)]);
 }

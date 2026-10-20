@@ -42,7 +42,11 @@ export class EngineHost {
     const child = utilityProcess.fork(join(__dirname, 'engine.js'), [], {
       serviceName: 'Solline Engine',
       stdio: 'inherit',
-      env: { ...process.env, SOLLINE_PACKAGED: app.isPackaged ? '1' : '0' },
+      env: {
+        ...process.env,
+        SOLLINE_PACKAGED: app.isPackaged ? '1' : '0',
+        SOLLINE_DATA_DIR: app.getPath('userData'),
+      },
     });
     const { port1, port2 } = new MessageChannelMain();
     port1.on('message', (event) => this.#onMessage(event.data));

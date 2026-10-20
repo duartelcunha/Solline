@@ -104,3 +104,25 @@
   os agentes. `SOLLINE_AGENTS=claude,…` escolhe que agentes correm a sério; por omissão só o Claude.
 - **Node 22.18+**: o gravador de fixtures importa o `env.ts` do motor diretamente.
 
+## 2026-10-20: M1d, modelos DeepSeek pelo Claude Code (experimental)
+
+- **São os modelos, não o DeepSeek Harness.** O agente `claude:deepseek` é o mesmo `claude.exe`
+  a falar com `https://api.deepseek.com/anthropic` (configuração do guia da DeepSeek: tudo em
+  `deepseek-flash[1m]`, haiku e subagentes em `deepseek-flash`). O código vai para os servidores da
+  DeepSeek. A Anthropic não suporta este encaminhamento; não encontrei uma proibição.
+- **A chave vem do Gestor de Credenciais do Windows** (credencial genérica `solline/deepseek`) ou
+  da variável `DEEPSEEK_API_KEY`, só no arranque e só para o processo do agente. Desvio ao plano
+  (que dizia só variável): as regras pessoais mandam os segredos para o Gestor de Credenciais e uma
+  variável de utilizador fica em claro no registo. Lê-se com `CredRead` num PowerShell com o script
+  em `-EncodedCommand` (pelo stdin o PowerShell engole a here-string do `Add-Type`); demora ~2 s.
+- **Isolado:** `CLAUDE_CONFIG_DIR` próprio em `<userData>/profiles/deepseek` (o login do claude.ai
+  nunca chega a um URL de terceiros), sem segredos do anfitrião (`no-secrets`, cai sempre a
+  `ANTHROPIC_API_KEY`), sem definições do utilizador nem do projeto, "Permitir sempre" só na sessão,
+  sem Auto, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
+- **Sem custo:** o `total_cost_usd` seria calculado com preços do Claude; o motor tira-o antes de
+  chegar à interface e mostra tokens. A DeepSeek ignora o `cache_control`, por isso sai mais caro
+  do que parece pelos tokens.
+- **Falta a corrida real** (`SOLLINE_AGENTS=claude:deepseek`): sem chave nesta máquina. Por
+  confirmar nela: se o `thinking` adaptativo e o effort passam, a primeira corrida com a pasta de
+  config vazia e os nomes que o init devolve.
+

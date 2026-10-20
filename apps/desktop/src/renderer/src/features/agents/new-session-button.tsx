@@ -26,7 +26,16 @@ function AgentMenu({
   side: 'right' | 'bottom';
 }) {
   return (
-    <MenuShell title="Nova sessão com" trigger={trigger} side={side} align="start">
+    <MenuShell
+      title="Nova sessão com"
+      trigger={trigger}
+      side={side}
+      align="start"
+      // Ao abrir, volta a ver o estado (por exemplo uma chave acabada de guardar).
+      onOpenChange={(open) => {
+        if (open) void actions.loadAgents();
+      }}
+    >
       {agents.map((agent) => {
         const blocked = blockedReason(agent, project);
         return (

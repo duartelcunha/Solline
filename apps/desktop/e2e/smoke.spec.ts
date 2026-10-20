@@ -175,6 +175,19 @@ test('um projeto novo pergunta pela confiança e o escudo muda-a', async () => {
   await expect(shield).toHaveAttribute('data-trusted', 'true');
 });
 
+test('a nova sessão deixa escolher o agente e mostra porque um não está pronto', async () => {
+  const page = await app.firstWindow();
+  await page.getByTestId('new-session-agent').click();
+  await expect(page.getByTestId('agent-claude')).toBeVisible();
+  const deepseek = page.getByTestId('agent-claude:deepseek');
+  await expect(deepseek).toContainText('DeepSeek (experimental)');
+  // Sem chave fica desligado e diz onde a pôr; com chave fica pronto.
+  const disabled = await deepseek.getAttribute('data-disabled');
+  if (disabled !== null) await expect(deepseek).toContainText('Gestor de Credenciais');
+  await shot(page, 'agent-picker');
+  await page.keyboard.press('Escape');
+});
+
 test('a interface não escolhe a pasta de uma sessão', async () => {
   const page = await app.firstWindow();
   const errors = await page.evaluate(async () => {
