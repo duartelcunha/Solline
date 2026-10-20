@@ -42,3 +42,5 @@ export {
   binaryName,
 } from './adapters/claude/executable.ts';
 export { ENGINE_VERSION } from './version.ts';
+export { JsonRpcPeer, RpcError, StderrTail, type RequestId } from './rpc/json-rpc.ts';
+export { killTree, spawnAgent, type SpawnAgentOptions } from './rpc/spawn.ts';
