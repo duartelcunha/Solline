@@ -284,6 +284,10 @@ export const AgentCapabilities = z.object({
 });
 export type AgentCapabilities = z.infer<typeof AgentCapabilities>;
 
+/** Nome de uma variável de ambiente (só o nome; o valor nunca sai do motor). */
+export const EnvKeyName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+export type EnvKeyName = z.infer<typeof EnvKeyName>;
+
 /** Como o motor fala com o agente. */
 export const AgentTransport = z.enum(['claude-sdk', 'codex-app-server', 'acp']);
 
@@ -302,6 +306,15 @@ export const AgentDescriptor = z.object({
   untrustedProjects: z.enum(['allowed', 'refused']),
   /** Aceita servidores MCP por sessão. */
   mcp: z.boolean().optional(),
+  /** Versão instalada e a que foi revista, nos agentes que se instalam à parte. */
+  version: z.object({ installed: z.string().nullable(), reviewed: z.string() }).optional(),
+  /** O agente sabe entrar dentro da app (por exemplo "Entrar com ChatGPT"). */
+  login: z.object({ label: z.string(), pending: z.boolean() }).optional(),
+  /**
+   * Agentes que só recebem as variáveis que escolhes: os nomes escolhidos (nunca os valores).
+   * Sem o campo, o agente não deixa escolher.
+   */
+  keys: z.array(EnvKeyName).optional(),
 });
 export type AgentDescriptor = z.infer<typeof AgentDescriptor>;
 

@@ -1,4 +1,3 @@
-import type { Readable, Writable } from 'node:stream';
 import type {
   AgentCapabilities,
   AskBlock,
@@ -8,17 +7,14 @@ import type {
   PermissionBlock,
   SessionSettings,
 } from '@solline/protocol';
-import { APP_NAME, CLIENT_APP_ID } from '@solline/protocol/app';
 import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts';
 import { JsonRpcPeer, StderrTail, type RequestId } from '../../rpc/json-rpc.ts';
-import { killTree, spawnAgent } from '../../rpc/spawn.ts';
-import { ENGINE_VERSION } from '../../version.ts';
 import { clip } from '../claude/tools.ts';
 import { crashMessage, errorNotice, withTimeout } from '../shared/turns.ts';
 import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
 import { CODEX_MODES, DEFAULT_CODEX_MODE, threadPolicy, turnOverrides } from './modes.ts';
 import { CodexNormalizer, displayCommand } from './normalizer.ts';
-import type { InitializeParams } from './protocol/InitializeParams';
+import { initializeCodex, spawnCodex, type CodexTransport } from './transport.ts';
 import type { ReviewDecision } from './protocol/ReviewDecision';
 import type { CommandExecutionApprovalDecision } from './protocol/v2/CommandExecutionApprovalDecision';
 import type { CommandExecutionRequestApprovalParams } from './protocol/v2/CommandExecutionRequestApprovalParams';
@@ -31,14 +27,7 @@ import type { TurnStartParams } from './protocol/v2/TurnStartParams';
 import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
 import type { WindowsSandboxReadinessResponse } from './protocol/v2/WindowsSandboxReadinessResponse';
 
-/** Os fios para o app-server: stdio do processo, ou streams falsos nos testes. */
-export interface CodexTransport {
-  input: Readable;
-  output: Writable;
-  stderr?: Readable | undefined;
-  exited: Promise<unknown>;
-  kill(): Promise<void>;
-}
+export type { CodexTransport } from './transport.ts';
 
 export interface CodexAdapterOptions extends AgentStartOptions {
   /** Caminho absoluto do codex.exe. */
@@ -54,7 +43,7 @@ const START_TIMEOUT_MS = 60_000;
 const CONTROL_TIMEOUT_MS = 30_000;
 
 export const CODEX_LOGIN_MESSAGE =
-  'O Codex não tem sessão iniciada. Entra com o ChatGPT no Codex (codex login) e volta a abrir a sessão.';
+  'O Codex não tem sessão iniciada. Carrega em "Entrar com ChatGPT" no seletor de agentes e volta a abrir a sessão.';
 
 function modelOption(model: Model): ModelOption {
   return {
@@ -194,12 +183,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
     });
 
     try {
-      const init: InitializeParams = {
-        clientInfo: { name: CLIENT_APP_ID, title: APP_NAME, version: ENGINE_VERSION },
-        capabilities: { experimentalApi: false, requestAttestation: false },
-      };
-      await peer.request('initialize', init, START_TIMEOUT_MS);
-      peer.notify('initialized');
+      await initializeCodex(peer, START_TIMEOUT_MS);
       const account = await peer.request<GetAccountResponse>(
         'account/read',
         {},
@@ -372,28 +356,12 @@ export class CodexAppServerAdapter implements AgentAdapter {
   #spawn(): CodexTransport {
     const executable = this.#options.executable;
     if (!executable) throw new Error('Não encontrei o codex.exe');
-    const child = spawnAgent({
-      command: executable,
-      args: ['app-server'],
+    return spawnCodex({
+      executable,
       env: this.#options.env ?? {},
       cwd: this.#options.cwd,
+      stderr: this.#stderr,
     });
-    const exited = new Promise((resolve) => {
-      child.on('exit', resolve);
-      // Sem isto, um codex.exe que não arranca (apagado, bloqueado) derrubava o motor.
-      child.on('error', (error) => {
-        this.#stderr.push(String(error));
-        child.stdout.destroy();
-        resolve(error);
-      });
-    });
-    return {
-      input: child.stdout,
-      output: child.stdin,
-      stderr: child.stderr,
-      exited,
-      kill: () => killTree(child.pid),
-    };
   }
 
   async #sandboxReady(peer: JsonRpcPeer): Promise<boolean> {

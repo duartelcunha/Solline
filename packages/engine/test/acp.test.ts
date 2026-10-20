@@ -321,6 +321,7 @@ describe('catálogo ACP', () => {
         })).detect(),
       ).toEqual({
         status: 'ready',
+        version: { installed: entry.reviewedVersion, reviewed: entry.reviewedVersion },
       });
       expect(definition).toMatchObject({
         transport: 'acp',

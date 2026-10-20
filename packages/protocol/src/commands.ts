@@ -3,6 +3,7 @@ import {
   AgentCapabilities,
   AgentDescriptor,
   AgentId,
+  EnvKeyName,
   McpServerDescriptor,
   PermissionAnswer,
   SessionInfo,
@@ -25,6 +26,14 @@ export const PingResult = z.object({
 
 const Empty = z.object({}).strict();
 const SessionRef = z.object({ sessionId: z.string().min(1) }).strict();
+const AgentRef = z.object({ agent: AgentId }).strict();
+/** As variáveis que um agente recebe: só nomes, sem repetidos. */
+const EnvKeys = z
+  .array(EnvKeyName)
+  .max(32)
+  .refine((keys) => new Set(keys.map((k) => k.toUpperCase())).size === keys.length, {
+    message: 'Nomes repetidos',
+  });
 
 export const Project = z.object({
   id: z.string(),
@@ -72,8 +81,31 @@ export const SessionCreateResult = z.object({
 
 export const commandSchemas = {
   'engine.ping': { payload: PingPayload, result: PingResult },
-  /** Os agentes que o motor conhece e o estado de cada um nesta máquina. */
-  'agents.list': { payload: Empty, result: z.object({ agents: z.array(AgentDescriptor) }) },
+  /**
+   * Os agentes que o motor conhece e o estado de cada um nesta máquina. refresh volta a
+   * verificar o que o motor guardou (por exemplo se o Codex tem sessão iniciada).
+   */
+  'agents.list': {
+    payload: z.object({ refresh: z.boolean().optional() }).strict(),
+    result: z.object({ agents: z.array(AgentDescriptor) }),
+  },
+  /**
+   * Entrar no agente dentro da app (main): o motor arranca o login e o main abre o endereço
+   * no browser se for de confiança. Acaba com um agents.changed.
+   */
+  'agents.login': { payload: AgentRef, result: Empty },
+  /** Desiste de um login a meio. */
+  'agents.loginCancel': { payload: AgentRef, result: Empty },
+  /**
+   * Escolher as variáveis de ambiente que um agente recebe (main): pede confirmação nativa e
+   * só guarda se aceitares. saved é false se recusares.
+   */
+  'agents.setKeys': {
+    payload: AgentRef.extend({ keys: EnvKeys }).strict(),
+    result: z.object({ saved: z.boolean() }),
+  },
+  /** Nomes de variáveis do ambiente da Solline que parecem segredos (só nomes, para escolher). */
+  'agents.keyCandidates': { payload: Empty, result: z.object({ names: z.array(EnvKeyName) }) },
   /** Os servidores MCP do catálogo e o estado de cada um. */
   'mcp.list': { payload: Empty, result: z.object({ servers: z.array(McpServerDescriptor) }) },
   'session.create': { payload: SessionCreatePayload, result: SessionCreateResult },
@@ -115,6 +147,8 @@ export const commandSchemas = {
  * pela pasta e só depois chamar o motor com session.start.
  */
 export const MAIN_COMMANDS = [
+  'agents.login',
+  'agents.setKeys',
   'projects.list',
   'projects.add',
   'projects.setTrusted',
@@ -139,6 +173,13 @@ export const CommandNameSchema = z.enum(commandNames as [CommandName, ...Command
  */
 export const internalCommandSchemas = {
   'session.start': { payload: SessionStartPayload, result: SessionCreateResult },
+  /** Arranca o login de um agente e devolve o endereço que o main vai abrir no browser. */
+  'agents.loginStart': {
+    payload: AgentRef,
+    result: z.object({ url: z.url({ protocol: /^https$/ }) }),
+  },
+  /** Guarda as variáveis escolhidas para um agente (o main já pediu confirmação). */
+  'agents.saveKeys': { payload: AgentRef.extend({ keys: EnvKeys }).strict(), result: Empty },
   /** A confiança de um projeto mudou: as próximas retomas das suas sessões usam a nova. */
   'projects.trustChanged': {
     payload: z.object({ projectId: z.string().min(1).max(64), trusted: z.boolean() }).strict(),

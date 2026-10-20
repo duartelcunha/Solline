@@ -59,6 +59,8 @@ export interface FakeCodexOptions {
   failTurnStarts?: number;
   /** Segura a resposta ao turn/start até esta promessa resolver. */
   holdTurnStart?: Promise<void>;
+  /** Resposta ao account/login/start (por omissão, um login do ChatGPT). */
+  login?: unknown;
 }
 
 const DEFAULT_MODELS = [
@@ -163,6 +165,13 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
         turn: { id: `turn-${++turn}`, items: [], status: 'inProgress', error: null },
       }),
       'turn/interrupt': () => ({}),
+      'account/login/start': () =>
+        options.login ?? {
+          type: 'chatgpt',
+          loginId: 'login-1',
+          authUrl: 'https://auth.openai.com/oauth/authorize?client_id=x&state=y',
+        },
+      'account/login/cancel': () => ({ status: 'canceled' }),
     };
     if (id === undefined) return;
     if (msg.method === 'turn/start' && options.holdTurnStart) {

@@ -58,6 +58,7 @@ export class SessionManager {
   readonly #registry: AgentRegistry;
   readonly #mcp: McpCatalog | undefined;
   readonly #checkCwd: (cwd: string) => Promise<void>;
+  readonly #keysFor: (agent: string) => Promise<readonly string[]>;
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
@@ -67,11 +68,14 @@ export class SessionManager {
     mcp?: McpCatalog | undefined;
     /** Para testes: troca a verificação da pasta. */
     checkCwd?: (cwd: string) => Promise<void>;
+    /** As variáveis escolhidas no painel para os agentes com configurableKeys. */
+    keysFor?: (agent: string) => Promise<readonly string[]>;
   }) {
     this.#emit = options.emit;
     this.#registry = options.registry;
     this.#mcp = options.mcp;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
+    this.#keysFor = options.keysFor ?? (async () => []);
   }
 
   async create(payload: SessionStartPayload): Promise<SessionResult> {
@@ -225,7 +229,14 @@ export class SessionManager {
     const entry: Partial<Entry> = {};
     // Segredos só no arranque e só para este processo (por exemplo a chave de um fornecedor).
     const secrets = definition.secrets ? await definition.secrets() : {};
-    const env = { ...agentEnv(definition.envPolicy), ...secrets };
+    // As variáveis escolhidas no painel valem a partir da próxima sessão (ou retoma).
+    const policy = definition.configurableKeys
+      ? {
+          ...definition.envPolicy,
+          keys: [...(definition.envPolicy.keys ?? []), ...(await this.#keysFor(definition.id))],
+        }
+      : definition.envPolicy;
+    const env = { ...agentEnv(policy), ...secrets };
     const adapter = definition.create(
       {
         cwd: info.cwd,

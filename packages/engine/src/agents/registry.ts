@@ -1,22 +1,27 @@
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import type { AgentDescriptor, AgentId, ModeOption } from '@solline/protocol';
 import { binaryName, platformPackageName } from '../adapters/claude/executable.ts';
 import { CLAUDE_MODES, ClaudeSdkAdapter, type ClaudeProfile } from '../adapters/claude/sdk.ts';
 import type { AgentAdapterFactory } from '../adapters/types.ts';
 import { CodexAppServerAdapter } from '../adapters/codex/adapter.ts';
+import { codexNeedsLogin, startCodexLogin } from '../adapters/codex/account.ts';
+import { spawnCodex, type CodexTransport } from '../adapters/codex/transport.ts';
 import {
   REVIEWED_CODEX_VERSION,
   resolveCodexExecutable,
   type CodexExecutable,
 } from '../adapters/codex/executable.ts';
 import { CODEX_MODES, DEFAULT_CODEX_MODE } from '../adapters/codex/modes.ts';
-import { CLAUDE_ENV_POLICY, type EnvPolicy } from '../env.ts';
+import { CLAUDE_ENV_POLICY, agentEnv, type EnvPolicy } from '../env.ts';
+import { StderrTail } from '../rpc/json-rpc.ts';
 import { CATALOG, catalogDefinition } from './catalog.ts';
+import type { LoginFlow } from './login.ts';
 import { PROVIDER_PROFILES, profileDefinition } from './profiles.ts';
 
-type Detected = Pick<AgentDescriptor, 'status' | 'detail'>;
+export type Detected = Pick<AgentDescriptor, 'status' | 'detail' | 'version'>;
 
 /**
  * Tudo o que o motor sabe de um agente antes de abrir uma sessão: como se chama, como se
@@ -36,8 +41,18 @@ export interface AgentDefinition {
   untrustedProjects: 'allowed' | 'refused';
   /** Aceita servidores MCP por sessão. */
   mcp?: boolean;
-  /** Estado nesta máquina; não arranca o agente nem lê credenciais. */
-  detect(): Promise<Detected>;
+  /**
+   * Estado nesta máquina; nunca lê credenciais. Pode perguntar ao agente se tem sessão (o
+   * Codex), e guarda a resposta um bocado; refresh volta a perguntar.
+   */
+  detect(options?: { refresh?: boolean }): Promise<Detected>;
+  /** Entrar dentro da app: o agente dá um endereço para o browser e diz quando acabou. */
+  login?: { label: string; start(): Promise<LoginFlow> };
+  /**
+   * Só recebe os segredos que escolhes no painel (nomes guardados em agent-settings.json),
+   * juntos ao envPolicy.keys no arranque de cada sessão.
+   */
+  configurableKeys?: boolean;
   /**
    * Segredos lidos só no arranque (por exemplo do Gestor de Credenciais) e juntos ao ambiente
    * do agente. Lança com uma mensagem calma se faltar algum.
@@ -124,24 +139,58 @@ export function claudeDefinition(
   };
 }
 
+/** Quanto tempo vale a resposta do Codex sobre ter sessão iniciada. */
+const ACCOUNT_TTL_MS = 60_000;
+
 /**
  * O Codex pelo codex app-server. Lê AGENTS.md e config do projeto, por isso só corre em
  * projetos de confiança. Recebe só as chaves da OpenAI, nenhum outro segredo do anfitrião.
  */
 export function codexDefinition(
-  options: { resolve?: () => CodexExecutable | null; packaged?: boolean | undefined } = {},
+  options: {
+    resolve?: () => CodexExecutable | null;
+    packaged?: boolean | undefined;
+    /** Para testes: o app-server auxiliar (conta e login) em vez do codex.exe. */
+    accountTransport?: () => CodexTransport;
+  } = {},
 ): AgentDefinition {
   const resolve =
     options.resolve ?? (() => resolveCodexExecutable({ packaged: options.packaged === true }));
+  const envPolicy: EnvPolicy = { base: 'no-secrets', keys: ['OPENAI_API_KEY', 'CODEX_API_KEY'] };
+  const reviewed = (): CodexExecutable => {
+    const found = resolve();
+    if (!found) throw new Error('Não encontrei o Codex nesta máquina');
+    if (found.version !== REVIEWED_CODEX_VERSION) {
+      throw new Error(`O Codex instalado (${found.version ?? '?'}) não é a versão revista`);
+    }
+    return found;
+  };
+  // Um app-server sem sessão, na pasta pessoal: não lê config de nenhum projeto.
+  const aux = (found: CodexExecutable): CodexTransport =>
+    options.accountTransport?.() ??
+    spawnCodex({
+      executable: found.path,
+      env: agentEnv(envPolicy),
+      cwd: os.homedir(),
+      stderr: new StderrTail(),
+    });
+  let account: { at: number; needsLogin: Promise<boolean> } | null = null;
+  const needsLogin = (found: CodexExecutable, refresh: boolean): Promise<boolean> => {
+    if (refresh || !account || Date.now() - account.at > ACCOUNT_TTL_MS) {
+      // Sem resposta não se bloqueia nada: a sessão diz porquê se faltar o login.
+      account = { at: Date.now(), needsLogin: codexNeedsLogin(aux(found)).catch(() => false) };
+    }
+    return account.needsLogin;
+  };
   return {
     id: 'codex',
     label: 'Codex',
     transport: 'codex-app-server',
-    envPolicy: { base: 'no-secrets', keys: ['OPENAI_API_KEY', 'CODEX_API_KEY'] },
+    envPolicy,
     defaultMode: DEFAULT_CODEX_MODE,
     staticModes: CODEX_MODES,
     untrustedProjects: 'refused',
-    detect: async () => {
+    detect: async ({ refresh = false } = {}) => {
       const found = resolve();
       if (!found) {
         return {
@@ -149,22 +198,33 @@ export function codexDefinition(
           detail: `Instala o Codex: npm install -g @openai/codex@${REVIEWED_CODEX_VERSION}`,
         };
       }
+      const version = { installed: found.version, reviewed: REVIEWED_CODEX_VERSION };
       if (found.version !== REVIEWED_CODEX_VERSION) {
         return {
           status: 'unreviewed',
           detail: `Versão não revista (instalada ${found.version ?? '?'}, revista ${REVIEWED_CODEX_VERSION})`,
+          version,
         };
       }
-      return { status: 'ready' };
-    },
-    create: (start, sink) => {
-      const found = resolve();
-      if (!found) throw new Error('Não encontrei o Codex nesta máquina');
-      if (found.version !== REVIEWED_CODEX_VERSION) {
-        throw new Error(`O Codex instalado (${found.version ?? '?'}) não é a versão revista`);
+      if (await needsLogin(found, refresh)) {
+        return { status: 'needs-login', detail: 'Entra com o ChatGPT para usar o Codex', version };
       }
-      return new CodexAppServerAdapter({ ...start, executable: found.path }, sink);
+      return { status: 'ready', version };
     },
+    login: {
+      label: 'Entrar com ChatGPT',
+      start: async () => {
+        const flow = await startCodexLogin(aux(reviewed()));
+        // Acabado (bem ou mal), a próxima lista volta a perguntar ao Codex.
+        const forget = () => {
+          account = null;
+        };
+        flow.done.then(forget, forget);
+        return flow;
+      },
+    },
+    create: (start, sink) =>
+      new CodexAppServerAdapter({ ...start, executable: reviewed().path }, sink),
   };
 }
 

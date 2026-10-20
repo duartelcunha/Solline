@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AskBlock, ConversationDelta, SessionState } from './conversation.ts';
+import { AgentId, AskBlock, ConversationDelta, SessionState } from './conversation.ts';
 
 /**
  * Eventos que o motor emite sem pedido (motor -> main -> interface).
@@ -46,7 +46,17 @@ export const EngineErrorEvent = z.object({
   sessionId: z.string().optional(),
 });
 
+/** O estado de um agente mudou (um login acabou, por exemplo): volta a pedir agents.list. */
+export const AgentsChangedEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('agents.changed'),
+  agent: AgentId.optional(),
+  /** Mensagem calma quando o que mudou foi uma falha (login recusado ou expirado). */
+  error: z.string().optional(),
+});
+
 export const EngineEvent = z.discriminatedUnion('type', [
+  AgentsChangedEvent,
   EngineReadyEvent,
   SessionEvent,
   SessionStateEvent,
@@ -57,3 +67,4 @@ export type EngineEvent = z.infer<typeof EngineEvent>;
 export type SessionEvent = z.infer<typeof SessionEvent>;
 export type SessionStateEvent = z.infer<typeof SessionStateEvent>;
 export type PermissionRequestEvent = z.infer<typeof PermissionRequestEvent>;
+export type AgentsChangedEvent = z.infer<typeof AgentsChangedEvent>;
