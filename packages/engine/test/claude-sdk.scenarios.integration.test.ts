@@ -170,6 +170,7 @@ describe.skipIf(skip)('cenários reais do Claude', () => {
         );
       try {
         const { session } = await manager.create({
+          projectId: 'p',
           agent: 'claude',
           cwd,
           mode: 'default',

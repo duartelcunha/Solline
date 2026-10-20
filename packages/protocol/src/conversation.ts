@@ -185,6 +185,7 @@ export type AgentCapabilities = z.infer<typeof AgentCapabilities>;
 
 export const SessionInfo = z.object({
   id: z.string(),
+  projectId: z.string(),
   agent: AgentKind,
   cwd: z.string(),
   title: z.string(),
@@ -223,7 +224,12 @@ export type ConversationDelta = z.infer<typeof ConversationDelta>;
 export const PermissionAnswer = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('allow-once') }),
   z.object({ decision: z.literal('allow-always') }),
-  z.object({ decision: z.literal('deny'), message: z.string().optional() }),
-  z.object({ decision: z.literal('answer'), answers: z.record(z.string(), z.string()) }),
+  z.object({ decision: z.literal('deny'), message: z.string().max(10_000).optional() }),
+  z.object({
+    decision: z.literal('answer'),
+    answers: z
+      .record(z.string().max(500), z.string().max(10_000))
+      .refine((answers) => Object.keys(answers).length <= 8, 'Respostas a mais'),
+  }),
 ]);
 export type PermissionAnswer = z.infer<typeof PermissionAnswer>;

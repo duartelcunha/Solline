@@ -8,6 +8,9 @@ export {
   CRASH_MESSAGE,
   askBlockFor,
   capabilitiesFrom,
+  toEffortLevel,
+  toPermissionMode,
+  toPermissionModeOr,
   toPermissionResult,
   type ClaudeSdkOptions,
 } from './adapters/claude-sdk.ts';

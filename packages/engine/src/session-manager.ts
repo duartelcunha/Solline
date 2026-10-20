@@ -1,12 +1,28 @@
-import type {
-  AgentKind,
-  CommandPayload,
-  CommandResult,
-  EngineEvent,
-  PermissionAnswer,
-  SessionInfo,
+import { stat } from 'node:fs/promises';
+import { isAbsolute } from 'node:path';
+import {
+  findModel,
+  type AgentKind,
+  type EngineCommandResult,
+  type EngineEvent,
+  type ModeOption,
+  type PermissionAnswer,
+  type SessionInfo,
+  type SessionStartPayload,
 } from '@solline/protocol';
 import type { AgentAdapter, AgentAdapterFactory, AdapterSink } from './adapters/types.ts';
+
+type SessionResult = EngineCommandResult<'session.start'>;
+
+/** A pasta tem de ser absoluta e existir; o main já a tirou de um projeto conhecido. */
+async function defaultCheckCwd(cwd: string): Promise<void> {
+  if (!isAbsolute(cwd)) throw new Error('A pasta da sessão tem de ser um caminho absoluto');
+  const isDir = await stat(cwd).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
+  if (!isDir) throw new Error('A pasta do projeto já não existe');
+}
 
 interface Entry {
   info: SessionInfo;
@@ -23,18 +39,36 @@ export class SessionManager {
   readonly #sessions = new Map<string, Entry>();
   readonly #emit: (event: EngineEvent) => void;
   readonly #adapters: Record<AgentKind, AgentAdapterFactory>;
+  readonly #staticModes: Partial<Record<AgentKind, readonly ModeOption[]>>;
+  readonly #defaultModes: Partial<Record<AgentKind, string>>;
+  readonly #checkCwd: (cwd: string) => Promise<void>;
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
     adapters: Record<AgentKind, AgentAdapterFactory>;
+    /** Modos que cada agente aceita antes de arrancar (o pedido de criação é validado aqui). */
+    staticModes?: Partial<Record<AgentKind, readonly ModeOption[]>>;
+    /** Modo com que cada agente arranca quando o pedido não traz nenhum. */
+    defaultModes?: Partial<Record<AgentKind, string>>;
+    /** Para testes: troca a verificação da pasta. */
+    checkCwd?: (cwd: string) => Promise<void>;
   }) {
     this.#emit = options.emit;
     this.#adapters = options.adapters;
+    this.#staticModes = options.staticModes ?? {};
+    this.#defaultModes = options.defaultModes ?? {};
+    this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
   }
 
-  create(payload: CommandPayload<'session.create'>): Promise<CommandResult<'session.create'>> {
+  async create(payload: SessionStartPayload): Promise<SessionResult> {
+    await this.#checkCwd(payload.cwd);
+    const known = this.#staticModes[payload.agent];
+    if (payload.mode && known && !known.some((m) => m.id === payload.mode)) {
+      throw new Error(`Modo desconhecido para este agente: ${payload.mode}`);
+    }
     const info: SessionInfo = {
       id: crypto.randomUUID(),
+      projectId: payload.projectId,
       agent: payload.agent,
       cwd: payload.cwd,
       // O título vem da primeira mensagem, na interface.
@@ -43,7 +77,7 @@ export class SessionManager {
       settings: {
         model: payload.model ?? null,
         effort: payload.effort ?? null,
-        mode: payload.mode,
+        mode: payload.mode ?? this.#defaultModes[payload.agent] ?? 'default',
       },
       agentSessionId: null,
     };
@@ -51,7 +85,7 @@ export class SessionManager {
   }
 
   /** Abre de novo uma sessão que caiu, com resume no agente e as mesmas definições. */
-  async resume(sessionId: string): Promise<CommandResult<'session.resume'>> {
+  async resume(sessionId: string): Promise<SessionResult> {
     const entry = this.#get(sessionId);
     const resumeId = entry.adapter.agentSessionId();
     if (!resumeId) throw new Error('Esta sessão ainda não tem histórico no agente para retomar');
@@ -67,18 +101,33 @@ export class SessionManager {
     return this.#get(sessionId).adapter.interrupt();
   }
 
-  setMode(sessionId: string, mode: string): Promise<void> {
-    return this.#get(sessionId).adapter.setMode(mode);
+  /** Modo, modelo e effort só passam se o agente os anunciou nas capacidades. */
+  async setMode(sessionId: string, mode: string): Promise<void> {
+    const { adapter } = this.#get(sessionId);
+    if (!adapter.capabilities().modes.some((m) => m.id === mode)) {
+      throw new Error(`Modo desconhecido para este agente: ${mode}`);
+    }
+    await adapter.setMode(mode);
   }
 
-  setModel(sessionId: string, model: string): Promise<void> {
-    return this.#get(sessionId).adapter.setModel(model);
+  async setModel(sessionId: string, model: string): Promise<void> {
+    const { adapter } = this.#get(sessionId);
+    if (!findModel(adapter.capabilities().models, model)) {
+      throw new Error(`Modelo desconhecido para este agente: ${model}`);
+    }
+    await adapter.setModel(model);
   }
 
   async setEffort(sessionId: string, effort: string): Promise<void> {
-    const { adapter } = this.#get(sessionId);
-    if (!adapter.setEffort || !adapter.capabilities().effort) {
+    const { adapter, info } = this.#get(sessionId);
+    const capabilities = adapter.capabilities();
+    if (!adapter.setEffort || !capabilities.effort) {
       throw new Error('Este agente não tem níveis de effort');
+    }
+    const model = findModel(capabilities.models, info.settings.model);
+    const allowed = model ? model.efforts : capabilities.models.flatMap((m) => m.efforts);
+    if (!allowed.includes(effort)) {
+      throw new Error(`Este modelo não tem o effort ${effort}`);
     }
     await adapter.setEffort(effort);
   }
@@ -94,7 +143,7 @@ export class SessionManager {
     await Promise.all(entries.map((entry) => entry.adapter.close()));
   }
 
-  async #start(info: SessionInfo, resume?: string): Promise<CommandResult<'session.create'>> {
+  async #start(info: SessionInfo, resume?: string): Promise<SessionResult> {
     const { model, effort, mode } = info.settings;
     const adapter = this.#adapters[info.agent](
       { cwd: info.cwd, model: model ?? undefined, effort: effort ?? undefined, mode, resume },
@@ -106,6 +155,19 @@ export class SessionManager {
       const started = await adapter.start();
       info.settings = started.settings;
       info.state = 'idle';
+      // Um modo que o agente aceitou no arranque mas não anuncia (por exemplo Auto num modelo
+      // sem suporte) volta ao modo por omissão: a interface nunca mostra um modo que não há.
+      const fallback = this.#defaultModes[info.agent];
+      const modes = started.capabilities.modes;
+      if (
+        fallback &&
+        fallback !== info.settings.mode &&
+        !modes.some((m) => m.id === info.settings.mode) &&
+        modes.some((m) => m.id === fallback)
+      ) {
+        await adapter.setMode(fallback);
+        info.settings = { ...info.settings, mode: fallback };
+      }
       return { session: { ...info }, capabilities: started.capabilities };
     } catch (error) {
       // Uma sessão que nunca arrancou não fica; uma retomada fica, em erro, para tentar outra vez.

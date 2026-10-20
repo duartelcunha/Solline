@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import type { EngineEvent } from '@solline/protocol';
 import {
@@ -5,6 +6,7 @@ import {
   ClaudeSdkAdapter,
   SessionManager,
   askBlockFor,
+  toPermissionMode,
   toPermissionResult,
 } from '../src/index.ts';
 import { fakeQuery, loadFixture, recordingSink, reduce, waitFor } from './helpers.ts';
@@ -161,6 +163,30 @@ describe('ClaudeSdkAdapter', () => {
   });
 });
 
+describe('modos e effort que chegam ao SDK', () => {
+  it('só os modos da Solline passam; bypassPermissions e dontAsk nunca', () => {
+    expect(toPermissionMode('plan')).toBe('plan');
+    expect(() => toPermissionMode('bypassPermissions')).toThrow('Modo desconhecido');
+    expect(() => toPermissionMode('dontAsk')).toThrow('Modo desconhecido');
+  });
+
+  it('um modo pedido que não existe cai para default no arranque', async () => {
+    const { fake, adapter } = adapterFor('plain-answer', { mode: 'bypassPermissions' });
+    await adapter.start();
+    expect(fake.options().permissionMode).toBe('default');
+    await adapter.close();
+  });
+
+  it('setMode e setEffort recusam valores fora da lista sem chamar o SDK', async () => {
+    const { fake, adapter } = adapterFor('plain-answer');
+    await adapter.start();
+    await expect(adapter.setMode('bypassPermissions')).rejects.toThrow('Modo desconhecido');
+    await expect(adapter.setEffort('turbo')).rejects.toThrow('Effort desconhecido');
+    expect(fake.calls).toEqual([]);
+    await adapter.close();
+  });
+});
+
 describe('pedidos especiais', () => {
   const base = { signal: new AbortController().signal, toolUseID: 'tu1', requestId: 'r1' };
 
@@ -247,8 +273,9 @@ describe('SessionManager', () => {
       },
     });
     const created = await manager.create({
+      projectId: 'p',
       agent: 'claude',
-      cwd: 'C:/p',
+      cwd: tmpdir(),
       mode: 'default',
       model: 'haiku',
       effort: 'low',

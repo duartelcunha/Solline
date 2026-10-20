@@ -1,17 +1,14 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { Check, ChevronDown, Cpu, Gauge } from 'lucide-react';
-import type { AgentCapabilities, ModelOption, SessionSettings } from '@solline/protocol';
+import {
+  findModel,
+  type AgentCapabilities,
+  type ModelOption,
+  type SessionSettings,
+} from '@solline/protocol';
 import { ModeIcon } from '../../components/icons.tsx';
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
-
-export function findModel(
-  models: readonly ModelOption[],
-  current: string | null,
-): ModelOption | undefined {
-  if (!current) return undefined;
-  return models.find((m) => m.id === current) ?? models.find((m) => m.resolved === current);
-}
 
 /** "Opus 5.5 · Best for..." -> "Opus 5.5"; se não houver versão, o nome do menu. */
 export function shortModelName(model: ModelOption | undefined, current: string | null): string {

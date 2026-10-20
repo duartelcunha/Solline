@@ -87,6 +87,34 @@ test('a interface não tem acesso ao Node', async () => {
   });
 });
 
+test('a interface não escolhe a pasta de uma sessão', async () => {
+  const page = await app.firstWindow();
+  const errors = await page.evaluate(async () => {
+    const api = (
+      globalThis as unknown as { solline: { request(c: string, p: unknown): Promise<unknown> } }
+    ).solline;
+    const fail = (p: Promise<unknown>) =>
+      p.then(
+        () => 'aceite',
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+    return {
+      cwd: await fail(
+        api.request('session.create', { agent: 'claude', cwd: 'C:\\', mode: 'default' }),
+      ),
+      unknown: await fail(
+        api.request('session.create', { projectId: 'nao-existe', agent: 'claude' }),
+      ),
+      internal: await fail(
+        api.request('session.start', { projectId: 'x', agent: 'claude', cwd: 'C:\\' }),
+      ),
+    };
+  });
+  expect(errors.cwd).not.toBe('aceite');
+  expect(errors.unknown).toContain('Projeto desconhecido');
+  expect(errors.internal).toContain('Comando desconhecido');
+});
+
 test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)', async () => {
   test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
   test.setTimeout(240_000);

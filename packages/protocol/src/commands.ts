@@ -27,15 +27,28 @@ export const Project = z.object({
 });
 export type Project = z.infer<typeof Project>;
 
+/** Texto de uma mensagem: limite largo, só para a interface não conseguir encher o motor. */
+const MessageText = z.string().min(1).max(200_000);
+
+/**
+ * Pedido da interface para abrir uma sessão. A interface só manda ids: a pasta vem do
+ * projeto, resolvida no main (session-policy.ts). Sem modo, vale o modo por omissão do agente.
+ */
 export const SessionCreatePayload = z
   .object({
+    projectId: z.string().min(1).max(64),
     agent: AgentKind,
-    cwd: z.string().min(1),
-    model: z.string().min(1).optional(),
-    effort: z.string().min(1).optional(),
-    mode: z.string().min(1),
+    mode: z.string().min(1).max(64).optional(),
+    model: z.string().min(1).max(200).optional(),
+    effort: z.string().min(1).max(32).optional(),
   })
   .strict();
+
+/** main -> motor: o mesmo pedido já com a pasta do projeto. A interface nunca o manda. */
+export const SessionStartPayload = SessionCreatePayload.extend({
+  cwd: z.string().min(1),
+}).strict();
+export type SessionStartPayload = z.infer<typeof SessionStartPayload>;
 
 export const SessionCreateResult = z.object({
   session: SessionInfo,
@@ -46,7 +59,7 @@ export const commandSchemas = {
   'engine.ping': { payload: PingPayload, result: PingResult },
   'session.create': { payload: SessionCreatePayload, result: SessionCreateResult },
   'session.send': {
-    payload: SessionRef.extend({ text: z.string().min(1) }).strict(),
+    payload: SessionRef.extend({ text: MessageText }).strict(),
     result: z.object({ turnId: z.string() }),
   },
   'session.interrupt': { payload: SessionRef, result: Empty },
@@ -73,10 +86,16 @@ export const commandSchemas = {
   'projects.add': { payload: Empty, result: z.object({ project: Project.nullable() }) },
 } as const;
 
-/** Comandos que o main trata sem passar pelo motor. */
-export const MAIN_COMMANDS = ['projects.list', 'projects.add'] as const satisfies CommandName[];
+/**
+ * Comandos que o main trata. O session.create passa por aqui para o main trocar o projeto
+ * pela pasta e só depois chamar o motor com session.start.
+ */
+export const MAIN_COMMANDS = [
+  'projects.list',
+  'projects.add',
+  'session.create',
+] as const satisfies CommandName[];
 export type MainCommandName = (typeof MAIN_COMMANDS)[number];
-export type EngineCommandName = Exclude<CommandName, MainCommandName>;
 export function isMainCommand(command: CommandName): command is MainCommandName {
   return (MAIN_COMMANDS as readonly string[]).includes(command);
 }
@@ -89,11 +108,36 @@ export type CommandResult<C extends CommandName> = z.infer<(typeof commandSchema
 
 export const CommandNameSchema = z.enum(commandNames as [CommandName, ...CommandName[]]);
 
+/**
+ * Comandos que só o main manda ao motor. Não estão no CommandNameSchema, por isso nenhum
+ * pedido da interface os consegue nomear.
+ */
+export const internalCommandSchemas = {
+  'session.start': { payload: SessionStartPayload, result: SessionCreateResult },
+} as const;
+
+type EngineSchemas = Omit<typeof commandSchemas, MainCommandName> & typeof internalCommandSchemas;
+export type EngineCommandName = keyof EngineSchemas;
+
+/** Os comandos que o motor aceita: os da interface que não são do main, mais os internos. */
+export const engineCommandSchemas: EngineSchemas = {
+  ...(Object.fromEntries(
+    Object.entries(commandSchemas).filter(([name]) => !isMainCommand(name as CommandName)),
+  ) as Omit<typeof commandSchemas, MainCommandName>),
+  ...internalCommandSchemas,
+};
+export const engineCommandNames = Object.keys(engineCommandSchemas) as EngineCommandName[];
+
+export type EngineCommandPayload<C extends EngineCommandName> = z.infer<
+  EngineSchemas[C]['payload']
+>;
+export type EngineCommandResult<C extends EngineCommandName> = z.infer<EngineSchemas[C]['result']>;
+
 /** Pedido que viaja pela MessagePort entre main e motor. */
 export const RequestEnvelope = z.object({
   kind: z.literal('request'),
   id: z.string().min(1),
-  command: CommandNameSchema,
+  command: z.enum(engineCommandNames as [EngineCommandName, ...EngineCommandName[]]),
   payload: z.unknown(),
 });
 export type RequestEnvelope = z.infer<typeof RequestEnvelope>;

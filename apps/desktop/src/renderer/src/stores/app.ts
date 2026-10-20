@@ -48,6 +48,7 @@ export function sessionStore(id: string): SessionStore | undefined {
 const NONE = createSessionStore(
   {
     id: '',
+    projectId: '',
     agent: 'claude',
     cwd: '',
     title: '',
@@ -149,9 +150,8 @@ export const actions = {
     useApp.setState({ creatingIn: projectId, activeProjectId: projectId, notice: null });
     try {
       const { session, capabilities } = await request('session.create', {
+        projectId: project.id,
         agent: 'claude',
-        cwd: project.path,
-        mode: 'default',
       });
       sessionStores.set(session.id, createSessionStore(session, projectId, capabilities));
       useApp.setState((s) => ({

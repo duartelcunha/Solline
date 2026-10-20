@@ -1,15 +1,14 @@
 import {
   RequestEnvelope,
-  commandSchemas,
-  isMainCommand,
+  engineCommandSchemas,
   type AgentKind,
-  type CommandPayload,
-  type CommandResult,
   type EngineCommandName,
+  type EngineCommandPayload,
+  type EngineCommandResult,
   type EngineEvent,
   type ResponseEnvelope,
 } from '@solline/protocol';
-import { ClaudeSdkAdapter } from './adapters/claude-sdk.ts';
+import { CLAUDE_MODES, ClaudeSdkAdapter } from './adapters/claude-sdk.ts';
 import type { AgentAdapterFactory } from './adapters/types.ts';
 import { SessionManager } from './session-manager.ts';
 import { ENGINE_VERSION } from './version.ts';
@@ -25,7 +24,7 @@ export interface EngineOptions {
 }
 
 type Handlers = {
-  [C in EngineCommandName]: (payload: CommandPayload<C>) => Promise<CommandResult<C>>;
+  [C in EngineCommandName]: (payload: EngineCommandPayload<C>) => Promise<EngineCommandResult<C>>;
 };
 
 /** O motor recebe envelopes de pedido e devolve envelopes de resposta. Não sabe do Electron. */
@@ -42,6 +41,8 @@ export class Engine {
     this.sessions = new SessionManager({
       emit: options.emit ?? (() => undefined),
       adapters: { claude, ...options.adapters },
+      staticModes: { claude: CLAUDE_MODES },
+      defaultModes: { claude: 'default' },
     });
     const s = this.sessions;
     const ok = {} as Record<string, never>;
@@ -52,7 +53,7 @@ export class Engine {
         pid: process.pid,
         receivedAt: Date.now(),
       }),
-      'session.create': (p) => s.create(p),
+      'session.start': (p) => s.create(p),
       'session.resume': (p) => s.resume(p.sessionId),
       'session.send': async (p) => ({ turnId: await s.send(p.sessionId, p.text) }),
       'session.interrupt': async (p) => (await s.interrupt(p.sessionId), ok),
@@ -64,18 +65,18 @@ export class Engine {
   }
 
   async handle(raw: unknown): Promise<ResponseEnvelope> {
+    // Só passam comandos do motor: os do main e os desconhecidos ficam aqui.
     const parsed = RequestEnvelope.safeParse(raw);
-    if (!parsed.success || isMainCommand(parsed.data.command)) {
+    if (!parsed.success) {
       const id =
         typeof raw === 'object' && raw !== null && 'id' in raw && typeof raw.id === 'string'
           ? raw.id
           : '';
       return { kind: 'response', id, ok: false, error: { message: 'Pedido inválido' } };
     }
-    const { id, payload } = parsed.data;
-    const command = parsed.data.command as EngineCommandName;
+    const { id, payload, command } = parsed.data;
     try {
-      const schema = commandSchemas[command];
+      const schema = engineCommandSchemas[command];
       const input = schema.payload.parse(payload ?? {});
       const handler = this.#handlers[command] as (payload: unknown) => Promise<unknown>;
       const result = schema.result.parse(await handler(input));

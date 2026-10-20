@@ -4,9 +4,9 @@ import { MessageChannelMain, app, utilityProcess, type UtilityProcess } from 'el
 import {
   EngineEvent,
   ResponseEnvelope,
-  commandSchemas,
-  type CommandResult,
+  engineCommandSchemas,
   type EngineCommandName,
+  type EngineCommandResult,
   type RequestEnvelope,
 } from '@solline/protocol';
 
@@ -19,7 +19,7 @@ interface Pending {
 const DEFAULT_TIMEOUT_MS = 20_000;
 const TIMEOUT_MS: Partial<Record<EngineCommandName, number>> = {
   'engine.ping': 5_000,
-  'session.create': 120_000,
+  'session.start': 120_000,
   'session.resume': 120_000,
 };
 
@@ -67,10 +67,10 @@ export class EngineHost {
   async request<C extends EngineCommandName>(
     command: C,
     payload: unknown = {},
-  ): Promise<CommandResult<C>> {
+  ): Promise<EngineCommandResult<C>> {
     const port = this.#port;
     if (!port) throw new Error('O motor não está a correr');
-    const schema = commandSchemas[command];
+    const schema = engineCommandSchemas[command];
     const input = schema.payload.parse(payload);
     const id = randomUUID();
     const envelope: RequestEnvelope = { kind: 'request', id, command, payload: input };
@@ -83,7 +83,7 @@ export class EngineHost {
       this.#pending.set(id, { resolve, reject, timer });
       port.postMessage(envelope);
     });
-    return schema.result.parse(raw) as CommandResult<C>;
+    return schema.result.parse(raw) as EngineCommandResult<C>;
   }
 
   stop(): void {

@@ -12,6 +12,7 @@ import { APP_NAME } from '@solline/protocol/app';
 import { IPC, type Theme } from '@solline/protocol/bridge';
 import {
   CommandNameSchema,
+  SessionCreatePayload,
   commandSchemas,
   isMainCommand,
   type CommandName,
@@ -19,6 +20,7 @@ import {
 } from '@solline/protocol';
 import { EngineHost } from './engine-host.ts';
 import { ProjectStore } from './projects.ts';
+import { resolveSessionStart } from './session-policy.ts';
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId(`app.${APP_NAME.toLowerCase()}`);
@@ -31,7 +33,7 @@ const engine = new EngineHost((event) => {
 });
 const projects = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
 
-async function handleMain(command: MainCommandName): Promise<unknown> {
+async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
   switch (command) {
     case 'projects.list':
       return { projects: await projects.list() };
@@ -42,6 +44,11 @@ async function handleMain(command: MainCommandName): Promise<unknown> {
         : await dialog.showOpenDialog(options);
       const folder = picked.canceled ? undefined : picked.filePaths[0];
       return { project: folder ? await projects.add(folder) : null };
+    }
+    case 'session.create': {
+      // A interface pede pelo projeto; a pasta vem sempre do que está guardado aqui.
+      const start = await resolveSessionStart(projects, SessionCreatePayload.parse(payload));
+      return engine.request('session.start', start);
     }
   }
 }
@@ -100,8 +107,8 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
   const payload = (raw as { payload?: unknown }).payload ?? {};
   try {
     if (isMainCommand(command)) {
-      commandSchemas[command].payload.parse(payload);
-      const result = commandSchemas[command].result.parse(await handleMain(command));
+      const input = commandSchemas[command].payload.parse(payload);
+      const result = commandSchemas[command].result.parse(await handleMain(command, input));
       return { ok: true, result };
     }
     return { ok: true, result: await engine.request(command, payload) };

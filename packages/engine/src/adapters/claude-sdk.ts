@@ -53,6 +53,29 @@ export const CLAUDE_MODES: readonly ModeOption[] = [
   },
 ];
 
+/**
+ * Só os modos que a Solline mostra chegam ao SDK: bypassPermissions e dontAsk nunca
+ * passam, venha o pedido de onde vier.
+ */
+export function toPermissionMode(id: string): PermissionMode {
+  if (!CLAUDE_MODES.some((mode) => mode.id === id)) {
+    throw new Error(`Modo desconhecido para o Claude: ${id}`);
+  }
+  return id as PermissionMode;
+}
+
+/** Como toPermissionMode, mas cai para o fallback (no arranque e no resume). */
+export function toPermissionModeOr(id: string, fallback: PermissionMode): PermissionMode {
+  return CLAUDE_MODES.some((mode) => mode.id === id) ? (id as PermissionMode) : fallback;
+}
+
+const EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+export function toEffortLevel(id: string): EffortLevel {
+  if (!EFFORT_LEVELS.includes(id)) throw new Error(`Effort desconhecido: ${id}`);
+  return id as EffortLevel;
+}
+
 const CONTROL_TIMEOUT_MS = 15_000;
 const START_TIMEOUT_MS = 90_000;
 const STDERR_LIMIT = 4_000;
@@ -303,7 +326,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
 
   async setMode(mode: string): Promise<void> {
     const q = this.#requireQuery();
-    await this.#control(q.setPermissionMode(mode as PermissionMode), 'Mudar o modo');
+    await this.#control(q.setPermissionMode(toPermissionMode(mode)), 'Mudar o modo');
     this.#applySettings({ mode });
   }
 
@@ -314,11 +337,9 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   }
 
   async setEffort(effort: string): Promise<void> {
+    const level = toEffortLevel(effort);
     const q = this.#requireQuery();
-    await this.#control(
-      q.applyFlagSettings({ effortLevel: effort as EffortLevel }),
-      'Mudar o effort',
-    );
+    await this.#control(q.applyFlagSettings({ effortLevel: level }), 'Mudar o effort');
     this.#applySettings({ effort });
   }
 
@@ -351,8 +372,10 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     return {
       cwd: options.cwd,
       ...(options.model ? { model: options.model } : {}),
-      ...(options.effort ? { effort: options.effort as EffortLevel } : {}),
-      permissionMode: options.mode as PermissionMode,
+      ...(options.effort && EFFORT_LEVELS.includes(options.effort)
+        ? { effort: toEffortLevel(options.effort) }
+        : {}),
+      permissionMode: toPermissionModeOr(options.mode, 'default'),
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },
       systemPrompt: { type: 'preset', preset: 'claude_code' },

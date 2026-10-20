@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type {
+  ModelInfo,
   Options,
   PermissionResult,
   Query,
@@ -80,7 +81,10 @@ export interface FakeQueryControl {
  * Um query() falso que reproduz uma fixture gravada: espera pela mensagem do
  * utilizador, emite as mensagens e chama o canUseTool onde a gravação o chamou.
  */
-export function fakeQuery(records: FixtureRecord[]): FakeQueryControl {
+export function fakeQuery(
+  records: FixtureRecord[],
+  extra: { models?: ModelInfo[] } = {},
+): FakeQueryControl {
   let captured: Options | undefined;
   let crashWith: ((error: Error) => void) | undefined;
   const control: FakeQueryControl = {
@@ -134,7 +138,7 @@ export function fakeQuery(records: FixtureRecord[]): FakeQueryControl {
         };
       const query = Object.assign(generator, {
         initializationResult: async () => ({
-          models: [
+          models: extra.models ?? [
             {
               value: 'default',
               resolvedModel: 'claude-opus-5-5',

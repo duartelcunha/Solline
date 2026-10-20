@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest';
+import type { Project } from '@solline/protocol';
+import { resolveSessionStart, type ProjectLookup } from './session-policy.ts';
+
+const project: Project = { id: 'p1', path: 'C:/code/app', name: 'app', addedAt: 0 };
+const store: ProjectLookup = { get: async (id) => (id === project.id ? project : undefined) };
+const exists = async () => true;
+
+describe('resolveSessionStart', () => {
+  it('a pasta vem sempre do projeto guardado', async () => {
+    const start = await resolveSessionStart(
+      store,
+      { projectId: 'p1', agent: 'claude', mode: 'plan' },
+      exists,
+    );
+    expect(start).toEqual({ projectId: 'p1', agent: 'claude', mode: 'plan', cwd: project.path });
+  });
+
+  it('um projeto desconhecido não abre sessão', async () => {
+    await expect(
+      resolveSessionStart(store, { projectId: 'outro', agent: 'claude' }, exists),
+    ).rejects.toThrow('Projeto desconhecido');
+  });
+
+  it('uma pasta que já não existe não abre sessão', async () => {
+    await expect(
+      resolveSessionStart(store, { projectId: 'p1', agent: 'claude' }, async () => false),
+    ).rejects.toThrow('já não existe');
+  });
+});

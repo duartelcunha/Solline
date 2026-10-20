@@ -26,6 +26,10 @@ export class ProjectStore {
     return this.#cache;
   }
 
+  async get(id: string): Promise<Project | undefined> {
+    return (await this.list()).find((p) => p.id === id);
+  }
+
   /** Junta uma pasta; se já lá estiver, devolve a que existe. */
   async add(folder: string): Promise<Project> {
     const path = resolve(folder);
