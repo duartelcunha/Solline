@@ -17,8 +17,15 @@ export interface ProviderProfile {
   credentialTarget: string;
   /** Alternativa: variável de ambiente com a chave. */
   tokenEnvVar: string;
-  /** Modelo de cada alias do Claude Code (opus/sonnet/haiku) e dos subagentes. */
-  models: { main: string; opus: string; sonnet: string; haiku: string; subagent: string };
+  /** Modelo de cada alias do Claude Code (opus/sonnet/haiku/fable) e dos subagentes. */
+  models: {
+    main: string;
+    opus: string;
+    sonnet: string;
+    haiku: string;
+    subagent: string;
+    fable?: string;
+  };
   claude: ClaudeProfile;
   extraEnv: Readonly<Record<string, string>>;
 }
@@ -51,6 +58,75 @@ export const DEEPSEEK: ProviderProfile = {
   // Sem telemetria nem atualizações da Anthropic numa sessão que fala com outra API.
   extraEnv: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
 };
+
+/** Modelos GLM da Z.ai pelo endpoint compatível com a Anthropic (docs.z.ai/devpack/tool/claude). */
+export const GLM: ProviderProfile = {
+  id: 'glm',
+  label: 'GLM',
+  baseUrl: 'https://api.z.ai/api/anthropic',
+  credentialTarget: 'solline/glm',
+  tokenEnvVar: 'ZAI_API_KEY',
+  models: {
+    main: 'glm-5.3[1m]',
+    opus: 'glm-5.3[1m]',
+    sonnet: 'glm-5.3[1m]',
+    haiku: 'glm-5.3-flash[1m]',
+    subagent: 'glm-5.3-flash[1m]',
+    fable: 'glm-5.3[1m]',
+  },
+  claude: {
+    models: [
+      {
+        id: 'default',
+        resolved: 'glm-5.3[1m]',
+        label: 'GLM-5.3',
+        description: 'GLM-5.3 da Z.ai · 1M de contexto',
+      },
+    ],
+    hideModes: ['auto'],
+  },
+  // O guia da Z.ai sobe o tempo de espera: as respostas longas passam dos 10 min por omissão.
+  extraEnv: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', API_TIMEOUT_MS: '3000000' },
+};
+
+/**
+ * Modelos Kimi da Moonshot pelo endpoint compatível com a Anthropic
+ * (platform.kimi.ai/docs/guide/claude-code-kimi). O guia põe o haiku no kimi-k2.7-code, que
+ * obriga a pensar e dá 400 aos pedidos curtos do Claude Code sem thinking: fica tudo no K3.
+ */
+export const KIMI: ProviderProfile = {
+  id: 'kimi',
+  label: 'Kimi',
+  baseUrl: 'https://api.moonshot.ai/anthropic',
+  credentialTarget: 'solline/kimi',
+  tokenEnvVar: 'MOONSHOT_API_KEY',
+  models: {
+    main: 'kimi-k3[1m]',
+    opus: 'kimi-k3[1m]',
+    sonnet: 'kimi-k3[1m]',
+    haiku: 'kimi-k3[1m]',
+    subagent: 'kimi-k3[1m]',
+    fable: 'kimi-k3[1m]',
+  },
+  claude: {
+    models: [
+      {
+        id: 'default',
+        resolved: 'kimi-k3[1m]',
+        label: 'Kimi K3',
+        description: 'Kimi K3 da Moonshot · 1M de contexto',
+      },
+    ],
+    hideModes: ['auto'],
+  },
+  extraEnv: {
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
+  },
+};
+
+/** Os perfis de outros fornecedores que o registo mostra, por esta ordem. */
+export const PROVIDER_PROFILES: readonly ProviderProfile[] = [DEEPSEEK, GLM, KIMI];
 
 const KEY_HINT = (p: ProviderProfile) =>
   `Guarda a chave no Gestor de Credenciais do Windows (credencial genérica "${p.credentialTarget}") ` +
@@ -114,6 +190,7 @@ export function profileDefinition(
         ANTHROPIC_DEFAULT_SONNET_MODEL: profile.models.sonnet,
         ANTHROPIC_DEFAULT_HAIKU_MODEL: profile.models.haiku,
         CLAUDE_CODE_SUBAGENT_MODEL: profile.models.subagent,
+        ...(profile.models.fable ? { ANTHROPIC_DEFAULT_FABLE_MODEL: profile.models.fable } : {}),
         CLAUDE_CONFIG_DIR: configDir,
         ...profile.extraEnv,
       },

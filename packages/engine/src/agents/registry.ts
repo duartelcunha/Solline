@@ -14,7 +14,7 @@ import {
 import { CODEX_MODES, DEFAULT_CODEX_MODE } from '../adapters/codex/modes.ts';
 import { CLAUDE_ENV_POLICY, type EnvPolicy } from '../env.ts';
 import { CATALOG, catalogDefinition } from './catalog.ts';
-import { DEEPSEEK, profileDefinition } from './profiles.ts';
+import { PROVIDER_PROFILES, profileDefinition } from './profiles.ts';
 
 type Detected = Pick<AgentDescriptor, 'status' | 'detail'>;
 
@@ -172,7 +172,7 @@ export function builtinRegistry(options: BuiltinOptions = {}): AgentRegistry {
   return registryOf([
     claudeDefinition(options),
     codexDefinition({ packaged: options.packaged }),
-    profileDefinition(DEEPSEEK, options),
+    ...PROVIDER_PROFILES.map((profile) => profileDefinition(profile, options)),
     ...CATALOG.map((entry) => catalogDefinition(entry)),
   ]);
 }

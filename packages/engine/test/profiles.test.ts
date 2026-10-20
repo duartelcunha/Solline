@@ -5,6 +5,10 @@ import type { EngineEvent } from '@solline/protocol';
 import {
   ClaudeSdkAdapter,
   DEEPSEEK,
+  GLM,
+  KIMI,
+  PROVIDER_PROFILES,
+  builtinRegistry,
   SessionManager,
   agentEnv,
   profileDefinition,
@@ -201,5 +205,59 @@ describe('perfil DeepSeek: adaptador', () => {
     }
     expect(usage.some((u) => u.tokens)).toBe(true);
     await manager.disposeAll();
+  });
+});
+
+describe('perfis GLM e Kimi', () => {
+  const dataDir = path.join(tmpdir(), 'solline-dados');
+  const none: CredentialReader = async () => null;
+
+  it('o GLM fala com a Z.ai, com o GLM-5.3 em todos os aliases e o tempo de espera do guia', () => {
+    const definition = profileDefinition(GLM, { dataDir, readCredential: none, env: {} });
+    const env = agentEnv(definition.envPolicy, HOST);
+    expect(definition).toMatchObject({ id: 'claude:glm', label: 'GLM', experimental: true });
+    expect(env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+      ANTHROPIC_MODEL: 'glm-5.3[1m]',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3[1m]',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: 'glm-5.3[1m]',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash[1m]',
+      API_TIMEOUT_MS: '3000000',
+      CLAUDE_CONFIG_DIR: path.join(dataDir, 'profiles', 'glm'),
+    });
+    expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+  });
+
+  it('o Kimi fala com a Moonshot e não usa o kimi-k2.7-code (obriga a pensar)', () => {
+    const definition = profileDefinition(KIMI, { dataDir, readCredential: none, env: {} });
+    const env = agentEnv(definition.envPolicy, HOST);
+    expect(definition).toMatchObject({ id: 'claude:kimi', label: 'Kimi' });
+    expect(env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://api.moonshot.ai/anthropic',
+      ANTHROPIC_MODEL: 'kimi-k3[1m]',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k3[1m]',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'kimi-k3[1m]',
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
+    });
+    expect(Object.values(env)).not.toContain('kimi-k2.7-code');
+  });
+
+  it('cada perfil tem a sua credencial e variável, e o registo mostra os três', async () => {
+    const reads: string[] = [];
+    const readCredential: CredentialReader = async (target, mode) => {
+      reads.push(`${mode}:${target}`);
+      return mode === 'check' ? false : null;
+    };
+    const glm = profileDefinition(GLM, { readCredential, env: { ZAI_API_KEY: 'z' } });
+    expect(await glm.secrets!()).toEqual({ ANTHROPIC_AUTH_TOKEN: 'z' });
+    const kimi = profileDefinition(KIMI, { readCredential, env: {} });
+    await expect(kimi.secrets!()).rejects.toThrow('solline/kimi');
+    expect(reads).toEqual(['read:solline/kimi']);
+    expect(new Set(PROVIDER_PROFILES.map((p) => p.credentialTarget)).size).toBe(3);
+    const ids = builtinRegistry({ isolated: true })
+      .list()
+      .map((d) => d.id);
+    expect(ids).toEqual(expect.arrayContaining(['claude:deepseek', 'claude:glm', 'claude:kimi']));
   });
 });
