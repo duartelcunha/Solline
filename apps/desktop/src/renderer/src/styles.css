@@ -303,6 +303,57 @@ body {
   animation: sl-dialog 220ms var(--sl-ease-out);
 }
 
+/* ---------- Agentes ---------- */
+
+/* O estado novo entra por cima do antigo com um desfoque curto: lê-se como uma só peça. */
+@keyframes sl-swap {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translateY(2px);
+  }
+}
+.status-swap {
+  animation: sl-swap var(--sl-duration-base) var(--sl-ease-out);
+}
+
+/* Entrou: um anel sai do ponto uma vez. Raro (um login), por isso pode ser mais longo. */
+@keyframes sl-ping {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.8);
+  }
+}
+.status-ping {
+  animation: sl-ping 520ms var(--sl-ease-out) both;
+}
+
+/* Um chip novo cresce do sítio onde aparece, nunca do nada. */
+.chip-in {
+  animation: sl-pop 160ms var(--sl-ease-out);
+}
+
+/* A linha de cada agente entra em cascata curta quando o painel abre. */
+.row-in {
+  animation: sl-appear var(--sl-duration-base) var(--sl-ease-out) both;
+}
+
+/* O ícone de Verificar de novo gira enquanto o motor pergunta aos agentes. */
+.icon-spin {
+  animation: sl-spin 0.8s linear infinite;
+}
+
+/* Os pontos do resumo mudam de cor sem saltar. */
+.meter-dot {
+  transition:
+    background-color var(--sl-duration-base) ease,
+    transform var(--sl-duration-fast) var(--sl-ease-out);
+}
+
 /* A conversa desvanece por baixo do cabeçalho em vez de uma linha dura. */
 .scroll-fade {
   mask-image: linear-gradient(to bottom, transparent 0, black 16px);
@@ -320,6 +371,16 @@ body {
     opacity: 0.6;
   }
   .dot-pulse {
+    animation: none !important;
+  }
+  /* Menos movimento: o estado novo só aparece em fade; o anel e o giro saem. */
+  .status-swap,
+  .chip-in,
+  .row-in {
+    animation-name: sl-fade !important;
+  }
+  .status-ping,
+  .icon-spin {
     animation: none !important;
   }
 }

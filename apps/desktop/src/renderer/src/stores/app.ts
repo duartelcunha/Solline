@@ -40,6 +40,8 @@ interface AppState {
   agentsPanel: boolean;
   /** A voltar a verificar os agentes (Verificar de novo). */
   checkingAgents: boolean;
+  /** Agentes com um pedido de login ainda sem resposta (o botão fica desligado). */
+  loginRequests: string[];
 }
 
 export const useApp = create<AppState>(() => ({
@@ -54,6 +56,7 @@ export const useApp = create<AppState>(() => ({
   notice: null,
   agentsPanel: false,
   checkingAgents: false,
+  loginRequests: [],
 }));
 
 const sessionStores = new Map<string, SessionStore>();
@@ -166,11 +169,14 @@ export const actions = {
 
   /** Entrar no agente: o main abre o browser; o fim chega por agents.changed. */
   async login(agent: AgentId): Promise<void> {
-    useApp.setState({ notice: null });
+    if (useApp.getState().loginRequests.includes(agent)) return;
+    useApp.setState((s) => ({ notice: null, loginRequests: [...s.loginRequests, agent] }));
     try {
       await request('agents.login', { agent });
     } catch (error) {
       useApp.setState({ notice: `Não foi possível entrar. ${message(error)}` });
+    } finally {
+      useApp.setState((s) => ({ loginRequests: s.loginRequests.filter((a) => a !== agent) }));
     }
     await actions.loadAgents();
   },

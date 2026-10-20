@@ -45,7 +45,7 @@ function AgentMenu({
             <ActionItem
               key={agent.id}
               title={`${agent.label}: ${pending ? 'à espera do browser…' : agent.login.label}`}
-              description={pending ? 'Carrega para desistir do login' : agent.detail}
+              description={pending ? 'Carrega para cancelar' : agent.detail}
               icon={<LogIn size={14} strokeWidth={1.9} />}
               onSelect={() =>
                 void (pending ? actions.cancelLogin(agent.id) : actions.login(agent.id))
