@@ -115,6 +115,32 @@ test('a interface não escolhe a pasta de uma sessão', async () => {
   expect(errors.internal).toContain('Comando desconhecido');
 });
 
+test('só links https abrem fora e as permissões do browser vêm negadas', async () => {
+  const page = await app.firstWindow();
+  await app.evaluate(({ shell }) => {
+    const opened: string[] = [];
+    (globalThis as { opened?: string[] }).opened = opened;
+    shell.openExternal = (async (url: string) => {
+      opened.push(url);
+    }) as typeof shell.openExternal;
+  });
+  const result = await page.evaluate(async () => {
+    const g = globalThis as unknown as {
+      open(url: string): unknown;
+      navigator: { permissions: { query(d: { name: string }): Promise<{ state: string }> } };
+    };
+    return {
+      https: g.open('https://example.com/') === null,
+      http: g.open('http://example.com/') === null,
+      creds: g.open('https://user:pw@example.com/') === null,
+      geolocation: (await g.navigator.permissions.query({ name: 'geolocation' })).state,
+    };
+  });
+  const opened = await app.evaluate(() => (globalThis as { opened?: string[] }).opened ?? []);
+  expect(result).toEqual({ https: true, http: true, creds: true, geolocation: 'denied' });
+  expect(opened).toEqual(['https://example.com/']);
+});
+
 test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)', async () => {
   test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
   test.setTimeout(240_000);

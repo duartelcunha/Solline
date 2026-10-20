@@ -13,6 +13,8 @@ O plano em curso (vários agentes num só cliente) está em `docs/plano.md`. As 
    expõe (contextIsolation, sandbox, sem nodeIntegration).
 3. Tudo clicável: nenhuma função existe só por comando ou atalho; o teclado é o atalho.
 4. O motor corre num `utilityProcess` e liga ao main por MessagePort. Testa-se em Node puro.
+   Nenhum agente corre como Electron-as-node: os fuses tiram o `runAsNode`, o `NODE_OPTIONS` e o
+   `--inspect` ao executável da app.
 5. O nome da app vive só em `packages/protocol/src/app.ts`.
 
 ## Regras do SDK

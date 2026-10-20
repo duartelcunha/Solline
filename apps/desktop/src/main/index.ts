@@ -1,10 +1,12 @@
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   BrowserWindow,
   app,
   dialog,
   ipcMain,
   nativeTheme,
+  session,
   shell,
   type IpcMainInvokeEvent,
 } from 'electron';
@@ -59,10 +61,47 @@ const titleBarColors: Record<Theme, { color: string; symbolColor: string }> = {
   dark: { color: '#00000000', symbolColor: '#e8e5e0' },
 };
 
+const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined;
+const rendererFile = join(__dirname, '../renderer/index.html');
+
+/** Sem hash nem query; no Windows o disco e as pastas não distinguem maiúsculas. */
+function samePage(a: string, b: string): boolean {
+  const clean = (value: string) => {
+    const url = new URL(value);
+    url.hash = '';
+    url.search = '';
+    return process.platform === 'win32' ? url.href.toLowerCase() : url.href;
+  };
+  return clean(a) === clean(b);
+}
+
+/**
+ * Só a janela principal, no frame de topo e na página que a app carregou, fala com o main.
+ * A condição é a mesma do loadURL/loadFile em createWindow.
+ */
 function isTrustedSender(event: IpcMainInvokeEvent): boolean {
-  const url = event.senderFrame?.url ?? '';
-  const devUrl = process.env.ELECTRON_RENDERER_URL;
-  return url.startsWith('file://') || (devUrl !== undefined && url.startsWith(devUrl));
+  const frame = event.senderFrame;
+  if (!mainWindow || event.sender !== mainWindow.webContents || !frame || frame.parent) {
+    return false;
+  }
+  try {
+    if (devUrl) return new URL(frame.url).origin === new URL(devUrl).origin;
+    return samePage(frame.url, pathToFileURL(rendererFile).href);
+  } catch {
+    return false;
+  }
+}
+
+/** Links externos: só https, sem utilizador nem password no URL. */
+function openExternalSafely(raw: string): void {
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'https:' && !url.username && !url.password) {
+      void shell.openExternal(url.href);
+    }
+  } catch {
+    // URL inválido: não abre nada.
+  }
 }
 
 function createWindow(): void {
@@ -88,15 +127,14 @@ function createWindow(): void {
   win.once('ready-to-show', () => win.show());
   // Nada de navegar para fora nem abrir janelas: links externos vão para o browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://')) void shell.openExternal(url);
+    openExternalSafely(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event) => event.preventDefault());
 
-  const devUrl = process.env.ELECTRON_RENDERER_URL;
-  if (!app.isPackaged && devUrl) void win.loadURL(devUrl);
-  else void win.loadFile(join(__dirname, '../renderer/index.html'));
   mainWindow = win;
+  if (devUrl) void win.loadURL(devUrl);
+  else void win.loadFile(rendererFile);
 }
 
 ipcMain.handle(IPC.request, async (event, raw: unknown) => {
@@ -126,7 +164,19 @@ ipcMain.handle(IPC.setTheme, (event, theme: unknown) => {
   mainWindow?.setTitleBarOverlay({ ...titleBarColors[theme], height: TITLE_BAR_HEIGHT });
 });
 
+// Qualquer webContents novo nasce sem webviews, sem janelas e sem navegar.
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('will-attach-webview', (event) => event.preventDefault());
+  contents.on('will-navigate', (event) => event.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+});
+
 void app.whenReady().then(() => {
+  // A interface não usa câmara, microfone, notificações nem nada do género: tudo negado.
+  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
+    callback(false),
+  );
+  session.defaultSession.setPermissionCheckHandler(() => false);
   engine.start();
   createWindow();
   app.on('activate', () => {

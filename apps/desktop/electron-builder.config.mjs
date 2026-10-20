@@ -19,6 +19,18 @@ export default {
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
   },
+  // Fecha as portas para correr código dentro do executável da app. O motor é um
+  // utilityProcess e os agentes são executáveis à parte, por isso nada precisa do runAsNode.
+  // O grantFileProtocolExtraPrivileges fica: a interface carrega módulos de file://.
+  electronFuses: {
+    runAsNode: false,
+    enableCookieEncryption: true,
+    enableNodeOptionsEnvironmentVariable: false,
+    enableNodeCliInspectArguments: false,
+    enableEmbeddedAsarIntegrityValidation: true,
+    onlyLoadAppFromAsar: true,
+    grantFileProtocolExtraPrivileges: true,
+  },
   nsis: {
     oneClick: true,
     perMachine: false,

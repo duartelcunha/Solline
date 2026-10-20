@@ -53,3 +53,26 @@
   `canUseTool`, não nos afeta); a 0.3.302 liga os subagentes fork por omissão (mais blocos
   `parentToolId` planos até ao M2) e põe fornecedores de terceiros em `default` (passamos sempre
   `permissionMode`). Fixtures regravadas; o normalizador não mudou.
+
+## 2026-10-20: M1b, confiança
+
+- **A interface só manda ids.** `session.create` é do main: troca o projeto pela pasta guardada e
+  chama o motor com `session.start`, que a IPC não consegue nomear. Modo, modelo e effort são
+  validados no motor contra as capacidades; o adaptador do Claude nunca deixa passar
+  `bypassPermissions` nem `dontAsk`.
+- **IPC só da janela principal**, no frame de topo e na página carregada (origem exata em dev,
+  `index.html` em `file://` no build). Permissões do browser todas negadas; webviews e janelas novas
+  bloqueadas; links externos só `https:` sem credenciais no URL.
+- **CSP na meta do `index.html`** (um `file://` não tem cabeçalhos), agora com `object-src`,
+  `base-uri`, `form-action` e `frame-src` a `'none'`.
+- **Fuses no build** (lidos no `Solline.exe` com `@electron/fuses` 1.8.0): RunAsNode, NODE_OPTIONS e
+  `--inspect` desligados; cookies cifrados; integridade do asar e só carregar do asar ligados;
+  `GrantFileProtocolExtraPrivileges` ligado porque a interface carrega módulos de `file://`. A
+  integridade não cobre o `app.asar.unpacked` (onde vive o `claude.exe`) e a pasta de instalação
+  por utilizador é gravável pelo próprio utilizador: o ganho principal é fechar o runAsNode, o
+  NODE_OPTIONS e o inspect.
+- **Smart App Control:** neste PC o Windows bloqueia o `Solline.exe` sem assinatura ("An Application
+  Control policy has blocked this file"), por isso a app empacotada não arranca aqui. O smoke corre
+  sobre o Electron de `node_modules`. Para usar a app instalada é preciso assinar o build ou desligar
+  o Smart App Control (decisão do Duarte; não se volta a ligar sem reinstalar o Windows).
+
