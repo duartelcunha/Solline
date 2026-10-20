@@ -378,7 +378,8 @@ test('rever o diff, comentar, rejeitar, desfazer e rebobinar (SDK real)', async 
   const panel = page.getByTestId('review-panel');
   await expect(panel).toBeVisible();
   const file = panel.locator('[data-testid="diff-file"][data-path="notes.txt"]');
-  await expect(file).toBeVisible();
+  // O primeiro diff da sessão pode demorar (git a frio no Windows).
+  await expect(file).toBeVisible({ timeout: 15_000 });
   await expect(file.locator('[data-kind="del"]')).toContainText('alpha');
   await expect(file.locator('[data-kind="add"]')).toContainText('beta');
 
@@ -398,7 +399,8 @@ test('rever o diff, comentar, rejeitar, desfazer e rebobinar (SDK real)', async 
   await shot(page, 'review-empty');
   await page.getByTestId('review-undo').click();
   await expect.poll(notes).toContain('beta');
-  await expect(file).toBeVisible();
+  // O primeiro diff da sessão pode demorar (git a frio no Windows).
+  await expect(file).toBeVisible({ timeout: 15_000 });
   await page.getByTestId('review-toggle').click();
   await expect(panel).toBeHidden();
 
