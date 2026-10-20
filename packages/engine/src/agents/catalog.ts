@@ -100,6 +100,8 @@ export function catalogDefinition(
     defaultMode: null,
     staticModes: [],
     untrustedProjects: entry.untrustedProjects,
+    // O ACP obriga os agentes a aceitar servidores MCP por stdio.
+    mcp: true,
     detect: async () => {
       const found = find();
       if (!found)

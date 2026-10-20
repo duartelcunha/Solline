@@ -29,6 +29,17 @@ export interface AgentStartOptions {
   projectTrusted?: boolean | undefined;
   /** Ambiente do processo do agente, já com a política do registo aplicada. */
   env?: Record<string, string | undefined> | undefined;
+  /** Servidores MCP só desta sessão (stdio). */
+  mcpServers?: readonly McpServerLaunch[] | undefined;
+}
+
+export interface McpServerLaunch {
+  name: string;
+  command: string;
+  args: readonly string[];
+  env: Readonly<Record<string, string>>;
+  /** Corre programas: as ferramentas dele nunca ficam com "Permitir sempre". */
+  executesCode: boolean;
 }
 
 export interface AgentStartResult {

@@ -3,6 +3,7 @@ import { useStore } from 'zustand';
 import type {
   AgentDescriptor,
   AgentId,
+  McpServerDescriptor,
   CommandName,
   CommandPayload,
   CommandResult,
@@ -25,6 +26,9 @@ interface AppState {
   projects: Project[];
   /** Os agentes que o motor conhece, pela ordem do registo. */
   agents: AgentDescriptor[];
+  /** Servidores MCP do catálogo e os escolhidos para as próximas sessões. */
+  mcpServers: McpServerDescriptor[];
+  mcpSelection: string[];
   /** Ids das sessões, da mais recente para a mais antiga. */
   sessionIds: string[];
   activeProjectId: string | null;
@@ -37,6 +41,8 @@ interface AppState {
 export const useApp = create<AppState>(() => ({
   projects: [],
   agents: [],
+  mcpServers: [],
+  mcpSelection: [],
   sessionIds: [],
   activeProjectId: null,
   activeSessionId: null,
@@ -120,8 +126,18 @@ function defaultAgent(): AgentId {
 export const actions = {
   async loadAgents(): Promise<void> {
     try {
-      const { agents } = await request('agents.list', {});
-      useApp.setState({ agents });
+      const [{ agents }, { servers }] = await Promise.all([
+        request('agents.list', {}),
+        request('mcp.list', {}),
+      ]);
+      useApp.setState((s) => ({
+        agents,
+        mcpServers: servers,
+        // Um servidor que deixou de estar pronto sai da escolha.
+        mcpSelection: s.mcpSelection.filter((id) =>
+          servers.some((m) => m.id === id && m.status === 'ready'),
+        ),
+      }));
     } catch (error) {
       useApp.setState({ notice: `Não foi possível ver os agentes. ${message(error)}` });
     }
@@ -162,6 +178,14 @@ export const actions = {
     }
   },
 
+  toggleMcp(id: string): void {
+    useApp.setState((s) => ({
+      mcpSelection: s.mcpSelection.includes(id)
+        ? s.mcpSelection.filter((m) => m !== id)
+        : [...s.mcpSelection, id],
+    }));
+  },
+
   selectProject(projectId: string): void {
     useApp.setState({ activeProjectId: projectId });
   },
@@ -179,9 +203,11 @@ export const actions = {
     if (!project) return;
     useApp.setState({ creatingIn: projectId, activeProjectId: projectId, notice: null });
     try {
+      const mcpServerIds = useApp.getState().mcpSelection;
       const { session, capabilities } = await request('session.create', {
         projectId: project.id,
         agent,
+        ...(mcpServerIds.length ? { mcpServerIds } : {}),
       });
       sessionStores.set(session.id, createSessionStore(session, projectId, capabilities));
       useApp.setState((s) => ({

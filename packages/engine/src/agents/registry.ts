@@ -34,6 +34,8 @@ export interface AgentDefinition {
   staticModes: readonly ModeOption[];
   /** refused: o agente lê config do projeto que não se consegue desligar. */
   untrustedProjects: 'allowed' | 'refused';
+  /** Aceita servidores MCP por sessão. */
+  mcp?: boolean;
   /** Estado nesta máquina; não arranca o agente nem lê credenciais. */
   detect(): Promise<Detected>;
   /**
@@ -107,6 +109,7 @@ export function claudeDefinition(
     defaultMode: 'default',
     staticModes: CLAUDE_MODES,
     untrustedProjects: 'allowed',
+    mcp: true,
     detect: () => detectClaude(options.claudeExecutable),
     create: (start, sink) =>
       new ClaudeSdkAdapter(

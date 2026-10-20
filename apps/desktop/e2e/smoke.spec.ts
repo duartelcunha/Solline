@@ -181,6 +181,8 @@ test('a nova sessão deixa escolher o agente e mostra porque um não está pront
   await expect(page.getByTestId('agent-claude')).toBeVisible();
   await expect(page.getByTestId('agent-codex')).toContainText('Codex');
   await expect(page.getByTestId('agent-opencode')).toContainText('OpenCode');
+  // O REA aparece nos servidores MCP; sem estar instalado diz como instalar.
+  await expect(page.getByTestId('mcp-rea')).toContainText('REA');
   const deepseek = page.getByTestId('agent-claude:deepseek');
   await expect(deepseek).toContainText('DeepSeek (experimental)');
   // Sem chave fica desligado e diz onde a pôr; com chave fica pronto.

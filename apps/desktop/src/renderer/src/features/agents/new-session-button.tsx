@@ -1,5 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { ChevronDown, Plus } from 'lucide-react';
+import { Check, ChevronDown, Plus } from 'lucide-react';
 import type { AgentDescriptor, Project } from '@solline/protocol';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useApp } from '../../stores/app.ts';
@@ -49,7 +49,50 @@ function AgentMenu({
           />
         );
       })}
+      <McpChoices />
     </MenuShell>
+  );
+}
+
+/** Servidores MCP para ligar às próximas sessões (só a elas, nunca à config do agente). */
+function McpChoices() {
+  const servers = useApp((s) => s.mcpServers);
+  const selected = useApp((s) => s.mcpSelection);
+  if (servers.length === 0) return null;
+  return (
+    <>
+      <Menu.Separator className="my-1 h-px bg-line" />
+      <Menu.Label className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium tracking-[0.04em] text-subtle uppercase">
+        Servidores MCP
+      </Menu.Label>
+      {servers.map((server) => (
+        <Menu.CheckboxItem
+          key={server.id}
+          checked={selected.includes(server.id)}
+          disabled={server.status !== 'ready'}
+          onSelect={(event) => event.preventDefault()}
+          onCheckedChange={() => actions.toggleMcp(server.id)}
+          data-testid={`mcp-${server.id}`}
+          className="group flex cursor-default items-start gap-2.5 rounded-md px-2.5 py-2 text-[13px] outline-none select-none data-[highlighted]:bg-surface-hover data-[disabled]:opacity-50"
+        >
+          <span className="mt-0.5 grid size-4 shrink-0 place-items-center text-accent-text">
+            <Menu.ItemIndicator>
+              <Check size={14} strokeWidth={2.25} />
+            </Menu.ItemIndicator>
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">{server.label}</span>
+            <span className="block text-[11.5px] leading-snug text-muted">
+              {server.status !== 'ready'
+                ? server.detail
+                : server.executesCode
+                  ? 'Corre programas: sem Auto e sem "Permitir sempre"'
+                  : 'Só nesta sessão'}
+            </span>
+          </span>
+        </Menu.CheckboxItem>
+      ))}
+    </>
   );
 }
 
@@ -65,10 +108,11 @@ export function NewSessionButton({
   variant: 'icon' | 'primary';
 }) {
   const agents = useApp((s) => s.agents);
+  const mcp = useApp((s) => s.mcpServers);
   const creating = useApp((s) =>
     variant === 'icon' ? s.creatingIn === project.id : s.creatingIn !== null,
   );
-  const choose = agents.length > 1;
+  const choose = agents.length > 1 || mcp.length > 0;
 
   if (variant === 'icon') {
     return (

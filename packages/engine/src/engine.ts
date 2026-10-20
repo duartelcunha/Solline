@@ -10,6 +10,7 @@ import {
 } from '@solline/protocol';
 import type { AgentAdapterFactory } from './adapters/types.ts';
 import { builtinRegistry, withFactories, type AgentRegistry } from './agents/registry.ts';
+import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { SessionManager } from './session-manager.ts';
 import { ENGINE_VERSION } from './version.ts';
 
@@ -27,6 +28,8 @@ export interface EngineOptions {
   adapters?: Partial<Record<AgentId, AgentAdapterFactory>>;
   /** Para testes: troca o registo inteiro. */
   registry?: AgentRegistry;
+  /** Para testes: troca o catálogo de servidores MCP. */
+  mcp?: McpCatalog;
 }
 
 type Handlers = {
@@ -48,7 +51,8 @@ export class Engine {
         packaged: options.packaged,
       });
     const registry = options.adapters ? withFactories(base, options.adapters) : base;
-    this.sessions = new SessionManager({ emit: options.emit ?? (() => undefined), registry });
+    const mcp = options.mcp ?? mcpCatalog({ dataDir: options.dataDir });
+    this.sessions = new SessionManager({ emit: options.emit ?? (() => undefined), registry, mcp });
     const s = this.sessions;
     const ok = {} as Record<string, never>;
     this.#handlers = {
@@ -58,6 +62,7 @@ export class Engine {
         pid: process.pid,
         receivedAt: Date.now(),
       }),
+      'mcp.list': async () => ({ servers: await mcp.list() }),
       'agents.list': async () => ({
         agents: await Promise.all(
           registry.list().map(async (d) => ({

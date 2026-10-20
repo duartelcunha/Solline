@@ -453,6 +453,21 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       stderr: (data) => {
         this.#stderr = (this.#stderr + data).slice(-STDERR_LIMIT);
       },
+      ...(options.mcpServers?.length
+        ? {
+            mcpServers: Object.fromEntries(
+              options.mcpServers.map((s) => [
+                s.name,
+                {
+                  type: 'stdio' as const,
+                  command: s.command,
+                  args: [...s.args],
+                  env: { ...s.env },
+                },
+              ]),
+            ),
+          }
+        : {}),
       ...(options.resume ? { resume: options.resume } : {}),
       ...(options.spawn ? { spawnClaudeCodeProcess: options.spawn } : {}),
       ...(options.claudeExecutable ? { pathToClaudeCodeExecutable: options.claudeExecutable } : {}),
@@ -464,7 +479,13 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     this.#emit(deltas);
     // Num perfil de fornecedor não há definições gravadas: o "sempre" fica na sessão.
     const trusted = this.#options.projectTrusted === true && !this.#options.profile;
-    const block = askBlockFor(toolName, input, options, trusted);
+    const asked = askBlockFor(toolName, input, options, trusted);
+    // As ferramentas de um servidor que corre programas pedem sempre (nunca "Permitir sempre").
+    const risky = (this.#options.mcpServers ?? []).some(
+      (s) => s.executesCode && toolName.startsWith(`mcp__${s.name}__`),
+    );
+    const block: AskBlock =
+      risky && asked.kind === 'permission' ? { ...asked, canAlwaysAllow: false } : asked;
     const entry: AskEntry = { turnId, block, input, suggestions: options.suggestions };
     this.#asks.set(block.id, entry);
     this.#sink.ask(turnId, block);

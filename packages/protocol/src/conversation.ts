@@ -303,6 +303,17 @@ export const AgentDescriptor = z.object({
 });
 export type AgentDescriptor = z.infer<typeof AgentDescriptor>;
 
+/** Um servidor MCP que se pode ligar a uma sessão nova (catálogo revisto no motor). */
+export const McpServerDescriptor = z.object({
+  id: z.string(),
+  label: z.string(),
+  status: z.enum(['ready', 'not-found', 'unreviewed']),
+  detail: z.string().optional(),
+  /** Corre programas ou alvos: sem Auto e sem "Permitir sempre" nas ferramentas dele. */
+  executesCode: z.boolean(),
+});
+export type McpServerDescriptor = z.infer<typeof McpServerDescriptor>;
+
 export const SessionInfo = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -313,6 +324,8 @@ export const SessionInfo = z.object({
   settings: SessionSettings,
   /** Id da sessão no agente (serve para retomar). */
   agentSessionId: z.string().nullable(),
+  /** Servidores MCP ligados a esta sessão. */
+  mcpServers: z.array(z.string()).optional(),
 });
 export type SessionInfo = z.infer<typeof SessionInfo>;
 

@@ -3,6 +3,7 @@ import {
   AgentCapabilities,
   AgentDescriptor,
   AgentId,
+  McpServerDescriptor,
   PermissionAnswer,
   SessionInfo,
 } from './conversation.ts';
@@ -52,6 +53,8 @@ export const SessionCreatePayload = z
     mode: z.string().min(1).max(64).optional(),
     model: z.string().min(1).max(200).optional(),
     effort: z.string().min(1).max(32).optional(),
+    /** Servidores MCP do catálogo a ligar só a esta sessão. */
+    mcpServerIds: z.array(z.string().min(1).max(32)).max(8).optional(),
   })
   .strict();
 
@@ -71,6 +74,8 @@ export const commandSchemas = {
   'engine.ping': { payload: PingPayload, result: PingResult },
   /** Os agentes que o motor conhece e o estado de cada um nesta máquina. */
   'agents.list': { payload: Empty, result: z.object({ agents: z.array(AgentDescriptor) }) },
+  /** Os servidores MCP do catálogo e o estado de cada um. */
+  'mcp.list': { payload: Empty, result: z.object({ servers: z.array(McpServerDescriptor) }) },
   'session.create': { payload: SessionCreatePayload, result: SessionCreateResult },
   'session.send': {
     payload: SessionRef.extend({ text: MessageText }).strict(),

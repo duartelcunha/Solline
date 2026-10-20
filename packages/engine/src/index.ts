@@ -22,6 +22,7 @@ export type {
   AdapterSink,
   AgentStartOptions,
   AgentStartResult,
+  McpServerLaunch,
 } from './adapters/types.ts';
 export { AsyncQueue } from './async-queue.ts';
 export { sanitizedEnv, agentEnv, CLAUDE_ENV_POLICY, SECRET_NAME, type EnvPolicy } from './env.ts';
@@ -70,3 +71,12 @@ export {
 export { AcpNormalizer } from './adapters/acp/normalizer.ts';
 export { capabilitiesFromAcp, classifyModeRisk, acpConfig } from './adapters/acp/capabilities.ts';
 export { CATALOG, catalogDefinition, findNpmAgent, type CatalogEntry } from './agents/catalog.ts';
+export {
+  MCP_CATALOG,
+  findNode,
+  fixedMcpCatalog,
+  mcpCatalog,
+  type McpCatalog,
+  type McpEntry,
+  type McpLaunch,
+} from './mcp/catalog.ts';

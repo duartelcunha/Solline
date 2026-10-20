@@ -306,7 +306,15 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   async #openSession(peer: JsonRpcPeer, init: InitializeResponse): Promise<NewSessionResponse> {
-    const base = { cwd: this.#options.cwd, mcpServers: [] };
+    const base = {
+      cwd: this.#options.cwd,
+      mcpServers: (this.#options.mcpServers ?? []).map((s) => ({
+        name: s.name,
+        command: s.command,
+        args: [...s.args],
+        env: Object.entries(s.env).map(([name, value]) => ({ name, value })),
+      })),
+    };
     if (!this.#sessionId) {
       const created = await peer.request<NewSessionResponse>('session/new', base, START_TIMEOUT_MS);
       this.#sessionId = created.sessionId;

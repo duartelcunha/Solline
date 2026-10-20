@@ -205,3 +205,18 @@
 - **Fica para depois:** escolher que chaves cada agente ACP recebe (`agents.setKeys`) e um painel
   de agentes; hoje o seletor já diz o estado e como instalar ou entrar.
 
+## 2026-10-20: M1h, servidores MCP por sessão e REA
+
+- **Catálogo MCP no código** (`mcp/catalog.ts`), como os agentes: cada servidor é revisto e vai só
+  na sessão que o pede (Claude em `options.mcpServers`, ACP no `session/new`). Nunca se escreve nas
+  configs globais dos agentes. O Codex ainda não recebe servidores por sessão (falta ver como pela
+  config do thread).
+- **Correm no `node.exe` do PATH**, não no executável da app (os fuses tiraram o `runAsNode`).
+- **Servidores que correm programas** (`executesCode`) tiram o Auto (e qualquer modo de acesso
+  total) da sessão e as ferramentas deles nunca têm "Permitir sempre".
+- **REA 6.7.0 entra como servidor MCP opcional**, instalado numa pasta da app com
+  `npm install --prefix <dados>/mcp/rea --ignore-scripts rea-agents@6.7.0` (o `--ignore-scripts`
+  evita o download do Frida). Não o instalei: fica para o Duarte decidir. Nunca `rea setup`.
+- **Provado a sério** com um servidor de eco feito à mão: o Claude chama a ferramenta atrás de um
+  cartão sem "Permitir sempre" e o resultado volta.
+

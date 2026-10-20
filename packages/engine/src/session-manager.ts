@@ -9,9 +9,21 @@ import {
   type SessionInfo,
   type SessionStartPayload,
 } from '@solline/protocol';
-import type { AgentAdapter, AdapterSink } from './adapters/types.ts';
+import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/types.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { agentEnv } from './env.ts';
+import type { McpCatalog } from './mcp/catalog.ts';
+
+/** Com um servidor MCP que corre programas ligado, nada de modos sem perguntas. */
+const RESTRICTED_RISKS = new Set(['auto', 'full']);
+
+function restrict(capabilities: AgentCapabilities, restricted: boolean): AgentCapabilities {
+  if (!restricted) return capabilities;
+  return {
+    ...capabilities,
+    modes: capabilities.modes.filter((m) => !RESTRICTED_RISKS.has(m.risk)),
+  };
+}
 
 type SessionResult = EngineCommandResult<'session.start'>;
 
@@ -30,6 +42,7 @@ interface Entry {
   adapter: AgentAdapter;
   definition: AgentDefinition;
   trusted: boolean;
+  mcp: readonly McpServerLaunch[];
 }
 
 /**
@@ -42,17 +55,21 @@ export class SessionManager {
   readonly #sessions = new Map<string, Entry>();
   readonly #emit: (event: EngineEvent) => void;
   readonly #registry: AgentRegistry;
+  readonly #mcp: McpCatalog | undefined;
   readonly #checkCwd: (cwd: string) => Promise<void>;
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
     /** Os agentes que se podem abrir: modos, ambiente e adaptador de cada um. */
     registry: AgentRegistry;
+    /** Servidores MCP que uma sessão pode pedir. */
+    mcp?: McpCatalog | undefined;
     /** Para testes: troca a verificação da pasta. */
     checkCwd?: (cwd: string) => Promise<void>;
   }) {
     this.#emit = options.emit;
     this.#registry = options.registry;
+    this.#mcp = options.mcp;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
   }
 
@@ -66,6 +83,14 @@ export class SessionManager {
     const known = definition.staticModes;
     if (payload.mode && known.length > 0 && !known.some((m) => m.id === payload.mode)) {
       throw new Error(`Modo desconhecido para este agente: ${payload.mode}`);
+    }
+    const mcp = await this.#mcpFor(definition, payload.mcpServerIds ?? []);
+    const restricted = mcp.some((s) => s.executesCode);
+    const risk = known.find((m) => m.id === payload.mode)?.risk;
+    if (restricted && risk && RESTRICTED_RISKS.has(risk)) {
+      throw new Error(
+        'Com um servidor MCP que corre programas, escolhe um modo que pergunte antes',
+      );
     }
     const info: SessionInfo = {
       id: crypto.randomUUID(),
@@ -81,8 +106,9 @@ export class SessionManager {
         mode: payload.mode ?? definition.defaultMode,
       },
       agentSessionId: null,
+      ...(mcp.length ? { mcpServers: payload.mcpServerIds ?? [] } : {}),
     };
-    return this.#start(info, definition, payload.trusted, undefined, {
+    return this.#start(info, definition, payload.trusted, mcp, undefined, {
       model: payload.model,
       effort: payload.effort,
     });
@@ -104,7 +130,7 @@ export class SessionManager {
     const resumeId = entry.adapter.agentSessionId();
     if (!resumeId) throw new Error('Esta sessão ainda não tem histórico no agente para retomar');
     await entry.adapter.close();
-    return this.#start(entry.info, entry.definition, entry.trusted, resumeId);
+    return this.#start(entry.info, entry.definition, entry.trusted, entry.mcp, resumeId);
   }
 
   send(sessionId: string, text: string): Promise<string> {
@@ -117,8 +143,12 @@ export class SessionManager {
 
   /** Modo, modelo e effort só passam se o agente os anunciou nas capacidades. */
   async setMode(sessionId: string, mode: string): Promise<void> {
-    const { adapter } = this.#get(sessionId);
-    if (!adapter.capabilities().modes.some((m) => m.id === mode)) {
+    const { adapter, mcp } = this.#get(sessionId);
+    const modes = restrict(
+      adapter.capabilities(),
+      mcp.some((s) => s.executesCode),
+    ).modes;
+    if (!modes.some((m) => m.id === mode)) {
       throw new Error(`Modo desconhecido para este agente: ${mode}`);
     }
     await adapter.setMode(mode);
@@ -157,10 +187,31 @@ export class SessionManager {
     await Promise.all(entries.map((entry) => entry.adapter.close()));
   }
 
+  async #mcpFor(definition: AgentDefinition, ids: readonly string[]): Promise<McpServerLaunch[]> {
+    if (ids.length === 0) return [];
+    if (!definition.mcp)
+      throw new Error(`O ${definition.label} ainda não aceita servidores MCP por sessão`);
+    if (!this.#mcp) throw new Error('Não há servidores MCP configurados');
+    const catalog = this.#mcp;
+    return Promise.all(
+      [...new Set(ids)].map(async (id) => {
+        const s = await catalog.launch(id);
+        return {
+          name: s.name,
+          command: s.command,
+          args: s.args,
+          env: s.env,
+          executesCode: s.executesCode,
+        };
+      }),
+    );
+  }
+
   async #start(
     info: SessionInfo,
     definition: AgentDefinition,
     trusted: boolean,
+    mcp: readonly McpServerLaunch[],
     resume?: string,
     /** Só numa sessão nova: o modelo e o effort pedidos têm de existir no agente. */
     requested?: { model?: string | undefined; effort?: string | undefined },
@@ -182,12 +233,18 @@ export class SessionManager {
         resume,
         projectTrusted: trusted,
         env: { ...agentEnv(definition.envPolicy), ...secrets },
+        ...(mcp.length ? { mcpServers: mcp } : {}),
       },
-      this.#sinkFor(info, () => entry.adapter),
+      this.#sinkFor(
+        info,
+        () => entry.adapter,
+        mcp.some((s) => s.executesCode),
+      ),
     );
     entry.adapter = adapter;
     const isNew = !this.#sessions.has(info.id);
-    this.#sessions.set(info.id, { info, adapter, definition, trusted });
+    this.#sessions.set(info.id, { info, adapter, definition, trusted, mcp });
+    const restricted = mcp.some((s) => s.executesCode);
     let started: Awaited<ReturnType<AgentAdapter['start']>> | undefined;
     try {
       started = await adapter.start();
@@ -197,7 +254,8 @@ export class SessionManager {
       // Um modo que o agente aceitou no arranque mas não anuncia (por exemplo Auto num modelo
       // sem suporte) volta ao modo por omissão: a interface nunca mostra um modo que não há.
       const fallback = definition.defaultMode;
-      const modes = started.capabilities.modes;
+      const visible = restrict(started.capabilities, restricted);
+      const modes = visible.modes;
       if (
         fallback &&
         fallback !== info.settings.mode &&
@@ -207,7 +265,7 @@ export class SessionManager {
         await adapter.setMode(fallback);
         info.settings = { ...info.settings, mode: fallback };
       }
-      return { session: { ...info }, capabilities: started.capabilities };
+      return { session: { ...info }, capabilities: visible };
     } catch (error) {
       // O agente arrancou mas algo depois falhou: fecha-o, senão o processo ficava sem dono.
       if (started) await adapter.close().catch(() => undefined);
@@ -217,11 +275,19 @@ export class SessionManager {
     }
   }
 
-  #sinkFor(info: SessionInfo, adapter: () => AgentAdapter | undefined): AdapterSink {
+  #sinkFor(
+    info: SessionInfo,
+    adapter: () => AgentAdapter | undefined,
+    restricted: boolean,
+  ): AdapterSink {
     const emit = this.#emit;
     return {
       delta: (raw) => {
-        const delta = withoutUnreportedCost(raw, adapter());
+        const cleaned = withoutUnreportedCost(raw, adapter());
+        const delta =
+          cleaned.type === 'capabilities'
+            ? { ...cleaned, capabilities: restrict(cleaned.capabilities, restricted) }
+            : cleaned;
         if (delta.type === 'settings') info.settings = { ...info.settings, ...delta.settings };
         if (delta.type === 'meta') info.agentSessionId = delta.agentSessionId;
         emit({ kind: 'event', type: 'session.event', sessionId: info.id, delta });
