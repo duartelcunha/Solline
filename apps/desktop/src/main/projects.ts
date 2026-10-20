@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { Project, type CheckSpec, type SetupSpec } from '@solline/protocol';
+import { assertLocalFolder } from './session-policy.ts';
 
 /** v1 não tinha confiança: os projetos que já lá estavam ficam de confiança (como antes). */
 const ProjectsFileV1 = z.object({
@@ -47,9 +48,11 @@ export class ProjectStore {
     return (await this.list()).find((p) => p.id === id);
   }
 
-  /** Junta uma pasta; se já lá estiver, devolve a que existe. */
+  /** Junta uma pasta local; se já lá estiver, devolve a que existe. Rede e dispositivos não. */
   async add(folder: string, trusted: boolean): Promise<Project> {
+    assertLocalFolder(folder);
     const path = resolve(folder);
+    assertLocalFolder(path);
     const projects = await this.list();
     const key = process.platform === 'win32' ? path.toLowerCase() : path;
     const existing = projects.find(

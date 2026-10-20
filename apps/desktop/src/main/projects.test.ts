@@ -73,3 +73,16 @@ describe('verificações do projeto', () => {
     expect((await new ProjectStore(file).get(project.id))?.checks).toBeNull();
   });
 });
+
+describe('ProjectStore.add: pastas de rede e de dispositivo', () => {
+  it.each([
+    '\\\\servidor\\partilha\\app',
+    '\\\\?\\C:\\code',
+    '\\\\.\\PhysicalDrive0',
+    '//servidor/app',
+  ])('não guarda %s como projeto', async (path) => {
+    const store = new ProjectStore(file);
+    await expect(store.add(path, false)).rejects.toThrow('rede ou de dispositivo');
+    expect(await store.list()).toEqual([]);
+  });
+});
