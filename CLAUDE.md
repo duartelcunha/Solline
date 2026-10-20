@@ -1,8 +1,8 @@
 # Solline
 
 Cliente de desktop pessoal para o Claude Code. Projeto pessoal: nada de trabalho entra aqui.
-O plano aprovado está em `~/.claude/plans/can-we-change-the-sequential-horizon.md` (secção
-"Núcleo: desenho detalhado"). As decisões de versões estão em `DECISIONS.md`.
+O plano em curso (vários agentes num só cliente) está em `docs/plano.md`. As decisões estão em
+`DECISIONS.md`.
 
 ## Regras de arquitetura
 
