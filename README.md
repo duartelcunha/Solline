@@ -1,15 +1,16 @@
 # Solline
 
-App de desktop para trabalhar com agentes de código (Claude Code, Codex, modelos DeepSeek e qualquer agente ACP): o poder do terminal com a facilidade de uma app.
+App de desktop para trabalhar com agentes de código (Claude Code, Codex, modelos DeepSeek, GLM e Kimi e qualquer agente ACP): o poder do terminal com a facilidade de uma app.
 Por agora é para uso pessoal, no Windows.
 
 ## Estado
 
 M1 (conversa a andar) mais o plano multi-agente (`docs/plano.md`), de M1b a M1h:
 
-- **Agentes:** Claude Code (Agent SDK), Codex (`codex app-server`), modelos DeepSeek pelo Claude
-  Code (experimental, chave no Gestor de Credenciais) e qualquer agente ACP do catálogo
-  (OpenCode primeiro). Escolhe-se na nova sessão.
+- **Agentes:** Claude Code (Agent SDK), Codex (`codex app-server`, com "Entrar com ChatGPT" na
+  app), modelos DeepSeek, GLM e Kimi pelo Claude Code (experimental, chave no Gestor de
+  Credenciais) e qualquer agente ACP do catálogo (OpenCode primeiro). Escolhe-se na nova sessão;
+  o painel de agentes mostra o estado e as variáveis que cada agente ACP recebe.
 - **Confiança:** a interface só manda ids; projetos sem confiança não leem a config da pasta;
   cada agente recebe só os segredos que declara; modos de acesso total nunca aparecem.
 - **Servidores MCP por sessão** de um catálogo revisto (REA opcional), sem tocar nas configs
