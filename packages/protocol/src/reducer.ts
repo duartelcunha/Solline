@@ -3,7 +3,7 @@ import type { Block, ConversationDelta, Turn } from './conversation.ts';
 /**
  * Aplica um delta à lista de turnos e devolve uma lista nova (sem mutar a anterior).
  * É o único sítio que sabe juntar deltas: a interface usa-o no store e o motor nos testes.
- * Deltas de usage, settings e meta não mexem nos turnos.
+ * Deltas de usage, settings e meta não mexem nos turnos; rewind corta a partir de um turno.
  */
 export function applyDelta(turns: readonly Turn[], delta: ConversationDelta): Turn[] {
   switch (delta.type) {
@@ -27,6 +27,10 @@ export function applyDelta(turns: readonly Turn[], delta: ConversationDelta): Tu
             : block,
         ),
       );
+    case 'rewind': {
+      const index = turns.findIndex((turn) => turn.id === delta.turnId);
+      return index === -1 ? [...turns] : turns.slice(0, index);
+    }
     default:
       return [...turns];
   }

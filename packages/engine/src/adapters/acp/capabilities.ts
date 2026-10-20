@@ -122,7 +122,7 @@ export function capabilitiesFromAcp(
     modes,
     effort: efforts.length > 0,
     effortOrder: efforts,
-    features: { cost: features.cost, context: true, resume: features.resume },
+    features: { cost: features.cost, context: true, resume: features.resume, rewind: false },
   };
 }
 

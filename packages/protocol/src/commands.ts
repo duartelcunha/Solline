@@ -7,6 +7,7 @@ import {
   PermissionAnswer,
   SessionInfo,
 } from './conversation.ts';
+import { reviewCommandSchemas } from './review.ts';
 
 /**
  * Contrato dos comandos da Ponte: interface -> main -> motor.
@@ -108,6 +109,7 @@ export const commandSchemas = {
     payload: z.object({ projectId: z.string().min(1).max(64), trusted: z.boolean() }).strict(),
     result: z.object({ project: Project }),
   },
+  ...reviewCommandSchemas,
 } as const;
 
 /**

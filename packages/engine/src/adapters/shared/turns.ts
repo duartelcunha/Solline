@@ -1,5 +1,10 @@
 import type { ConversationDelta } from '@solline/protocol';
 
+/** O que segue para o agente: o resumo (quando há) antes da mensagem. */
+export function withContext(text: string, context: string | undefined): string {
+  return context ? `${context}\n\n---\n\n${text}` : text;
+}
+
 /** A vez de quem escreve, igual para todos os agentes. */
 export function userTurnDelta(turnId: string, text: string): ConversationDelta {
   return {

@@ -14,8 +14,14 @@ import { JsonRpcPeer, StderrTail, type RequestId } from '../../rpc/json-rpc.ts';
 import { killTree, spawnAgent } from '../../rpc/spawn.ts';
 import { ENGINE_VERSION } from '../../version.ts';
 import { clip } from '../claude/tools.ts';
-import { crashMessage, errorNotice, withTimeout } from '../shared/turns.ts';
-import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
+import { crashMessage, errorNotice, withContext, withTimeout } from '../shared/turns.ts';
+import type {
+  AdapterSink,
+  AgentAdapter,
+  AgentStartOptions,
+  AgentStartResult,
+  SendOptions,
+} from '../types.ts';
 import { CODEX_MODES, DEFAULT_CODEX_MODE, threadPolicy, turnOverrides } from './modes.ts';
 import { CodexNormalizer, displayCommand } from './normalizer.ts';
 import type { InitializeParams } from './protocol/InitializeParams';
@@ -26,6 +32,7 @@ import type { FileChangeRequestApprovalParams } from './protocol/v2/FileChangeRe
 import type { GetAccountResponse } from './protocol/v2/GetAccountResponse';
 import type { Model } from './protocol/v2/Model';
 import type { ModelListResponse } from './protocol/v2/ModelListResponse';
+import type { ThreadForkResponse } from './protocol/v2/ThreadForkResponse';
 import type { ThreadStartResponse } from './protocol/v2/ThreadStartResponse';
 import type { TurnStartParams } from './protocol/v2/TurnStartParams';
 import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
@@ -117,6 +124,15 @@ export function codexDecision(
  * O Codex pelo codex app-server: um processo por sessão, JSON-RPC por stdio. Modelo, effort e
  * modo valem a partir do turno seguinte (o app-server aplica-os no turn/start).
  */
+function parseCodexPoint(token: string): { thread: string; lastTurn: string | null } {
+  const parsed = JSON.parse(token) as { thread?: unknown; lastTurn?: unknown };
+  if (typeof parsed.thread !== 'string') throw new Error('Ponto de rebobinar inválido');
+  return {
+    thread: parsed.thread,
+    lastTurn: typeof parsed.lastTurn === 'string' ? parsed.lastTurn : null,
+  };
+}
+
 export class CodexAppServerAdapter implements AgentAdapter {
   readonly #options: CodexAdapterOptions;
   readonly #sink: AdapterSink;
@@ -128,6 +144,10 @@ export class CodexAppServerAdapter implements AgentAdapter {
   #peer: JsonRpcPeer | undefined;
   #threadId: string | null;
   #codexTurnId: string | null = null;
+  /** O último turno acabado no Codex: um fork volta até ele (lastTurnId). */
+  #lastCodexTurn: string | null = null;
+  /** Já há conversa nesta thread (retomada ou com turnos): só então há onde voltar. */
+  #hasHistory: boolean;
   #capabilities: AgentCapabilities | undefined;
   #settings: SessionSettings;
   #pending: Partial<
@@ -143,6 +163,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
     this.#options = options;
     this.#sink = sink;
     this.#threadId = options.resume ?? null;
+    this.#hasHistory = Boolean(options.resume ?? options.fork);
     this.#settings = {
       model: options.model ?? null,
       effort: options.effort ?? null,
@@ -152,6 +173,11 @@ export class CodexAppServerAdapter implements AgentAdapter {
 
   agentSessionId(): string | null {
     return this.#threadId;
+  }
+
+  rewindPoint(): string | null {
+    if (!this.#threadId || !this.#hasHistory) return null;
+    return JSON.stringify({ thread: this.#threadId, lastTurn: this.#lastCodexTurn });
   }
 
   capabilities(): AgentCapabilities {
@@ -217,7 +243,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
         modes,
         effort: models.some((m) => m.efforts.length > 0),
         effortOrder: effortOrder(models),
-        features: { cost: false, context: true, resume: true },
+        features: { cost: false, context: true, resume: true, rewind: true },
       };
       if (!modes.some((m) => m.id === this.#settings.mode))
         this.#settings.mode = DEFAULT_CODEX_MODE;
@@ -230,13 +256,25 @@ export class CodexAppServerAdapter implements AgentAdapter {
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
       };
-      const started = this.#threadId
-        ? await peer.request<ThreadStartResponse>(
-            'thread/resume',
-            { threadId: this.#threadId, ...params, excludeTurns: true },
+      const fork = this.#options.fork ? parseCodexPoint(this.#options.fork) : null;
+      const started = fork
+        ? await peer.request<ThreadForkResponse>(
+            'thread/fork',
+            {
+              threadId: fork.thread,
+              ...(fork.lastTurn ? { lastTurnId: fork.lastTurn } : {}),
+              ...params,
+              excludeTurns: true,
+            },
             START_TIMEOUT_MS,
           )
-        : await peer.request<ThreadStartResponse>('thread/start', params, START_TIMEOUT_MS);
+        : this.#threadId
+          ? await peer.request<ThreadStartResponse>(
+              'thread/resume',
+              { threadId: this.#threadId, ...params, excludeTurns: true },
+              START_TIMEOUT_MS,
+            )
+          : await peer.request<ThreadStartResponse>('thread/start', params, START_TIMEOUT_MS);
       this.#threadId = started.thread.id;
       this.#settings.model = started.model ?? model;
       if (this.#settings.effort) this.#pending.effort = this.#settings.effort;
@@ -258,12 +296,12 @@ export class CodexAppServerAdapter implements AgentAdapter {
     return { settings: { ...this.#settings }, capabilities: this.capabilities() };
   }
 
-  async send(text: string): Promise<string> {
+  async send(text: string, options: SendOptions = {}): Promise<string> {
     const peer = this.#peer;
     if (!peer || peer.isClosed || this.#crashed || !this.#threadId) {
       throw new Error('A sessão não está ligada');
     }
-    const turnId = crypto.randomUUID();
+    const turnId = options.turnId ?? crypto.randomUUID();
     this.#emit(this.#normalizer.userTurn(turnId, text));
     this.#running = true;
     this.#sink.state('running');
@@ -271,7 +309,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
     const sent = this.#pending;
     const params: TurnStartParams = {
       threadId: this.#threadId,
-      input: [{ type: 'text', text, text_elements: [] }],
+      input: [{ type: 'text', text: withContext(text, options.context), text_elements: [] }],
       ...sent,
     };
     this.#pending = {};
@@ -424,6 +462,11 @@ export class CodexAppServerAdapter implements AgentAdapter {
     }
     this.#emit(this.#normalizer.push(method, params));
     if (method === 'turn/completed') {
+      const done = (params as { turn?: { id?: string } }).turn?.id ?? this.#codexTurnId;
+      if (done) {
+        this.#lastCodexTurn = done;
+        this.#hasHistory = true;
+      }
       this.#running = false;
       this.#interruptPending = false;
       this.#codexTurnId = null;

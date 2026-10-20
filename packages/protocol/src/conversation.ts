@@ -270,6 +270,8 @@ export const AgentFeatures = z.object({
   cost: z.boolean(),
   context: z.boolean(),
   resume: z.boolean(),
+  /** Rebobina a conversa no próprio agente; sem isto, rebobinar abre uma sessão nova com resumo. */
+  rewind: z.boolean(),
 });
 export type AgentFeatures = z.infer<typeof AgentFeatures>;
 
@@ -354,6 +356,8 @@ export const ConversationDelta = z.discriminatedUnion('type', [
   z.object({ type: z.literal('meta'), agentSessionId: z.string() }),
   /** O agente mudou o que sabe fazer (por exemplo outros modelos ou modos). Substitui tudo. */
   z.object({ type: z.literal('capabilities'), capabilities: AgentCapabilities }),
+  /** A conversa voltou a antes deste turno do utilizador: ele e os seguintes saem. */
+  z.object({ type: z.literal('rewind'), turnId: z.string() }),
 ]);
 export type ConversationDelta = z.infer<typeof ConversationDelta>;
 

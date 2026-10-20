@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AskBlock, ConversationDelta, SessionState } from './conversation.ts';
+import { Timeline } from './review.ts';
 
 /**
  * Eventos que o motor emite sem pedido (motor -> main -> interface).
@@ -39,6 +40,14 @@ export const PermissionRequestEvent = z.object({
   request: AskBlock,
 });
 
+/** A linha do tempo de uma sessão mudou: checkpoint novo, turno acabado, rever ou rebobinar. */
+export const SessionTimelineEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.timeline'),
+  sessionId: z.string(),
+  timeline: Timeline,
+});
+
 export const EngineErrorEvent = z.object({
   kind: z.literal('event'),
   type: z.literal('engine.error'),
@@ -51,9 +60,11 @@ export const EngineEvent = z.discriminatedUnion('type', [
   SessionEvent,
   SessionStateEvent,
   PermissionRequestEvent,
+  SessionTimelineEvent,
   EngineErrorEvent,
 ]);
 export type EngineEvent = z.infer<typeof EngineEvent>;
 export type SessionEvent = z.infer<typeof SessionEvent>;
 export type SessionStateEvent = z.infer<typeof SessionStateEvent>;
 export type PermissionRequestEvent = z.infer<typeof PermissionRequestEvent>;
+export type SessionTimelineEvent = z.infer<typeof SessionTimelineEvent>;

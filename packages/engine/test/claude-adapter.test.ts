@@ -442,6 +442,6 @@ describe('SessionManager', () => {
         },
       }),
     });
-    expect(() => manager.send('x', 'olá')).toThrow('Sessão desconhecida');
+    await expect(manager.send('x', 'olá')).rejects.toThrow('Sessão desconhecida');
   });
 });

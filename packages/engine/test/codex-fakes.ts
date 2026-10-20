@@ -159,6 +159,11 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
         model: params.model ?? 'gpt-6-luna',
         reasoningEffort: 'medium',
       }),
+      'thread/fork': () => ({
+        thread: { id: `${params.threadId ?? threadId}-fork`, turns: [] },
+        model: params.model ?? 'gpt-6-luna',
+        reasoningEffort: 'medium',
+      }),
       'turn/start': () => ({
         turn: { id: `turn-${++turn}`, items: [], status: 'inProgress', error: null },
       }),

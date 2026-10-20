@@ -141,7 +141,12 @@ describe('CodexAppServerAdapter', () => {
     expect(started.capabilities.models.map((m) => m.id)).toEqual(['gpt-6-luna', 'gpt-5.6-terra']);
     expect(started.capabilities.effortOrder).toEqual(['low', 'medium', 'high', 'ultra']);
     expect(started.capabilities.modes.map((m) => m.id)).toEqual(['read-only', 'ask', 'auto']);
-    expect(started.capabilities.features).toEqual({ cost: false, context: true, resume: true });
+    expect(started.capabilities.features).toEqual({
+      cost: false,
+      context: true,
+      resume: true,
+      rewind: true,
+    });
     expect(started.settings).toMatchObject({ model: 'gpt-6-luna', mode: 'ask', effort: 'medium' });
     expect(a.agentSessionId()).toBe('thread-1');
     const init = server.received.find((m) => m.method === 'initialize');

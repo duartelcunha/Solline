@@ -1,15 +1,26 @@
 import { stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import {
+  applyDelta,
   findModel,
   type AgentCapabilities,
+  type ConversationRewind,
+  type DiffScope,
   type EngineCommandResult,
   type EngineEvent,
+  type FileDiff,
   type PermissionAnswer,
+  type ReviewAction,
+  type ReviewComment,
   type SessionInfo,
   type SessionStartPayload,
+  type Timeline,
+  type Turn,
 } from '@solline/protocol';
 import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/types.ts';
+import type { SessionCheckpoints } from './checkpoints/session-checkpoints.ts';
+import type { CheckpointStore } from './checkpoints/store.ts';
+import { commentsMessage, summaryOf, textOf } from './review.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
@@ -46,6 +57,29 @@ interface Entry {
   mcp: readonly McpServerLaunch[];
 }
 
+/** O que a sessão guarda para lá do adaptador (sobrevive a retomar e a rebobinar). */
+interface Memory {
+  /** A conversa como a interface a vê (para o resumo de rebobinar e as citações). */
+  turns: Turn[];
+  checkpoints: SessionCheckpoints | undefined;
+  /** Ponto de rebobinar do agente antes de cada turno do utilizador (null: do zero). */
+  points: Map<string, string | null>;
+  /** Há um checkpoint aberto à espera do fim do turno. */
+  open: boolean;
+  /** Resumo que segue com a próxima mensagem, depois de rebobinar numa sessão nova. */
+  context: string | undefined;
+}
+
+const DISABLED_TIMELINE = (rewind: ConversationRewind): Timeline => ({
+  available: false,
+  reason: 'os checkpoints estão desligados',
+  checkpoints: [],
+  pending: { files: 0, additions: 0, deletions: 0 },
+  undo: null,
+  conversationRewind: rewind,
+  rewoundTo: null,
+});
+
 /**
  * Todas as conversas vivas do motor. Cada uma tem o seu adaptador; o que o adaptador
  * conta passa a eventos da Ponte com o id da sessão.
@@ -54,10 +88,12 @@ interface Entry {
  */
 export class SessionManager {
   readonly #sessions = new Map<string, Entry>();
+  readonly #memory = new Map<string, Memory>();
   readonly #emit: (event: EngineEvent) => void;
   readonly #registry: AgentRegistry;
   readonly #mcp: McpCatalog | undefined;
   readonly #checkCwd: (cwd: string) => Promise<void>;
+  readonly #store: CheckpointStore | undefined;
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
@@ -67,11 +103,14 @@ export class SessionManager {
     mcp?: McpCatalog | undefined;
     /** Para testes: troca a verificação da pasta. */
     checkCwd?: (cwd: string) => Promise<void>;
+    /** Checkpoints escondidos por turno; sem isto, rever e rebobinar ficheiros ficam desligados. */
+    checkpoints?: CheckpointStore | undefined;
   }) {
     this.#emit = options.emit;
     this.#registry = options.registry;
     this.#mcp = options.mcp;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
+    this.#store = options.checkpoints;
   }
 
   async create(payload: SessionStartPayload): Promise<SessionResult> {
@@ -109,10 +148,29 @@ export class SessionManager {
       agentSessionId: null,
       ...(mcp.length ? { mcpServers: payload.mcpServerIds ?? [] } : {}),
     };
-    return this.#start(info, definition, payload.trusted, mcp, undefined, {
-      model: payload.model,
-      effort: payload.effort,
-    });
+    const memory: Memory = {
+      turns: [],
+      checkpoints: undefined,
+      points: new Map(),
+      open: false,
+      context: undefined,
+    };
+    this.#memory.set(info.id, memory);
+    let result: SessionResult;
+    try {
+      result = await this.#start(info, definition, payload.trusted, mcp, undefined, {
+        model: payload.model,
+        effort: payload.effort,
+      });
+    } catch (error) {
+      this.#memory.delete(info.id);
+      throw error;
+    }
+    // O primeiro checkpoint (o disco antes de tudo) faz-se por trás: a sessão já está pronta.
+    const checkpoints = this.#store?.open(info.id, info.cwd, () => this.#rewindKind(info.id));
+    memory.checkpoints = checkpoints;
+    void checkpoints?.ready.then(() => this.#emitTimeline(info.id));
+    return result;
   }
 
   /**
@@ -134,8 +192,131 @@ export class SessionManager {
     return this.#start(entry.info, entry.definition, entry.trusted, entry.mcp, resumeId);
   }
 
-  send(sessionId: string, text: string): Promise<string> {
-    return this.#get(sessionId).adapter.send(text);
+  /**
+   * Antes de a mensagem seguir, o disco fica guardado (o checkpoint deste turno) e o ponto
+   * de rebobinar do agente também. Se o checkpoint falhar, a mensagem segue na mesma.
+   */
+  async send(sessionId: string, text: string): Promise<string> {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    const turnId = crypto.randomUUID();
+    const point = entry.adapter.rewindPoint?.();
+    const checkpoints = memory.checkpoints;
+    if (checkpoints) {
+      const { staged, done } = checkpoints.beginTurn(turnId, text);
+      await staged;
+      memory.open = true;
+      void done.then(() => this.#emitTimeline(sessionId));
+    }
+    const context = memory.context;
+    let sent: string;
+    try {
+      sent = await entry.adapter.send(text, { turnId, ...(context ? { context } : {}) });
+    } catch (error) {
+      if (checkpoints) {
+        memory.open = false;
+        await checkpoints.truncate(turnId);
+        this.#emitTimeline(sessionId);
+      }
+      throw error;
+    }
+    memory.context = undefined;
+    if (point !== undefined) memory.points.set(sent, point);
+    return sent;
+  }
+
+  /** A linha do tempo, com o "por rever" contado de novo (o disco pode ter mudado por fora). */
+  async timeline(sessionId: string): Promise<Timeline> {
+    this.#get(sessionId);
+    const checkpoints = this.#memoryOf(sessionId).checkpoints;
+    if (!checkpoints) return DISABLED_TIMELINE(this.#rewindKind(sessionId));
+    await checkpoints.ready;
+    return checkpoints.refresh();
+  }
+
+  diff(sessionId: string, scope: DiffScope): Promise<FileDiff[]> {
+    return this.#checkpoints(sessionId).diff(scope);
+  }
+
+  async review(
+    sessionId: string,
+    action: ReviewAction,
+    path?: string,
+    hunkId?: string,
+  ): Promise<Timeline> {
+    const timeline = await this.#checkpoints(sessionId).apply(action, path, hunkId);
+    this.#emitTimeline(sessionId, timeline);
+    return timeline;
+  }
+
+  async undo(sessionId: string): Promise<Timeline> {
+    const timeline = await this.#checkpoints(sessionId).undo();
+    this.#emitTimeline(sessionId, timeline);
+    return timeline;
+  }
+
+  /** Os comentários seguem como a próxima mensagem, com a linha citada de cada um. */
+  async comment(sessionId: string, comments: ReviewComment[], note?: string): Promise<string> {
+    const checkpoints = this.#memoryOf(sessionId).checkpoints;
+    const files = checkpoints?.available ? await checkpoints.diff({ kind: 'review' }) : [];
+    return this.send(sessionId, commentsMessage(comments, files, note));
+  }
+
+  /**
+   * Volta a antes de um turno. Os ficheiros voltam pelo checkpoint; a conversa volta no
+   * agente quando ele sabe (fork no ponto guardado) e, nos outros, numa sessão nova que
+   * recebe um resumo do que ficou para trás com a próxima mensagem.
+   */
+  async rewind(
+    sessionId: string,
+    turnId: string,
+    options: { files: boolean; conversation: boolean },
+  ): Promise<{ timeline: Timeline; text: string | null; conversation: ConversationRewind | null }> {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    if (entry.info.state !== 'idle' && entry.info.state !== 'error') {
+      throw new Error('Espera que o agente acabe (ou interrompe-o) antes de rebobinar');
+    }
+    const index = memory.turns.findIndex((t) => t.id === turnId && t.role === 'user');
+    if (index === -1) throw new Error('Este turno já não está na conversa');
+    const userTurn = memory.turns[index];
+    if (options.files) {
+      const checkpoints = this.#checkpoints(sessionId);
+      if (!checkpoints.has(turnId)) throw new Error('Este turno não tem checkpoint');
+      await checkpoints.rewindFiles(turnId);
+    }
+    let kind: ConversationRewind | null = null;
+    if (options.conversation) {
+      const point = memory.points.get(turnId);
+      kind = point !== undefined && entry.adapter.rewindPoint ? 'agent' : 'summary';
+      const kept = memory.turns.slice(0, index);
+      const dropped = memory.turns.slice(index).map((t) => t.id);
+      await entry.adapter.close();
+      entry.info.agentSessionId = null;
+      await this.#start(
+        entry.info,
+        entry.definition,
+        entry.trusted,
+        entry.mcp,
+        undefined,
+        undefined,
+        kind === 'agent' && point ? point : undefined,
+      );
+      memory.context = kind === 'summary' ? summaryOf(kept) : undefined;
+      // Pelo sink, para os turnos guardados aqui e a interface cortarem no mesmo sítio.
+      this.#deltaFor(entry.info, memory)({ type: 'rewind', turnId });
+      for (const id of dropped) memory.points.delete(id);
+      await memory.checkpoints?.truncate(turnId);
+    }
+    const timeline = memory.checkpoints
+      ? memory.checkpoints.timeline()
+      : DISABLED_TIMELINE(this.#rewindKind(sessionId));
+    this.#emitTimeline(sessionId, timeline);
+    return {
+      timeline,
+      text: options.conversation && userTurn ? textOf(userTurn) : null,
+      conversation: kind,
+    };
   }
 
   interrupt(sessionId: string): Promise<void> {
@@ -184,8 +365,47 @@ export class SessionManager {
 
   async disposeAll(): Promise<void> {
     const entries = [...this.#sessions.values()];
+    const memories = [...this.#memory.values()];
     this.#sessions.clear();
+    this.#memory.clear();
     await Promise.all(entries.map((entry) => entry.adapter.close()));
+    await Promise.all(memories.map((m) => m.checkpoints?.dispose()));
+  }
+
+  #memoryOf(sessionId: string): Memory {
+    const memory = this.#memory.get(sessionId);
+    if (!memory) throw new Error('Sessão desconhecida (o motor pode ter reiniciado)');
+    return memory;
+  }
+
+  #checkpoints(sessionId: string): SessionCheckpoints {
+    this.#get(sessionId);
+    const checkpoints = this.#memoryOf(sessionId).checkpoints;
+    if (!checkpoints) throw new Error('Os checkpoints estão desligados');
+    return checkpoints;
+  }
+
+  #rewindKind(sessionId: string): ConversationRewind {
+    return this.#sessions.get(sessionId)?.adapter.rewindPoint ? 'agent' : 'summary';
+  }
+
+  #emitTimeline(sessionId: string, timeline?: Timeline): void {
+    const memory = this.#memory.get(sessionId);
+    if (!memory?.checkpoints) return;
+    this.#emit({
+      kind: 'event',
+      type: 'session.timeline',
+      sessionId,
+      timeline: timeline ?? memory.checkpoints.timeline(),
+    });
+  }
+
+  /** Fim de turno (o agente voltou a parar): fecha o checkpoint aberto. */
+  #turnSettled(sessionId: string): void {
+    const memory = this.#memory.get(sessionId);
+    if (!memory?.checkpoints || !memory.open) return;
+    memory.open = false;
+    void memory.checkpoints.endTurn().then(() => this.#emitTimeline(sessionId));
   }
 
   async #mcpFor(definition: AgentDefinition, ids: readonly string[]): Promise<McpServerLaunch[]> {
@@ -216,6 +436,8 @@ export class SessionManager {
     resume?: string,
     /** Só numa sessão nova: o modelo e o effort pedidos têm de existir no agente. */
     requested?: { model?: string | undefined; effort?: string | undefined },
+    /** Ponto de rebobinar do agente de onde a conversa continua. */
+    fork?: string,
   ): Promise<SessionResult> {
     // Também na retoma: tirar a confiança a um projeto fecha-o a estes agentes.
     if (!trusted && definition.untrustedProjects === 'refused') {
@@ -233,6 +455,7 @@ export class SessionManager {
         effort: effort ?? undefined,
         mode,
         resume,
+        ...(fork ? { fork } : {}),
         projectTrusted: trusted,
         env,
         ...(mcp.length ? { mcpServers: mcp.map((s) => withoutSecrets(s, env)) } : {}),
@@ -285,19 +508,19 @@ export class SessionManager {
     restricted: boolean,
   ): AdapterSink {
     const emit = this.#emit;
+    const forward = this.#deltaFor(info, this.#memory.get(info.id));
     return {
       delta: (raw) => {
         const cleaned = withoutUnreportedCost(raw, adapter());
-        const delta =
+        forward(
           cleaned.type === 'capabilities'
             ? { ...cleaned, capabilities: restrict(cleaned.capabilities, restricted) }
-            : cleaned;
-        if (delta.type === 'settings') info.settings = { ...info.settings, ...delta.settings };
-        if (delta.type === 'meta') info.agentSessionId = delta.agentSessionId;
-        emit({ kind: 'event', type: 'session.event', sessionId: info.id, delta });
+            : cleaned,
+        );
       },
       state: (state, error) => {
         info.state = state;
+        if (state === 'idle' || state === 'error') this.#turnSettled(info.id);
         emit({
           kind: 'event',
           type: 'session.state',
@@ -309,6 +532,19 @@ export class SessionManager {
       ask: (turnId, request) => {
         emit({ kind: 'event', type: 'permission.request', sessionId: info.id, turnId, request });
       },
+    };
+  }
+
+  /** Leva um delta à interface e à memória da sessão. */
+  #deltaFor(
+    info: SessionInfo,
+    memory: Memory | undefined,
+  ): (delta: Parameters<AdapterSink['delta']>[0]) => void {
+    return (delta) => {
+      if (delta.type === 'settings') info.settings = { ...info.settings, ...delta.settings };
+      if (delta.type === 'meta') info.agentSessionId = delta.agentSessionId;
+      if (memory) memory.turns = applyDelta(memory.turns, delta);
+      this.#emit({ kind: 'event', type: 'session.event', sessionId: info.id, delta });
     };
   }
 

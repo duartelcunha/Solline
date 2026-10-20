@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {
   RequestEnvelope,
   engineCommandSchemas,
@@ -10,6 +11,7 @@ import {
 } from '@solline/protocol';
 import type { AgentAdapterFactory } from './adapters/types.ts';
 import { builtinRegistry, withFactories, type AgentRegistry } from './agents/registry.ts';
+import { CheckpointStore, type CheckpointStoreOptions } from './checkpoints/store.ts';
 import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { SessionManager } from './session-manager.ts';
 import { ENGINE_VERSION } from './version.ts';
@@ -30,6 +32,8 @@ export interface EngineOptions {
   registry?: AgentRegistry;
   /** Para testes: troca o catálogo de servidores MCP. */
   mcp?: McpCatalog;
+  /** Checkpoints por turno (por omissão na pasta de dados); false desliga-os. */
+  checkpoints?: CheckpointStoreOptions | false;
 }
 
 type Handlers = {
@@ -40,6 +44,7 @@ type Handlers = {
 export class Engine {
   readonly sessions: SessionManager;
   readonly #handlers: Handlers;
+  readonly #checkpoints: CheckpointStore | undefined;
 
   constructor(options: EngineOptions = {}) {
     const base =
@@ -52,7 +57,19 @@ export class Engine {
       });
     const registry = options.adapters ? withFactories(base, options.adapters) : base;
     const mcp = options.mcp ?? mcpCatalog({ dataDir: options.dataDir });
-    this.sessions = new SessionManager({ emit: options.emit ?? (() => undefined), registry, mcp });
+    this.#checkpoints =
+      options.checkpoints === false
+        ? undefined
+        : new CheckpointStore({
+            root: options.dataDir ? path.join(options.dataDir, 'checkpoints') : undefined,
+            ...options.checkpoints,
+          });
+    this.sessions = new SessionManager({
+      emit: options.emit ?? (() => undefined),
+      registry,
+      mcp,
+      checkpoints: this.#checkpoints,
+    });
     const s = this.sessions;
     const ok = {} as Record<string, never>;
     this.#handlers = {
@@ -88,6 +105,15 @@ export class Engine {
       'session.setModel': async (p) => (await s.setModel(p.sessionId, p.model), ok),
       'session.setEffort': async (p) => (await s.setEffort(p.sessionId, p.effort), ok),
       'permission.answer': async (p) => (s.answer(p.sessionId, p.requestId, p.answer), ok),
+      'review.timeline': (p) => s.timeline(p.sessionId),
+      'review.diff': async (p) => ({ files: await s.diff(p.sessionId, p.scope) }),
+      'review.apply': (p) => s.review(p.sessionId, p.action, p.path, p.hunkId),
+      'review.undo': (p) => s.undo(p.sessionId),
+      'review.comment': async (p) => ({
+        turnId: await s.comment(p.sessionId, p.comments, p.note),
+      }),
+      'session.rewind': (p) =>
+        s.rewind(p.sessionId, p.turnId, { files: p.files, conversation: p.conversation }),
     };
   }
 
@@ -116,5 +142,6 @@ export class Engine {
 
   async dispose(): Promise<void> {
     await this.sessions.disposeAll();
+    await this.#checkpoints?.dispose();
   }
 }

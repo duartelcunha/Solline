@@ -25,7 +25,14 @@ import { sanitizedEnv } from '../../env.ts';
 import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts';
 import { ClaudeNormalizer } from './normalizer.ts';
 import { toolShape, toolSummary } from './tools.ts';
-import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
+import { withContext } from '../shared/turns.ts';
+import type {
+  AdapterSink,
+  AgentAdapter,
+  AgentStartOptions,
+  AgentStartResult,
+  SendOptions,
+} from '../types.ts';
 
 /**
  * O Claude Code a falar com outro fornecedor (ver agents/profiles.ts): os modelos do init
@@ -155,7 +162,7 @@ export function capabilitiesFrom(models: ModelInfo[], profile?: ClaudeProfile): 
     ),
     effort: listed.some((model) => model.efforts.length > 0),
     effortOrder: [...EFFORT_LEVELS],
-    features: { cost: !profile, context: true, resume: true },
+    features: { cost: !profile, context: true, resume: true, rewind: true },
   };
 }
 
@@ -286,6 +293,18 @@ function statusFor(outcome: BrokerOutcome): AskBlock['status'] {
   }
 }
 
+interface ClaudePoint {
+  session: string;
+  /** null: a sessão inteira, como estava ao retomar. */
+  at: string | null;
+}
+
+function parsePoint(token: string): ClaudePoint {
+  const parsed = JSON.parse(token) as Partial<ClaudePoint>;
+  if (typeof parsed.session !== 'string') throw new Error('Ponto de rebobinar inválido');
+  return { session: parsed.session, at: typeof parsed.at === 'string' ? parsed.at : null };
+}
+
 /**
  * O Claude através do Agent SDK: um query() de longa duração por sessão, em
  * streaming-input, alimentado por uma fila própria.
@@ -306,12 +325,20 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   #capabilities: AgentCapabilities | undefined;
   #settings: SessionSettings;
   #stderr = '';
+  /** A última entrada da conversa no Claude: é aí que um fork volta (resumeSessionAt). */
+  #point: ClaudePoint | null;
 
   constructor(options: ClaudeSdkOptions, sink: AdapterSink) {
     this.#options = options;
     this.#sink = sink;
     this.#normalizer = new ClaudeNormalizer();
-    this.#agentSessionId = options.resume ?? null;
+    this.#point = options.fork
+      ? parsePoint(options.fork)
+      : options.resume
+        ? { session: options.resume, at: null }
+        : null;
+    // Um fork só tem id quando o Claude o criar (no system/init).
+    this.#agentSessionId = options.fork ? null : (options.resume ?? null);
     this.#settings = {
       model: options.model ?? null,
       // Só reporta o effort que chega mesmo ao SDK (ver #sdkOptions).
@@ -322,6 +349,10 @@ export class ClaudeSdkAdapter implements AgentAdapter {
 
   agentSessionId(): string | null {
     return this.#agentSessionId;
+  }
+
+  rewindPoint(): string | null {
+    return this.#point ? JSON.stringify(this.#point) : null;
   }
 
   capabilities(): AgentCapabilities {
@@ -355,16 +386,16 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     return { settings: { ...this.#settings }, capabilities: this.#capabilities };
   }
 
-  async send(text: string): Promise<string> {
+  async send(text: string, options: SendOptions = {}): Promise<string> {
     const queue = this.#queue;
     if (!queue || queue.closed || this.#crashed) throw new Error('A sessão não está ligada');
-    const turnId = crypto.randomUUID();
+    const turnId = options.turnId ?? crypto.randomUUID();
     this.#emit(this.#normalizer.userTurn(turnId, text));
     this.#running = true;
     this.#sink.state('running');
     queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content: withContext(text, options.context) },
       parent_tool_use_id: null,
       uuid: turnId as SDKUserMessage['uuid'],
     });
@@ -468,7 +499,15 @@ export class ClaudeSdkAdapter implements AgentAdapter {
             ),
           }
         : {}),
-      ...(options.resume ? { resume: options.resume } : {}),
+      ...(options.fork && this.#point
+        ? {
+            resume: this.#point.session,
+            forkSession: true,
+            ...(this.#point.at ? { resumeSessionAt: this.#point.at } : {}),
+          }
+        : options.resume
+          ? { resume: options.resume }
+          : {}),
       ...(options.spawn ? { spawnClaudeCodeProcess: options.spawn } : {}),
       ...(options.claudeExecutable ? { pathToClaudeCodeExecutable: options.claudeExecutable } : {}),
     };
@@ -515,6 +554,11 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   #handle(message: SDKMessage): void {
     if (message.type === 'system' && message.subtype === 'init') {
       this.#agentSessionId = message.session_id;
+    }
+    // As entradas da conversa (não as parciais do streaming) marcam o ponto de rebobinar.
+    if ((message.type === 'assistant' || message.type === 'user') && message.uuid) {
+      const session = message.session_id ?? this.#agentSessionId;
+      if (session) this.#point = { session, at: message.uuid };
     }
     this.#emit(this.#normalizer.push(message));
     if (message.type === 'result') {

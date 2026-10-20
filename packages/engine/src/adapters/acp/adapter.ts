@@ -23,8 +23,14 @@ import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts
 import { JsonRpcPeer, RpcError, StderrTail, type RequestId } from '../../rpc/json-rpc.ts';
 import { killTree, spawnAgent } from '../../rpc/spawn.ts';
 import { ENGINE_VERSION } from '../../version.ts';
-import { crashMessage, withTimeout } from '../shared/turns.ts';
-import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
+import { crashMessage, withContext, withTimeout } from '../shared/turns.ts';
+import type {
+  AdapterSink,
+  AgentAdapter,
+  AgentStartOptions,
+  AgentStartResult,
+  SendOptions,
+} from '../types.ts';
 import {
   acpConfig,
   acpSettings,
@@ -209,12 +215,12 @@ export class AcpAdapter implements AgentAdapter {
     return { settings: { ...this.#settings }, capabilities: this.capabilities() };
   }
 
-  async send(text: string): Promise<string> {
+  async send(text: string, options: SendOptions = {}): Promise<string> {
     const peer = this.#peer;
     if (!peer || peer.isClosed || this.#crashed || !this.#sessionId) {
       throw new Error('A sessão não está ligada');
     }
-    const turnId = crypto.randomUUID();
+    const turnId = options.turnId ?? crypto.randomUUID();
     this.#emit(this.#normalizer.userTurn(turnId, text));
     this.#running = true;
     this.#sink.state('running');
@@ -222,7 +228,7 @@ export class AcpAdapter implements AgentAdapter {
     peer
       .request<PromptResponse>('session/prompt', {
         sessionId: this.#sessionId,
-        prompt: [{ type: 'text', text }],
+        prompt: [{ type: 'text', text: withContext(text, options.context) }],
       })
       .then(
         (response) => this.#endTurn(response.stopReason),
