@@ -179,6 +179,7 @@ test('a nova sessão deixa escolher o agente e mostra porque um não está pront
   const page = await app.firstWindow();
   await page.getByTestId('new-session-agent').click();
   await expect(page.getByTestId('agent-claude')).toBeVisible();
+  await expect(page.getByTestId('agent-codex')).toContainText('Codex');
   const deepseek = page.getByTestId('agent-claude:deepseek');
   await expect(deepseek).toContainText('DeepSeek (experimental)');
   // Sem chave fica desligado e diz onde a pôr; com chave fica pronto.
@@ -287,4 +288,25 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await setTheme(page, 'dark');
   await shot(page, 'conversation-dark');
   await setTheme(page, 'light');
+});
+
+test('Codex por clique: sessão, resposta e tokens (Codex real)', async () => {
+  test.skip(
+    process.env.SOLLINE_E2E_CODEX !== '1',
+    'gasta quota do Codex: só com SOLLINE_E2E_CODEX=1',
+  );
+  test.setTimeout(240_000);
+  const page = await app.firstWindow();
+  await page.getByTestId('new-session-agent').click();
+  await page.getByTestId('agent-codex').click();
+  await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
+  await expect(page.getByTestId('pill-mode')).toContainText('Ask');
+  await page.getByTestId('composer-input').fill('Reply with exactly one word: ok');
+  await page.getByTestId('send').click();
+  await expect(page.getByTestId('assistant-text').last()).toContainText(/ok/i, {
+    timeout: 180_000,
+  });
+  await expect(page.getByTestId('session-tokens')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('session-cost')).toHaveCount(0);
+  await shot(page, 'codex-session');
 });
