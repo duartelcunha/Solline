@@ -185,7 +185,8 @@ export function PermissionCard({
             className={secondary}
             onClick={() => answer({ decision: 'allow-always' })}
           >
-            {block.alwaysScope === 'session' ? 'Permitir nesta sessão' : 'Permitir sempre'}
+            {block.allowAlwaysLabel ??
+              (block.alwaysScope === 'session' ? 'Permitir nesta sessão' : 'Permitir sempre')}
             {block.defaultToNo ? null : <Kbd>2</Kbd>}
           </button>
         ) : null}
@@ -206,7 +207,7 @@ export function PermissionCard({
             className={quiet}
             onClick={() => answer({ decision: 'deny-always' })}
           >
-            Negar sempre
+            {block.denyAlwaysLabel ?? 'Negar sempre'}
           </button>
         ) : null}
       </div>

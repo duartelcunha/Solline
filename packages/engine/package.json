@@ -21,6 +21,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@agentclientprotocol/sdk": "2.0.0",
     "@types/node": "24.19.2",
     "vitest": "4.1.11"
   }

@@ -2,7 +2,7 @@
   "name": "@solline/desktop",
   "version": "0.0.1",
   "private": true,
-  "description": "Cliente de desktop para o Claude Code.",
+  "description": "Cliente de desktop para agentes de código.",
   "author": "Duarte Cunha",
   "main": "./out/main/index.js",
   "scripts": {

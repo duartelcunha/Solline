@@ -1,6 +1,6 @@
 # Solline
 
-App de desktop para trabalhar com o Claude Code: o poder do terminal com a facilidade de uma app.
+App de desktop para trabalhar com agentes de código (Claude Code, Codex, modelos DeepSeek e qualquer agente ACP): o poder do terminal com a facilidade de uma app.
 Por agora é para uso pessoal, no Windows.
 
 ## Estado

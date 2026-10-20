@@ -180,6 +180,7 @@ test('a nova sessão deixa escolher o agente e mostra porque um não está pront
   await page.getByTestId('new-session-agent').click();
   await expect(page.getByTestId('agent-claude')).toBeVisible();
   await expect(page.getByTestId('agent-codex')).toContainText('Codex');
+  await expect(page.getByTestId('agent-opencode')).toContainText('OpenCode');
   const deepseek = page.getByTestId('agent-claude:deepseek');
   await expect(deepseek).toContainText('DeepSeek (experimental)');
   // Sem chave fica desligado e diz onde a pôr; com chave fica pronto.

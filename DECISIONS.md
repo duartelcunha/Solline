@@ -185,3 +185,23 @@
 - **Fica para depois:** "Entrar com ChatGPT" dentro da app (`account/login/start`); hoje, sem sessão,
   a mensagem manda fazer `codex login`.
 
+## 2026-10-20: M1g, adaptador ACP genérico
+
+- **ACP v1 por stdio com o nosso `JsonRpcPeer`** (com `"jsonrpc": "2.0"`); o
+  `@agentclientprotocol/sdk` 2.0.0 entra só para tipos (revisto: Apache-2.0, sem dependências nem
+  scripts de instalação). O SDK 2.0 saiu ontem e trocou a API do cliente; assim não nos afeta.
+- **A Solline não anuncia `fs` nem `terminal`:** o agente faz o trabalho e a Solline mostra e aprova.
+  Modelos, modos e effort vêm das config options (`model`, `mode`, `thought_level`), com recurso aos
+  modos e modelos à moda antiga. Modos de acesso total (yolo, bypass…) ficam escondidos e, se o
+  agente arrancar num, a Solline passa-o para o modo mais fechado. "Permitir/Negar sempre" usam os
+  nomes que o agente dá (o âmbito é dele). Retomar só se o agente souber (`resume` ou `load`).
+- **Catálogo no código** (`agents/catalog.ts`), uma entrada por commit depois de revista. Primeira:
+  **OpenCode 1.19.3** (MIT; o `postinstall` só copia o binário da plataforma; sem proveniência no
+  npm; lê `opencode.json` e plugins do projeto, por isso só com confiança). Corre `opencode acp`
+  com `OPENCODE_CONFIG_CONTENT` a pôr edições, comandos e web em "ask". Procura-se o `npm -g` no
+  PATH (só pastas absolutas); versão diferente da revista fica "por rever".
+- **Sem corrida real:** não há nenhum agente ACP instalado nesta máquina. O adaptador está testado
+  contra um agente ACP falso, também como processo de verdade, e na suite de contrato.
+- **Fica para depois:** escolher que chaves cada agente ACP recebe (`agents.setKeys`) e um painel
+  de agentes; hoje o seletor já diz o estado e como instalar ou entrar.
+

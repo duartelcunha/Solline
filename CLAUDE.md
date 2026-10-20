@@ -1,6 +1,6 @@
 # Solline
 
-Cliente de desktop pessoal para o Claude Code. Projeto pessoal: nada de trabalho entra aqui.
+Cliente de desktop pessoal para agentes de código (Claude Code, Codex, DeepSeek e agentes ACP). Projeto pessoal: nada de trabalho entra aqui.
 O plano em curso (vários agentes num só cliente) está em `docs/plano.md`. As decisões estão em
 `DECISIONS.md`.
 

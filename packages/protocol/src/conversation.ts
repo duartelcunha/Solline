@@ -112,6 +112,9 @@ export const PermissionBlock = z.object({
   defaultToNo: z.boolean(),
   /** O agente aceita recusar para sempre (regra gravada do lado dele). */
   canAlwaysDeny: z.boolean().optional(),
+  /** Os nomes que o agente dá às opções "sempre" (o âmbito é dele). */
+  allowAlwaysLabel: z.string().optional(),
+  denyAlwaysLabel: z.string().optional(),
   category: ToolCategory.optional(),
   content: z.array(ToolContent).optional(),
   status: AskStatus,

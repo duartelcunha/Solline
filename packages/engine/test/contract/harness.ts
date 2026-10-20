@@ -1,6 +1,12 @@
 import type { PermissionAnswer } from '@solline/protocol';
-import { ClaudeSdkAdapter, CodexAppServerAdapter, type AgentAdapter } from '../../src/index.ts';
+import {
+  AcpAdapter,
+  ClaudeSdkAdapter,
+  CodexAppServerAdapter,
+  type AgentAdapter,
+} from '../../src/index.ts';
 import { declinedVariant, loadCodexFixture, replayCodex } from '../codex-fakes.ts';
+import { fakeAcp } from '../fakes/acp-transport.ts';
 import { fakeQuery, loadFixture, recordingSink, type RecordingSink } from '../helpers.ts';
 
 /**
@@ -64,4 +70,19 @@ export const codexHarness: Harness = {
   },
 };
 
-export const HARNESSES: readonly Harness[] = [claudeHarness, codexHarness];
+/** Um agente ACP qualquer, com o agente falso (o mesmo que corre como processo nos testes). */
+export const acpHarness: Harness = {
+  agent: 'acp',
+  scenarios: ['plain-answer', 'edit-with-permission', 'denied-edit'],
+  open(scenario) {
+    const sink = recordingSink();
+    const fake = fakeAcp({ scenario: scenario === 'plain-answer' ? 'plain' : 'edit' });
+    const adapter = new AcpAdapter(
+      { cwd: 'C:/tmp/proj', mode: null, label: 'ACP', transport: fake.transport },
+      sink,
+    );
+    return { adapter, sink };
+  },
+};
+
+export const HARNESSES: readonly Harness[] = [claudeHarness, codexHarness, acpHarness];

@@ -60,3 +60,13 @@ export {
   type CodexExecutable,
 } from './adapters/codex/executable.ts';
 export { crashMessage, userTurnDelta } from './adapters/shared/turns.ts';
+export {
+  AcpAdapter,
+  ACP_PROTOCOL_VERSION,
+  acpOutcome,
+  type AcpAdapterOptions,
+  type AcpTransport,
+} from './adapters/acp/adapter.ts';
+export { AcpNormalizer } from './adapters/acp/normalizer.ts';
+export { capabilitiesFromAcp, classifyModeRisk, acpConfig } from './adapters/acp/capabilities.ts';
+export { CATALOG, catalogDefinition, findNpmAgent, type CatalogEntry } from './agents/catalog.ts';
