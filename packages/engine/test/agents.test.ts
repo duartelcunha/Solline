@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -153,6 +153,43 @@ describe('LoginManager', () => {
     expect(changes[0]![1]).toMatch(/expirou/);
     expect(login.cancelled).toHaveLength(1);
     expect(logins.pending('codex')).toBe(false);
+  });
+
+  it('um segundo clique enquanto o primeiro prepara fecha o processo do primeiro', async () => {
+    const logins = new LoginManager({ onChange: () => undefined });
+    const first = manualFlow('https://auth.openai.com/1');
+    const second = manualFlow('https://auth.openai.com/2');
+    let release: () => void = () => undefined;
+    const slow = new Promise<void>((resolve) => (release = resolve));
+    const one = logins.start('codex', async () => {
+      await slow;
+      return first.flow;
+    });
+    expect(logins.pending('codex')).toBe(true);
+    const two = logins.start('codex', async () => second.flow);
+    expect(await two).toBe(second.flow.url);
+    release();
+    await expect(one).rejects.toThrow('substituído');
+    expect(first.cancelled).toHaveLength(1);
+    expect(second.cancelled).toHaveLength(0);
+    expect(logins.pending('codex')).toBe(true);
+  });
+
+  it('cancelar ou fechar o motor a meio do arranque não deixa o processo órfão', async () => {
+    const logins = new LoginManager({ onChange: () => undefined });
+    const login = manualFlow();
+    let release: () => void = () => undefined;
+    const slow = new Promise<void>((resolve) => (release = resolve));
+    const started = logins.start('codex', async () => {
+      await slow;
+      return login.flow;
+    });
+    await logins.cancelAll();
+    expect(logins.pending('codex')).toBe(false);
+    release();
+    await expect(started).rejects.toThrow();
+    expect(login.cancelled).toHaveLength(1);
+    await expect(logins.start('codex', async () => manualFlow().flow)).rejects.toThrow('fechar');
   });
 
   it('um login que falha avisa com o erro', async () => {
@@ -360,5 +397,10 @@ describe('variáveis escolhidas para os agentes ACP', () => {
       '{"version":1,"agents":{"x":{"keys":["a b"]}}}',
     );
     expect(await settings.keys('x')).toEqual([]);
+    // Escrever por cima de um ficheiro que não se leu guarda primeiro uma cópia.
+    await settings.setKeys('opencode', ['C_KEY']);
+    const backups = (await readdir(dir)).filter((f) => f.endsWith('.bak'));
+    expect(backups).toHaveLength(1);
+    expect(await readFile(path.join(dir, backups[0]!), 'utf8')).toContain('a b');
   });
 });

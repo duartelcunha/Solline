@@ -21,7 +21,7 @@ import {
   type CommandPayload,
   type MainCommandName,
 } from '@solline/protocol';
-import { addedKeys, isAllowedLoginUrl } from './agent-policy.ts';
+import { addedKeys, allowedLoginUrl } from './agent-policy.ts';
 import { EngineHost } from './engine-host.ts';
 import { ProjectStore } from './projects.ts';
 import { resolveSessionStart } from './session-policy.ts';
@@ -84,13 +84,21 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
   switch (command) {
     case 'agents.login': {
       const { agent } = payload as CommandPayload<'agents.login'>;
-      const { url } = await engine.request('agents.loginStart', { agent });
       // O motor pede, o main decide: só se abre o browser no sítio de login do agente.
-      if (!isAllowedLoginUrl(agent, url)) {
-        await engine.request('agents.loginCancel', { agent }).catch(() => undefined);
+      // Em qualquer falha (endereço recusado, resposta inválida, tempo esgotado) o login fecha.
+      const cancel = () => engine.request('agents.loginCancel', { agent }).catch(() => undefined);
+      let url: URL | null;
+      try {
+        url = allowedLoginUrl(agent, (await engine.request('agents.loginStart', { agent })).url);
+      } catch (error) {
+        await cancel();
+        throw error;
+      }
+      if (!url) {
+        await cancel();
         throw new Error('O endereço de login não é o esperado; não foi aberto.');
       }
-      await shell.openExternal(url);
+      await shell.openExternal(url.href);
       return {};
     }
     case 'agents.setKeys': {

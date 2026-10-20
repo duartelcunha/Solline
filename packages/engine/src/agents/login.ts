@@ -17,6 +17,12 @@ export const LOGIN_TIMEOUT_MS = 10 * 60_000;
  */
 export class LoginManager {
   readonly #flows = new Map<AgentId, { flow: LoginFlow; timer: NodeJS.Timeout }>();
+  /** Logins a preparar (o agente ainda não deu o endereço), com o número do arranque. */
+  readonly #starting = new Map<AgentId, number>();
+  /** O número do último arranque (ou cancelamento) de cada agente: só esse vale. */
+  readonly #latest = new Map<AgentId, number>();
+  #generation = 0;
+  #closed = false;
   readonly #onChange: (agent: AgentId, error?: string) => void;
   readonly #timeoutMs: number;
 
@@ -26,12 +32,36 @@ export class LoginManager {
   }
 
   pending(agent: AgentId): boolean {
-    return this.#flows.has(agent);
+    return this.#flows.has(agent) || this.#starting.has(agent);
   }
 
   async start(agent: AgentId, begin: () => Promise<LoginFlow>): Promise<string> {
-    await this.cancel(agent);
-    const flow = await begin();
+    if (this.#closed) throw new Error('O motor está a fechar');
+    // Cada arranque tem um número, marcado já (sem esperar): se outro começar ou alguém
+    // cancelar enquanto o agente prepara o login (até um minuto), este fecha o seu processo
+    // em vez de ficar órfão.
+    const generation = ++this.#generation;
+    this.#latest.set(agent, generation);
+    this.#starting.set(agent, generation);
+    const previous = this.#flows.get(agent);
+    const preparing = begin();
+    preparing.catch(() => undefined);
+    let flow: LoginFlow;
+    try {
+      if (previous) {
+        this.#flows.delete(agent);
+        clearTimeout(previous.timer);
+        await previous.flow.cancel().catch(() => undefined);
+        this.#onChange(agent);
+      }
+      flow = await preparing;
+    } finally {
+      if (this.#starting.get(agent) === generation) this.#starting.delete(agent);
+    }
+    if (this.#closed || this.#latest.get(agent) !== generation) {
+      await flow.cancel();
+      throw new Error('O login foi cancelado ou substituído por outro');
+    }
     const timer = setTimeout(() => {
       if (this.#flows.get(agent)?.flow !== flow) return;
       this.#flows.delete(agent);
@@ -49,8 +79,14 @@ export class LoginManager {
 
   /** Desiste sem avisar de erro (foste tu que cancelaste). */
   async cancel(agent: AgentId): Promise<void> {
+    // Um arranque a meio deixa de valer: fecha o processo quando o agente responder.
+    const wasStarting = this.#starting.delete(agent);
+    this.#latest.set(agent, ++this.#generation);
     const entry = this.#flows.get(agent);
-    if (!entry) return;
+    if (!entry) {
+      if (wasStarting) this.#onChange(agent);
+      return;
+    }
     this.#flows.delete(agent);
     clearTimeout(entry.timer);
     await entry.flow.cancel();
@@ -58,7 +94,9 @@ export class LoginManager {
   }
 
   async cancelAll(): Promise<void> {
-    await Promise.all([...this.#flows.keys()].map((agent) => this.cancel(agent)));
+    this.#closed = true;
+    const agents = new Set([...this.#flows.keys(), ...this.#starting.keys()]);
+    await Promise.all([...agents].map((agent) => this.cancel(agent)));
   }
 
   #finish(agent: AgentId, flow: LoginFlow, error?: string): void {

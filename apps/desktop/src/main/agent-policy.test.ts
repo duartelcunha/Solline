@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { addedKeys, isAllowedLoginUrl } from './agent-policy.ts';
+import { addedKeys, allowedLoginUrl } from './agent-policy.ts';
 
-describe('isAllowedLoginUrl', () => {
+const isAllowedLoginUrl = (agent: string, raw: string) => allowedLoginUrl(agent, raw) !== null;
+
+describe('allowedLoginUrl', () => {
+  it('devolve o URL interpretado, que é o que se abre', () => {
+    expect(allowedLoginUrl('codex', ' https://AUTH.openai.com/x ')?.href).toBe(
+      'https://auth.openai.com/x',
+    );
+  });
+
   it('abre o login da OpenAI para o Codex', () => {
     expect(
       isAllowedLoginUrl('codex', 'https://auth.openai.com/oauth/authorize?client_id=x&state=y'),

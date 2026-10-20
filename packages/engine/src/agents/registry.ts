@@ -9,6 +9,7 @@ import type { AgentAdapterFactory } from '../adapters/types.ts';
 import { CodexAppServerAdapter } from '../adapters/codex/adapter.ts';
 import { codexNeedsLogin, startCodexLogin } from '../adapters/codex/account.ts';
 import { spawnCodex, type CodexTransport } from '../adapters/codex/transport.ts';
+import { withTimeout } from '../adapters/shared/turns.ts';
 import {
   REVIEWED_CODEX_VERSION,
   resolveCodexExecutable,
@@ -141,6 +142,8 @@ export function claudeDefinition(
 
 /** Quanto tempo vale a resposta do Codex sobre ter sessão iniciada. */
 const ACCOUNT_TTL_MS = 60_000;
+/** A lista de agentes não espera mais do que isto pela resposta do Codex. */
+const ACCOUNT_BUDGET_MS = 10_000;
 
 /**
  * O Codex pelo codex app-server. Lê AGENTS.md e config do projeto, por isso só corre em
@@ -178,7 +181,14 @@ export function codexDefinition(
   const needsLogin = (found: CodexExecutable, refresh: boolean): Promise<boolean> => {
     if (refresh || !account || Date.now() - account.at > ACCOUNT_TTL_MS) {
       // Sem resposta não se bloqueia nada: a sessão diz porquê se faltar o login.
-      account = { at: Date.now(), needsLogin: codexNeedsLogin(aux(found)).catch(() => false) };
+      account = {
+        at: Date.now(),
+        needsLogin: withTimeout(
+          codexNeedsLogin(aux(found)),
+          ACCOUNT_BUDGET_MS,
+          'Conta do Codex',
+        ).catch(() => false),
+      };
     }
     return account.needsLogin;
   };
