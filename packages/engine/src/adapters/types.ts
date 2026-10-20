@@ -21,11 +21,14 @@ export interface AgentStartOptions {
   cwd: string;
   model?: string | undefined;
   effort?: string | undefined;
-  mode: string;
+  /** null nos agentes sem modos. */
+  mode: string | null;
   /** Id da sessão no agente, para retomar o histórico. */
   resume?: string | undefined;
   /** Projeto de confiança: o agente pode ler as definições e instruções da pasta. */
   projectTrusted?: boolean | undefined;
+  /** Ambiente do processo do agente, já com a política do registo aplicada. */
+  env?: Record<string, string | undefined> | undefined;
 }
 
 export interface AgentStartResult {
@@ -34,8 +37,8 @@ export interface AgentStartResult {
 }
 
 /**
- * Um agente numa sessão. Cada provider (Claude pelo SDK, os outros por ACP no M1b)
- * implementa isto e traduz para o mesmo modelo de conversa.
+ * Um agente numa sessão. Cada transporte (Claude pelo SDK, Codex pelo app-server, os outros
+ * por ACP) implementa isto e traduz para o mesmo modelo de conversa.
  */
 export interface AgentAdapter {
   start(): Promise<AgentStartResult>;

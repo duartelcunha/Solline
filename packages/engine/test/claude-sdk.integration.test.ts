@@ -4,13 +4,14 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ClaudeSdkAdapter } from '../src/index.ts';
 import { recordingSink, reduce, waitFor } from './helpers.ts';
+import { realAgents } from './real-agents.ts';
 
 /**
  * Sessão real com o Claude: Haiku, effort low, num projeto temporário e sem as definições
  * do utilizador. Lê um ficheiro, pede permissão para o editar (o teste aceita uma vez),
  * edita e termina com result. Saltar com SOLLINE_SKIP_SDK=1.
  */
-const skip = process.env.SOLLINE_SKIP_SDK === '1';
+const skip = !realAgents().has('claude');
 
 describe.skipIf(skip)('ClaudeSdkAdapter (SDK real)', () => {
   let cwd: string;

@@ -9,7 +9,7 @@ import {
   toPermissionMode,
   toPermissionResult,
 } from '../src/index.ts';
-import { fakeQuery, loadFixture, recordingSink, reduce, waitFor } from './helpers.ts';
+import { fakeQuery, loadFixture, recordingSink, reduce, waitFor, testRegistry } from './helpers.ts';
 
 function adapterFor(fixture: string, extra: { mode?: string; model?: string } = {}) {
   const fake = fakeQuery(loadFixture(fixture));
@@ -316,7 +316,7 @@ describe('SessionManager', () => {
     const fakes: ReturnType<typeof fakeQuery>[] = [];
     const manager = new SessionManager({
       emit: (event) => events.push(event),
-      adapters: {
+      registry: testRegistry({
         claude: (options, sink) => {
           const fake = fakeQuery(loadFixture('plain-answer'));
           fakes.push(fake);
@@ -325,7 +325,7 @@ describe('SessionManager', () => {
             sink,
           );
         },
-      },
+      }),
     });
     const created = await manager.create({
       projectId: 'p',
@@ -363,11 +363,11 @@ describe('SessionManager', () => {
   it('erros de sessão desconhecida são claros', async () => {
     const manager = new SessionManager({
       emit: () => undefined,
-      adapters: {
+      registry: testRegistry({
         claude: () => {
           throw new Error('não');
         },
-      },
+      }),
     });
     expect(() => manager.send('x', 'olá')).toThrow('Sessão desconhecida');
   });

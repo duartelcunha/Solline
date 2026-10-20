@@ -5,14 +5,15 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CRASH_MESSAGE, ClaudeSdkAdapter, SessionManager } from '../src/index.ts';
 import type { EngineEvent } from '@solline/protocol';
-import { recordingSink, reduce, waitFor } from './helpers.ts';
+import { recordingSink, reduce, waitFor, testRegistry } from './helpers.ts';
+import { realAgents } from './real-agents.ts';
 
 /**
  * Cenários reais do M1 com Haiku e effort low: interromper (#444), plano (ExitPlanMode),
  * pergunta (AskUserQuestion) e o claude.exe a morrer a meio (#359) com retoma por resume.
  * Saltar com SOLLINE_SKIP_SDK=1.
  */
-const skip = process.env.SOLLINE_SKIP_SDK === '1';
+const skip = !realAgents().has('claude');
 const T = 180_000;
 
 describe.skipIf(skip)('cenários reais do Claude', () => {
@@ -142,7 +143,7 @@ describe.skipIf(skip)('cenários reais do Claude', () => {
       const events: EngineEvent[] = [];
       const manager = new SessionManager({
         emit: (event) => events.push(event),
-        adapters: {
+        registry: testRegistry({
           claude: (options, sink) =>
             new ClaudeSdkAdapter(
               {
@@ -161,7 +162,7 @@ describe.skipIf(skip)('cenários reais do Claude', () => {
               },
               sink,
             ),
-        },
+        }),
       });
       const idle = (n: number) =>
         waitFor(

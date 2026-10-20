@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { sanitizedEnv } from '../src/env.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const name = process.argv[2] ?? 'edit-with-permission';
@@ -32,10 +33,8 @@ const SCENARIOS = {
 const scenario = SCENARIOS[name];
 if (!scenario) throw new Error(`cenário desconhecido: ${name}`);
 
-const STRIP =
-  /^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_AGENT_SDK_.*|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_PREVIEW_.*|ANTHROPIC_BASE_URL|USE_LOCAL_OAUTH|USE_STAGING_OAUTH|MCP_CONNECTION_NONBLOCKING|MCP_SERVER_CONNECTION_BATCH_SIZE|AI_AGENT)$/;
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !STRIP.test(k)));
-env.CLAUDE_AGENT_SDK_CLIENT_APP = 'solline';
+// O mesmo ambiente que a app dá ao Claude (Node 22.18+ lê o .ts diretamente).
+const env = sanitizedEnv();
 
 const cwd = await mkdtemp(path.join(tmpdir(), 'solline-rec-'));
 for (const [file, content] of Object.entries(scenario.files))

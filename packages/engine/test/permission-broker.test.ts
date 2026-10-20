@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AsyncQueue, PermissionBroker, sanitizedEnv } from '../src/index.ts';
+import { AsyncQueue, PermissionBroker } from '../src/index.ts';
 
 describe('PermissionBroker', () => {
   it('entrega a resposta a quem espera', async () => {
@@ -52,28 +52,5 @@ describe('AsyncQueue', () => {
     await reading;
     expect(seen).toEqual([1, 2, 3]);
     expect(() => queue.push(4)).toThrow();
-  });
-});
-
-describe('sanitizedEnv', () => {
-  it('tira as variáveis herdadas de uma sessão anfitriã e identifica a Solline', () => {
-    const env = sanitizedEnv({
-      PATH: '/bin',
-      CLAUDE_CONFIG_DIR: '/c',
-      ANTHROPIC_API_KEY: 'k',
-      CLAUDECODE: '1',
-      CLAUDE_CODE_ENTRYPOINT: 'sdk-ts',
-      CLAUDE_CODE_SESSION_ID: 'x',
-      CLAUDE_AGENT_SDK_VERSION: '1',
-      ANTHROPIC_BASE_URL: 'http://localhost',
-      CLAUDE_PID: '1',
-      USE_LOCAL_OAUTH: '1',
-    });
-    expect(env).toEqual({
-      PATH: '/bin',
-      CLAUDE_CONFIG_DIR: '/c',
-      ANTHROPIC_API_KEY: 'k',
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'solline',
-    });
   });
 });

@@ -23,7 +23,15 @@ export type {
   AgentStartResult,
 } from './adapters/types.ts';
 export { AsyncQueue } from './async-queue.ts';
-export { sanitizedEnv } from './env.ts';
+export { sanitizedEnv, agentEnv, CLAUDE_ENV_POLICY, SECRET_NAME, type EnvPolicy } from './env.ts';
+export {
+  builtinRegistry,
+  claudeDefinition,
+  registryOf,
+  withFactories,
+  type AgentDefinition,
+  type AgentRegistry,
+} from './agents/registry.ts';
 export {
   resolveClaudeExecutable,
   toUnpackedPath,

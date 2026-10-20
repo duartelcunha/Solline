@@ -19,7 +19,7 @@ Se o Claude cair a meio, a sessão mostra "Retomar".
 
 ## Comandos
 
-Precisa de Node 22.12 ou mais recente e do pnpm (vem com o `corepack`).
+Precisa de Node 22.18 ou mais recente e do pnpm (vem com o `corepack`).
 
 ```sh
 pnpm install

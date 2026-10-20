@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
+import type { TokenUsage } from '@solline/protocol';
 import { actions, useSession } from '../../stores/app.ts';
+import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { SettingsPills } from './pills.tsx';
 
 const money = new Intl.NumberFormat('pt-PT', {
@@ -53,12 +55,27 @@ function ContextMeter({ used, max, percent }: { used: number; max: number; perce
   );
 }
 
+function TokenCount({ usage }: { usage: TokenUsage }) {
+  const label =
+    `Tokens desta sessão: ${tokens.format(usage.input)} de entrada` +
+    (usage.cachedInput ? ` (${tokens.format(usage.cachedInput)} em cache)` : '') +
+    `, ${tokens.format(usage.output)} de saída` +
+    (usage.reasoning ? ` (${tokens.format(usage.reasoning)} a pensar)` : '');
+  return (
+    <span className="tabular-nums" title={label} aria-label={label} data-testid="session-tokens">
+      {tokens.format(usage.input + usage.output)} tokens
+    </span>
+  );
+}
+
 export function Composer({ sessionId }: { sessionId: string }) {
   const state = useSession(sessionId, (s) => s.info.state);
   const settings = useSession(sessionId, (s) => s.info.settings);
   const capabilities = useSession(sessionId, (s) => s.capabilities);
   const usage = useSession(sessionId, (s) => s.usage);
   const actionError = useSession(sessionId, (s) => s.actionError);
+  const agentLabel = useSessionAgentLabel(sessionId);
+  const features = capabilities?.features;
   const [text, setText] = useState('');
   const input = useRef<HTMLTextAreaElement>(null);
 
@@ -71,7 +88,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const offline = state === 'starting' || state === 'error';
   const canSend = !busy && !offline && text.trim().length > 0;
 
-  // shortcut: não há fila de mensagens enquanto o Claude trabalha; o envio fica bloqueado
+  // shortcut: não há fila de mensagens enquanto o agente trabalha; o envio fica bloqueado
   // até ao fim do turno. Rever quando fizer falta mandar mensagens a meio (M2).
   async function send() {
     if (!canSend) return;
@@ -110,7 +127,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
               offline
                 ? 'A sessão não está ligada'
                 : busy
-                  ? 'O Claude está a trabalhar…'
+                  ? `O ${agentLabel} está a trabalhar…`
                   : 'Escreve uma mensagem'
             }
             aria-label="Mensagem"
@@ -129,14 +146,14 @@ export function Composer({ sessionId }: { sessionId: string }) {
               />
             ) : null}
             <div className="ml-auto flex items-center gap-3 text-[12px] text-muted">
-              {usage.context ? (
+              {usage.context && features?.context !== false ? (
                 <ContextMeter
                   used={usage.context.usedTokens}
                   max={usage.context.maxTokens}
                   percent={usage.context.percent}
                 />
               ) : null}
-              {usage.costUsd !== null ? (
+              {usage.costUsd !== null && features?.cost !== false ? (
                 <span
                   className="tabular-nums"
                   title="Custo estimado desta sessão"
@@ -144,6 +161,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
                 >
                   {money.format(usage.costUsd)}
                 </span>
+              ) : usage.tokens ? (
+                <TokenCount usage={usage.tokens} />
               ) : null}
               {busy ? (
                 <button

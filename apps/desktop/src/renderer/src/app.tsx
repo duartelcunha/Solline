@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderPlus, Moon, Plus, Sun, X } from 'lucide-react';
+import { FolderPlus, Moon, Sun, X } from 'lucide-react';
 import type { CommandResult } from '@solline/protocol';
 import type { Theme } from '@solline/protocol/bridge';
 import { Composer } from './features/composer/composer.tsx';
+import { NewSessionButton } from './features/agents/new-session-button.tsx';
 import { Conversation } from './features/conversation/conversation.tsx';
 import { Sidebar, StateDot } from './features/sidebar/sidebar.tsx';
 import { actions, dispatch, sessionStore, useApp, useSession } from './stores/app.ts';
@@ -92,7 +93,6 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
 function Welcome() {
   const projects = useApp((s) => s.projects);
   const activeProjectId = useApp((s) => s.activeProjectId);
-  const creating = useApp((s) => s.creatingIn !== null);
   const project = projects.find((p) => p.id === activeProjectId);
   return (
     <section className="flex flex-1 flex-col items-center justify-center gap-6 px-8 text-center">
@@ -102,20 +102,12 @@ function Welcome() {
         </h2>
         <p className="mt-1.5 text-muted">
           {project
-            ? 'Abre uma sessão para conversar com o Claude neste projeto.'
+            ? 'Abre uma sessão para trabalhar com um agente neste projeto.'
             : 'Poder do terminal, facilidade da app.'}
         </p>
       </div>
       {project ? (
-        <button
-          type="button"
-          disabled={creating}
-          onClick={() => void actions.createSession(project.id)}
-          data-testid="welcome-new-session"
-          className="inline-flex h-10 items-center gap-2 rounded-full bg-fg px-5 text-[14px] font-medium text-bg transition-transform duration-150 active:scale-[0.97] disabled:opacity-60"
-        >
-          <Plus size={16} /> {creating ? 'A abrir…' : 'Nova sessão'}
-        </button>
+        <NewSessionButton project={project} variant="primary" />
       ) : (
         <button
           type="button"
@@ -139,6 +131,7 @@ export function App() {
   useEffect(() => {
     const off = window.solline.onEvent(dispatch);
     void actions.loadProjects();
+    void actions.loadAgents();
     return off;
   }, []);
 

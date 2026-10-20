@@ -43,13 +43,25 @@ export const CLAUDE_MODES: readonly ModeOption[] = [
     id: 'default',
     label: 'Ask',
     description: 'Pede autorização antes de editar ficheiros ou correr comandos.',
+    risk: 'ask',
   },
-  { id: 'acceptEdits', label: 'Edits', description: 'Aceita edições de ficheiros sem perguntar.' },
-  { id: 'plan', label: 'Plan', description: 'Só lê e planeia; não muda nada até aprovares.' },
+  {
+    id: 'acceptEdits',
+    label: 'Edits',
+    description: 'Aceita edições de ficheiros sem perguntar.',
+    risk: 'edits',
+  },
+  {
+    id: 'plan',
+    label: 'Plan',
+    description: 'Só lê e planeia; não muda nada até aprovares.',
+    risk: 'plan',
+  },
   {
     id: 'auto',
     label: 'Auto',
     description: 'Um classificador aprova ou recusa cada ação e só pergunta quando não sabe.',
+    risk: 'auto',
   },
 ];
 
@@ -120,6 +132,8 @@ export function capabilitiesFrom(models: ModelInfo[]): AgentCapabilities {
     })),
     modes: CLAUDE_MODES.filter((mode) => mode.id !== 'auto' || auto),
     effort: models.some((model) => model.supportsEffort),
+    effortOrder: [...EFFORT_LEVELS],
+    features: { cost: true, context: true, resume: true },
   };
 }
 
@@ -385,7 +399,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       ...(options.effort && EFFORT_LEVELS.includes(options.effort)
         ? { effort: toEffortLevel(options.effort) }
         : {}),
-      permissionMode: toPermissionModeOr(options.mode, 'default'),
+      permissionMode: toPermissionModeOr(options.mode ?? 'default', 'default'),
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },
       systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -397,7 +411,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
             ? ['user', 'project', 'local']
             : ['user'],
       canUseTool: this.#canUseTool,
-      env: sanitizedEnv(),
+      env: options.env ?? sanitizedEnv(),
       stderr: (data) => {
         this.#stderr = (this.#stderr + data).slice(-STDERR_LIMIT);
       },

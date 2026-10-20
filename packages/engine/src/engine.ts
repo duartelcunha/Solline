@@ -1,15 +1,15 @@
 import {
   RequestEnvelope,
   engineCommandSchemas,
-  type AgentKind,
+  type AgentId,
   type EngineCommandName,
   type EngineCommandPayload,
   type EngineCommandResult,
   type EngineEvent,
   type ResponseEnvelope,
 } from '@solline/protocol';
-import { CLAUDE_MODES, ClaudeSdkAdapter } from './adapters/claude/sdk.ts';
 import type { AgentAdapterFactory } from './adapters/types.ts';
+import { builtinRegistry, withFactories, type AgentRegistry } from './agents/registry.ts';
 import { SessionManager } from './session-manager.ts';
 import { ENGINE_VERSION } from './version.ts';
 
@@ -19,8 +19,10 @@ export interface EngineOptions {
   emit?: (event: EngineEvent) => void;
   /** Sem definições do utilizador nem do projeto (testes e smoke). */
   isolated?: boolean;
-  /** Para testes: troca os adaptadores reais. */
-  adapters?: Partial<Record<AgentKind, AgentAdapterFactory>>;
+  /** Para testes: troca o adaptador de alguns agentes (o resto da definição fica). */
+  adapters?: Partial<Record<AgentId, AgentAdapterFactory>>;
+  /** Para testes: troca o registo inteiro. */
+  registry?: AgentRegistry;
 }
 
 type Handlers = {
@@ -33,17 +35,11 @@ export class Engine {
   readonly #handlers: Handlers;
 
   constructor(options: EngineOptions = {}) {
-    const claude: AgentAdapterFactory = (start, sink) =>
-      new ClaudeSdkAdapter(
-        { ...start, claudeExecutable: options.claudeExecutable, loadSettings: !options.isolated },
-        sink,
-      );
-    this.sessions = new SessionManager({
-      emit: options.emit ?? (() => undefined),
-      adapters: { claude, ...options.adapters },
-      staticModes: { claude: CLAUDE_MODES },
-      defaultModes: { claude: 'default' },
-    });
+    const base =
+      options.registry ??
+      builtinRegistry({ claudeExecutable: options.claudeExecutable, isolated: options.isolated });
+    const registry = options.adapters ? withFactories(base, options.adapters) : base;
+    this.sessions = new SessionManager({ emit: options.emit ?? (() => undefined), registry });
     const s = this.sessions;
     const ok = {} as Record<string, never>;
     this.#handlers = {
@@ -52,6 +48,21 @@ export class Engine {
         engineVersion: ENGINE_VERSION,
         pid: process.pid,
         receivedAt: Date.now(),
+      }),
+      'agents.list': async () => ({
+        agents: await Promise.all(
+          registry.list().map(async (d) => ({
+            id: d.id,
+            label: d.label,
+            transport: d.transport,
+            experimental: d.experimental === true,
+            untrustedProjects: d.untrustedProjects,
+            ...(await d.detect().catch((error: unknown): { status: 'error'; detail: string } => ({
+              status: 'error',
+              detail: error instanceof Error ? error.message : String(error),
+            }))),
+          })),
+        ),
       }),
       'session.start': (p) => s.create(p),
       'session.resume': (p) => s.resume(p.sessionId),

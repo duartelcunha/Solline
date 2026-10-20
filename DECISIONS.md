@@ -82,3 +82,22 @@
   sobre o Electron de `node_modules`. Para usar a app instalada é preciso assinar o build ou desligar
   o Smart App Control (decisão do Duarte; não se volta a ligar sem reinstalar o Windows).
 
+## 2026-10-20: M1c, agentes como dados (contrato neutro v2)
+
+- **Registo de agentes no motor** (`packages/engine/src/agents/registry.ts`): cada agente diz o
+  nome, o transporte, a política de ambiente, os modos, se corre em projetos sem confiança, como
+  se deteta e como se cria o adaptador. `agents.list` mostra-os à interface com o estado nesta
+  máquina. Por agora só o Claude.
+- **Ambiente por agente** (`agentEnv`): `host` (o Claude, igual a antes) ou `no-secrets` (sem os
+  segredos que o agente não declarou; é uma lista de recusa por nome, por isso um segredo com um
+  nome estranho passa). O herdado de uma sessão anfitriã sai sempre; o overlay ganha no fim.
+- **Contrato:** `AgentId` em vez do enum; cada modo tem um risco (`read-only`, `plan`, `ask`,
+  `edits`, `auto`, `full`) e a interface escolhe o ícone por aí; as capacidades trazem a ordem do
+  effort e o que o agente reporta (custo, contexto, retomar); tokens da sessão ao lado do custo
+  (último total, nunca somado); um delta `capabilities` para o agente mudar o que sabe fazer.
+- **A interface deixa de dizer "Claude"** fora dos dados: o nome vem do registo. O botão de nova
+  sessão ganha uma seta para escolher o agente quando houver mais do que um.
+- **Suite de contrato** (`packages/engine/test/contract`): os mesmos cenários gravados para todos
+  os agentes. `SOLLINE_AGENTS=claude,…` escolhe que agentes correm a sério; por omissão só o Claude.
+- **Node 22.18+**: o gravador de fixtures importa o `env.ts` do motor diretamente.
+

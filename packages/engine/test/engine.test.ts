@@ -3,7 +3,13 @@ import path from 'node:path';
 import type { ModelInfo } from '@anthropic-ai/claude-agent-sdk';
 import { describe, expect, it } from 'vitest';
 import type { EngineEvent, ResponseEnvelope } from '@solline/protocol';
-import { ClaudeSdkAdapter, Engine } from '../src/index.ts';
+import {
+  ClaudeSdkAdapter,
+  Engine,
+  claudeDefinition,
+  registryOf,
+  type AgentDefinition,
+} from '../src/index.ts';
 import { fakeQuery, loadFixture, waitFor } from './helpers.ts';
 
 function fakeEngine(
@@ -201,6 +207,71 @@ describe('Engine', () => {
       result: { session: { settings: { mode: 'default' } } },
     });
     expect(fakes[0]!.calls).toEqual([{ method: 'setPermissionMode', args: ['default'] }]);
+    await engine.dispose();
+  });
+
+  it('agents.list mostra os agentes do registo e o estado de cada um', async () => {
+    const engine = new Engine({ isolated: true });
+    const listed = await call(engine, 'agents.list', {});
+    expect(listed).toMatchObject({
+      ok: true,
+      result: {
+        agents: [
+          {
+            id: 'claude',
+            label: 'Claude',
+            transport: 'claude-sdk',
+            experimental: false,
+            untrustedProjects: 'allowed',
+            status: expect.stringMatching(/^(ready|not-found)$/),
+          },
+        ],
+      },
+    });
+  });
+
+  it('um detect que rebenta aparece como erro, não parte a lista', async () => {
+    const broken: AgentDefinition = {
+      ...claudeDefinition(),
+      id: 'partido',
+      detect: () => Promise.reject(new Error('sem PATH')),
+    };
+    const engine = new Engine({ registry: registryOf([broken]) });
+    const listed = await call(engine, 'agents.list', {});
+    expect(listed).toMatchObject({
+      ok: true,
+      result: { agents: [{ id: 'partido', status: 'error', detail: 'sem PATH' }] },
+    });
+  });
+
+  it('um agente desconhecido não abre sessão', async () => {
+    const { engine } = fakeEngine();
+    await expect(start(engine, { agent: 'nao-existe' })).rejects.toThrow('Agente desconhecido');
+  });
+
+  it('um agente que lê config do projeto não abre em projetos sem confiança', async () => {
+    const fakes: ReturnType<typeof fakeQuery>[] = [];
+    const strict: AgentDefinition = {
+      ...claudeDefinition({ isolated: true }),
+      id: 'estrito',
+      label: 'Estrito',
+      untrustedProjects: 'refused',
+      create: (options, sink) => {
+        const fake = fakeQuery(loadFixture('plain-answer'));
+        fakes.push(fake);
+        return new ClaudeSdkAdapter(
+          { ...options, queryFn: fake.queryFn, loadSettings: false },
+          sink,
+        );
+      },
+    };
+    const engine = new Engine({ registry: registryOf([strict]) });
+    await expect(start(engine, { agent: 'estrito', trusted: false })).rejects.toThrow(
+      'só corre em projetos de confiança',
+    );
+    expect(fakes).toHaveLength(0);
+    await start(engine, { agent: 'estrito', trusted: true });
+    expect(fakes).toHaveLength(1);
     await engine.dispose();
   });
 });

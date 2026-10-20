@@ -16,7 +16,18 @@ import {
   type SessionState,
   type Turn,
 } from '@solline/protocol';
-import type { AdapterSink } from '../src/index.ts';
+import {
+  builtinRegistry,
+  withFactories,
+  type AdapterSink,
+  type AgentAdapterFactory,
+  type AgentRegistry,
+} from '../src/index.ts';
+
+/** O registo de verdade (isolado) com o adaptador de alguns agentes trocado. */
+export function testRegistry(factories: Record<string, AgentAdapterFactory>): AgentRegistry {
+  return withFactories(builtinRegistry({ isolated: true }), factories);
+}
 
 export type FixtureRecord =
   | { kind: 'message'; message: SDKMessage }

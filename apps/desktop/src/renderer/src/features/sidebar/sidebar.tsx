@@ -1,8 +1,8 @@
-import { FolderPlus, Folder, Plus, ShieldCheck, ShieldOff } from 'lucide-react';
+import { FolderPlus, Folder, ShieldCheck, ShieldOff } from 'lucide-react';
 import { APP_NAME } from '@solline/protocol/app';
 import type { Project, SessionState } from '@solline/protocol';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { Spinner } from '../conversation/blocks.tsx';
+import { NewSessionButton } from '../agents/new-session-button.tsx';
 
 const STATE_LABEL: Record<SessionState, string> = {
   starting: 'a arrancar',
@@ -60,7 +60,6 @@ function SessionRow({ id }: { id: string }) {
 
 function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: string[] }) {
   const activeProject = useApp((s) => s.activeProjectId === project.id);
-  const creating = useApp((s) => s.creatingIn === project.id);
   return (
     <li className="mb-2">
       <div className="group flex items-center gap-1 pr-1">
@@ -99,17 +98,7 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
             <ShieldOff size={14} strokeWidth={1.9} />
           )}
         </button>
-        <button
-          type="button"
-          onClick={() => void actions.createSession(project.id)}
-          disabled={creating}
-          aria-label={`Nova sessão em ${project.name}`}
-          title="Nova sessão"
-          data-testid="new-session"
-          className="grid size-6 shrink-0 place-items-center rounded-sm text-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-fg disabled:opacity-100"
-        >
-          {creating ? <Spinner label="A abrir sessão" /> : <Plus size={14} strokeWidth={2} />}
-        </button>
+        <NewSessionButton project={project} variant="icon" />
       </div>
       {sessionIds.length > 0 ? (
         <ul className="mt-0.5 space-y-px">

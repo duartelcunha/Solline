@@ -23,7 +23,7 @@ export interface SessionData {
 
 export type SessionStore = StoreApi<SessionData>;
 
-export const EMPTY_USAGE: Usage = { costUsd: null, models: [], context: null };
+export const EMPTY_USAGE: Usage = { costUsd: null, models: [], context: null, tokens: null };
 
 export function createSessionStore(
   info: SessionInfo,
@@ -56,6 +56,8 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
           };
         case 'meta':
           return { ...data, info: { ...data.info, agentSessionId: delta.agentSessionId } };
+        case 'capabilities':
+          return { ...data, capabilities: delta.capabilities };
         case 'turn.start': {
           const turns = applyDelta(data.turns, delta);
           const first = delta.turn.role === 'user' && data.turns.length === 0;

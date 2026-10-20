@@ -8,6 +8,7 @@ import type {
   QuestionBlock,
 } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
+import { useAgentLabel } from '../agents/agent-label.tsx';
 import { ToolInput } from './tool-input.tsx';
 
 type Answer = (answer: PermissionAnswer) => void;
@@ -119,6 +120,7 @@ export function PermissionCard({
   active: boolean;
   onAnswer: Answer;
 }) {
+  const agentLabel = useAgentLabel();
   const first = useRef<HTMLButtonElement>(null);
   const [sent, setSent] = useState(false);
   const answer = (a: PermissionAnswer) => {
@@ -165,8 +167,8 @@ export function PermissionCard({
         <div className="min-w-0 flex-1">
           <h3 className="text-[14px] font-semibold tracking-[-0.01em]">{block.title}</h3>
           <p className="text-[12.5px] text-muted">
-            O Claude quer usar <span className="font-mono text-[12px]">{block.toolName}</span>.
-            {block.description ? ` ${block.description}` : ''}
+            O {agentLabel} quer usar <span className="font-mono text-[12px]">{block.toolName}</span>
+            .{block.description ? ` ${block.description}` : ''}
           </p>
         </div>
       </div>
@@ -243,6 +245,7 @@ export function PlanCard({ block, onAnswer }: { block: PlanBlock; onAnswer: Answ
 }
 
 export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnswer: Answer }) {
+  const agentLabel = useAgentLabel();
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [sent, setSent] = useState(false);
   if (block.status !== 'pending') {
@@ -269,7 +272,7 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
   };
   // shortcut: só as opções dadas, sem "outra resposta" escrita; o cartão completo é do M2.
   return (
-    <Card label="Pergunta do Claude" testId="question-card">
+    <Card label={`Pergunta do ${agentLabel}`} testId="question-card">
       <div className="space-y-4">
         {block.questions.map((q) => (
           <fieldset key={q.question}>

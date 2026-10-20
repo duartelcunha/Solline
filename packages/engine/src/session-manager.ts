@@ -2,15 +2,15 @@ import { stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import {
   findModel,
-  type AgentKind,
   type EngineCommandResult,
   type EngineEvent,
-  type ModeOption,
   type PermissionAnswer,
   type SessionInfo,
   type SessionStartPayload,
 } from '@solline/protocol';
-import type { AgentAdapter, AgentAdapterFactory, AdapterSink } from './adapters/types.ts';
+import type { AgentAdapter, AdapterSink } from './adapters/types.ts';
+import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
+import { agentEnv } from './env.ts';
 
 type SessionResult = EngineCommandResult<'session.start'>;
 
@@ -27,6 +27,7 @@ async function defaultCheckCwd(cwd: string): Promise<void> {
 interface Entry {
   info: SessionInfo;
   adapter: AgentAdapter;
+  definition: AgentDefinition;
   trusted: boolean;
 }
 
@@ -39,32 +40,30 @@ interface Entry {
 export class SessionManager {
   readonly #sessions = new Map<string, Entry>();
   readonly #emit: (event: EngineEvent) => void;
-  readonly #adapters: Record<AgentKind, AgentAdapterFactory>;
-  readonly #staticModes: Partial<Record<AgentKind, readonly ModeOption[]>>;
-  readonly #defaultModes: Partial<Record<AgentKind, string>>;
+  readonly #registry: AgentRegistry;
   readonly #checkCwd: (cwd: string) => Promise<void>;
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
-    adapters: Record<AgentKind, AgentAdapterFactory>;
-    /** Modos que cada agente aceita antes de arrancar (o pedido de criação é validado aqui). */
-    staticModes?: Partial<Record<AgentKind, readonly ModeOption[]>>;
-    /** Modo com que cada agente arranca quando o pedido não traz nenhum. */
-    defaultModes?: Partial<Record<AgentKind, string>>;
+    /** Os agentes que se podem abrir: modos, ambiente e adaptador de cada um. */
+    registry: AgentRegistry;
     /** Para testes: troca a verificação da pasta. */
     checkCwd?: (cwd: string) => Promise<void>;
   }) {
     this.#emit = options.emit;
-    this.#adapters = options.adapters;
-    this.#staticModes = options.staticModes ?? {};
-    this.#defaultModes = options.defaultModes ?? {};
+    this.#registry = options.registry;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
   }
 
   async create(payload: SessionStartPayload): Promise<SessionResult> {
+    const definition = this.#registry.get(payload.agent);
+    if (!definition) throw new Error(`Agente desconhecido: ${payload.agent}`);
+    if (!payload.trusted && definition.untrustedProjects === 'refused') {
+      throw new Error(`O ${definition.label} só corre em projetos de confiança`);
+    }
     await this.#checkCwd(payload.cwd);
-    const known = this.#staticModes[payload.agent];
-    if (payload.mode && known && !known.some((m) => m.id === payload.mode)) {
+    const known = definition.staticModes;
+    if (payload.mode && known.length > 0 && !known.some((m) => m.id === payload.mode)) {
       throw new Error(`Modo desconhecido para este agente: ${payload.mode}`);
     }
     const info: SessionInfo = {
@@ -78,11 +77,11 @@ export class SessionManager {
       settings: {
         model: payload.model ?? null,
         effort: payload.effort ?? null,
-        mode: payload.mode ?? this.#defaultModes[payload.agent] ?? 'default',
+        mode: payload.mode ?? definition.defaultMode,
       },
       agentSessionId: null,
     };
-    return this.#start(info, payload.trusted);
+    return this.#start(info, definition, payload.trusted);
   }
 
   /** Abre de novo uma sessão que caiu, com resume no agente e as mesmas definições. */
@@ -91,7 +90,7 @@ export class SessionManager {
     const resumeId = entry.adapter.agentSessionId();
     if (!resumeId) throw new Error('Esta sessão ainda não tem histórico no agente para retomar');
     await entry.adapter.close();
-    return this.#start(entry.info, entry.trusted, resumeId);
+    return this.#start(entry.info, entry.definition, entry.trusted, resumeId);
   }
 
   send(sessionId: string, text: string): Promise<string> {
@@ -144,9 +143,15 @@ export class SessionManager {
     await Promise.all(entries.map((entry) => entry.adapter.close()));
   }
 
-  async #start(info: SessionInfo, trusted: boolean, resume?: string): Promise<SessionResult> {
+  async #start(
+    info: SessionInfo,
+    definition: AgentDefinition,
+    trusted: boolean,
+    resume?: string,
+  ): Promise<SessionResult> {
     const { model, effort, mode } = info.settings;
-    const adapter = this.#adapters[info.agent](
+    const entry: Partial<Entry> = {};
+    const adapter = definition.create(
       {
         cwd: info.cwd,
         model: model ?? undefined,
@@ -154,18 +159,20 @@ export class SessionManager {
         mode,
         resume,
         projectTrusted: trusted,
+        env: agentEnv(definition.envPolicy),
       },
-      this.#sinkFor(info),
+      this.#sinkFor(info, () => entry.adapter),
     );
+    entry.adapter = adapter;
     const isNew = !this.#sessions.has(info.id);
-    this.#sessions.set(info.id, { info, adapter, trusted });
+    this.#sessions.set(info.id, { info, adapter, definition, trusted });
     try {
       const started = await adapter.start();
       info.settings = started.settings;
       info.state = 'idle';
       // Um modo que o agente aceitou no arranque mas não anuncia (por exemplo Auto num modelo
       // sem suporte) volta ao modo por omissão: a interface nunca mostra um modo que não há.
-      const fallback = this.#defaultModes[info.agent];
+      const fallback = definition.defaultMode;
       const modes = started.capabilities.modes;
       if (
         fallback &&
@@ -184,10 +191,11 @@ export class SessionManager {
     }
   }
 
-  #sinkFor(info: SessionInfo): AdapterSink {
+  #sinkFor(info: SessionInfo, adapter: () => AgentAdapter | undefined): AdapterSink {
     const emit = this.#emit;
     return {
-      delta: (delta) => {
+      delta: (raw) => {
+        const delta = withoutUnreportedCost(raw, adapter());
         if (delta.type === 'settings') info.settings = { ...info.settings, ...delta.settings };
         if (delta.type === 'meta') info.agentSessionId = delta.agentSessionId;
         emit({ kind: 'event', type: 'session.event', sessionId: info.id, delta });
@@ -213,4 +221,30 @@ export class SessionManager {
     if (!entry) throw new Error('Sessão desconhecida (o motor pode ter reiniciado)');
     return entry;
   }
+}
+
+/**
+ * Um agente que diz não reportar custo não mostra custo: se um valor aparecer na mesma, sai
+ * antes de chegar à interface (por exemplo o preço do Claude num perfil com outro fornecedor).
+ */
+function withoutUnreportedCost(
+  delta: Parameters<AdapterSink['delta']>[0],
+  adapter: AgentAdapter | undefined,
+): Parameters<AdapterSink['delta']>[0] {
+  if (delta.type !== 'usage' || !adapter) return delta;
+  let reportsCost: boolean;
+  try {
+    reportsCost = adapter.capabilities().features.cost;
+  } catch {
+    return delta;
+  }
+  if (reportsCost) return delta;
+  const { costUsd: _cost, ...usage } = delta.usage;
+  return {
+    type: 'usage',
+    usage: {
+      ...usage,
+      ...(usage.models ? { models: usage.models.map((m) => ({ ...m, costUsd: null })) } : {}),
+    },
+  };
 }

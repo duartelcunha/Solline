@@ -3,6 +3,7 @@ import { RotateCcw, WifiOff } from 'lucide-react';
 import type { PermissionAnswer, ToolBlock, Turn } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
 import { actions, useSession } from '../../stores/app.ts';
+import { AgentLabelContext, useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { PermissionCard, PlanCard, QuestionCard } from './asks.tsx';
 import { NoticeView, Spinner, ThinkingView, ToolRow } from './blocks.tsx';
 import { ToolDetail } from './tool-detail.tsx';
@@ -92,6 +93,8 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   const state = useSession(sessionId, (s) => s.info.state);
   const cwd = useSession(sessionId, (s) => s.info.cwd);
   const error = useSession(sessionId, (s) => s.error);
+  const canResume = useSession(sessionId, (s) => s.capabilities?.features.resume !== false);
+  const agentLabel = useSessionAgentLabel(sessionId);
   const [openToolId, setOpenToolId] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -119,68 +122,72 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   const working = state === 'running' && turns.at(-1)?.role === 'user';
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div
-        ref={scroller}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-        }}
-        className="scroll-fade min-h-0 flex-1 overflow-y-auto"
-        data-testid="conversation"
-      >
-        {turns.length === 0 ? (
-          <EmptySession cwd={cwd} />
-        ) : (
-          <div className="mx-auto w-full max-w-3xl space-y-6 px-8 pt-4 pb-10">
-            {turns.map((turn) =>
-              turn.role === 'user' ? (
-                <UserTurn key={turn.id} turn={turn} />
-              ) : (
-                <AssistantTurn
-                  key={turn.id}
-                  turn={turn}
-                  firstPendingId={firstPendingId}
-                  onOpen={(tool) => setOpenToolId(tool.id)}
-                  onAnswer={(requestId, answer) =>
-                    void actions.answer(sessionId, requestId, answer)
-                  }
-                />
-              ),
-            )}
-            {working ? (
-              <div
-                className="flex items-center gap-2 text-[12.5px] text-muted"
-                data-testid="working"
-              >
-                <Spinner label="O Claude está a trabalhar" /> A pensar…
-              </div>
-            ) : null}
-          </div>
-        )}
-      </div>
-
-      {error ? (
-        <div className="mx-auto w-full max-w-3xl px-8 pb-2">
-          <div
-            role="alert"
-            data-testid="session-error"
-            className="appear flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 shadow-raised"
-          >
-            <WifiOff size={16} className="shrink-0 text-muted" />
-            <p className="min-w-0 flex-1 text-[13px] text-muted">{error}</p>
-            <button
-              type="button"
-              onClick={() => void actions.resume(sessionId)}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-fg px-3 text-[13px] font-medium text-bg transition-transform duration-150 active:scale-[0.97]"
-            >
-              <RotateCcw size={14} /> Retomar
-            </button>
-          </div>
+    <AgentLabelContext.Provider value={agentLabel}>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={scroller}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+          }}
+          className="scroll-fade min-h-0 flex-1 overflow-y-auto"
+          data-testid="conversation"
+        >
+          {turns.length === 0 ? (
+            <EmptySession cwd={cwd} />
+          ) : (
+            <div className="mx-auto w-full max-w-3xl space-y-6 px-8 pt-4 pb-10">
+              {turns.map((turn) =>
+                turn.role === 'user' ? (
+                  <UserTurn key={turn.id} turn={turn} />
+                ) : (
+                  <AssistantTurn
+                    key={turn.id}
+                    turn={turn}
+                    firstPendingId={firstPendingId}
+                    onOpen={(tool) => setOpenToolId(tool.id)}
+                    onAnswer={(requestId, answer) =>
+                      void actions.answer(sessionId, requestId, answer)
+                    }
+                  />
+                ),
+              )}
+              {working ? (
+                <div
+                  className="flex items-center gap-2 text-[12.5px] text-muted"
+                  data-testid="working"
+                >
+                  <Spinner label={`O ${agentLabel} está a trabalhar`} /> A pensar…
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
-      ) : null}
 
-      <ToolDetail tool={openTool} onClose={() => setOpenToolId(null)} />
-    </div>
+        {error ? (
+          <div className="mx-auto w-full max-w-3xl px-8 pb-2">
+            <div
+              role="alert"
+              data-testid="session-error"
+              className="appear flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 shadow-raised"
+            >
+              <WifiOff size={16} className="shrink-0 text-muted" />
+              <p className="min-w-0 flex-1 text-[13px] text-muted">{error}</p>
+              {canResume ? (
+                <button
+                  type="button"
+                  onClick={() => void actions.resume(sessionId)}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-fg px-3 text-[13px] font-medium text-bg transition-transform duration-150 active:scale-[0.97]"
+                >
+                  <RotateCcw size={14} /> Retomar
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        <ToolDetail tool={openTool} onClose={() => setOpenToolId(null)} />
+      </div>
+    </AgentLabelContext.Provider>
   );
 }

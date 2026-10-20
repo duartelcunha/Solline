@@ -6,8 +6,9 @@ import { z } from 'zod';
  * conhece isto.
  */
 
-export const AgentKind = z.enum(['claude']);
-export type AgentKind = z.infer<typeof AgentKind>;
+/** Id de um agente no registo do motor: claude, claude:deepseek, codex, opencode… */
+export const AgentId = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}$/);
+export type AgentId = z.infer<typeof AgentId>;
 
 /** starting: a arrancar o agente · error: o processo do agente caiu (dá para retomar). */
 export const SessionState = z.enum(['starting', 'idle', 'running', 'needs-you', 'error']);
@@ -131,8 +132,17 @@ export const ModelUsageRow = z.object({
   model: z.string(),
   inputTokens: z.number(),
   outputTokens: z.number(),
-  costUsd: z.number(),
+  costUsd: z.number().nullable(),
 });
+
+/** Tokens da sessão: o último total que o agente reportou, como o custo. */
+export const TokenUsage = z.object({
+  input: z.number(),
+  output: z.number(),
+  cachedInput: z.number().optional(),
+  reasoning: z.number().optional(),
+});
+export type TokenUsage = z.infer<typeof TokenUsage>;
 
 export const ContextUsage = z.object({
   usedTokens: z.number(),
@@ -149,6 +159,7 @@ export const Usage = z.object({
   costUsd: z.number().nullable(),
   models: z.array(ModelUsageRow),
   context: ContextUsage.nullable(),
+  tokens: TokenUsage.nullable(),
 });
 export type Usage = z.infer<typeof Usage>;
 
@@ -156,7 +167,8 @@ export type Usage = z.infer<typeof Usage>;
 export const SessionSettings = z.object({
   model: z.string().nullable(),
   effort: z.string().nullable(),
-  mode: z.string(),
+  /** null nos agentes sem modos. */
+  mode: z.string().nullable(),
 });
 export type SessionSettings = z.infer<typeof SessionSettings>;
 
@@ -170,25 +182,63 @@ export const ModelOption = z.object({
 });
 export type ModelOption = z.infer<typeof ModelOption>;
 
+/**
+ * Quanto um modo deixa o agente fazer sem perguntar, do mais fechado ao mais aberto.
+ * A interface escolhe o ícone por aqui e nunca pelo id, que é de cada agente.
+ */
+export const ModeRisk = z.enum(['read-only', 'plan', 'ask', 'edits', 'auto', 'full']);
+export type ModeRisk = z.infer<typeof ModeRisk>;
+
 export const ModeOption = z.object({
   id: z.string(),
   label: z.string(),
   description: z.string(),
+  risk: ModeRisk,
 });
 export type ModeOption = z.infer<typeof ModeOption>;
+
+/** O que o agente reporta: a interface só mostra custo, contexto e "Retomar" quando existem. */
+export const AgentFeatures = z.object({
+  cost: z.boolean(),
+  context: z.boolean(),
+  resume: z.boolean(),
+});
+export type AgentFeatures = z.infer<typeof AgentFeatures>;
 
 /** O que este agente sabe fazer. A interface mostra só o que existe aqui. */
 export const AgentCapabilities = z.object({
   models: z.array(ModelOption),
   modes: z.array(ModeOption),
   effort: z.boolean(),
+  /** Ordem dos níveis de effort deste agente, do mais leve ao mais pesado. */
+  effortOrder: z.array(z.string()),
+  features: AgentFeatures,
 });
 export type AgentCapabilities = z.infer<typeof AgentCapabilities>;
+
+/** Como o motor fala com o agente. */
+export const AgentTransport = z.enum(['claude-sdk', 'codex-app-server', 'acp']);
+
+/**
+ * Um agente que a Solline conhece, com o estado nesta máquina. Vem do registo do motor
+ * (agents.list); a interface usa-o para o seletor e para o nome do agente.
+ */
+export const AgentDescriptor = z.object({
+  id: AgentId,
+  label: z.string(),
+  transport: AgentTransport,
+  status: z.enum(['ready', 'not-found', 'needs-login', 'needs-key', 'unreviewed', 'error']),
+  /** Porque não está pronto, numa frase. */
+  detail: z.string().optional(),
+  experimental: z.boolean(),
+  untrustedProjects: z.enum(['allowed', 'refused']),
+});
+export type AgentDescriptor = z.infer<typeof AgentDescriptor>;
 
 export const SessionInfo = z.object({
   id: z.string(),
   projectId: z.string(),
-  agent: AgentKind,
+  agent: AgentId,
   cwd: z.string(),
   title: z.string(),
   state: SessionState,
@@ -219,6 +269,8 @@ export const ConversationDelta = z.discriminatedUnion('type', [
   z.object({ type: z.literal('usage'), usage: Usage.partial() }),
   z.object({ type: z.literal('settings'), settings: SessionSettings.partial() }),
   z.object({ type: z.literal('meta'), agentSessionId: z.string() }),
+  /** O agente mudou o que sabe fazer (por exemplo outros modelos ou modos). Substitui tudo. */
+  z.object({ type: z.literal('capabilities'), capabilities: AgentCapabilities }),
 ]);
 export type ConversationDelta = z.infer<typeof ConversationDelta>;
 

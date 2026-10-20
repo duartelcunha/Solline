@@ -259,14 +259,26 @@ export class ClaudeNormalizer {
   #result(message: Extract<SDKMessage, { type: 'result' }>): ConversationDelta[] {
     const { turnId, deltas } = this.ensureAssistantTurn();
     const out: ConversationDelta[] = [...deltas];
+    const rows = Object.entries(message.modelUsage ?? {});
     const usage: Partial<Usage> = {
       costUsd: message.total_cost_usd,
-      models: Object.entries(message.modelUsage ?? {}).map(([model, row]) => ({
+      models: rows.map(([model, row]) => ({
         model,
         inputTokens: row.inputTokens + row.cacheReadInputTokens + row.cacheCreationInputTokens,
         outputTokens: row.outputTokens,
         costUsd: row.costUSD,
       })),
+      // Totais da sessão, como o custo: a interface mostra o último, nunca soma.
+      tokens: rows.length
+        ? {
+            input: rows.reduce(
+              (n, [, r]) => n + r.inputTokens + r.cacheReadInputTokens + r.cacheCreationInputTokens,
+              0,
+            ),
+            output: rows.reduce((n, [, r]) => n + r.outputTokens, 0),
+            cachedInput: rows.reduce((n, [, r]) => n + r.cacheReadInputTokens, 0),
+          }
+        : null,
     };
     out.push({ type: 'usage', usage });
 

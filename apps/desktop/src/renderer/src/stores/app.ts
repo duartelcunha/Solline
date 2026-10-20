@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { useStore } from 'zustand';
 import type {
+  AgentDescriptor,
+  AgentId,
   CommandName,
   CommandPayload,
   CommandResult,
@@ -21,6 +23,8 @@ import {
  */
 interface AppState {
   projects: Project[];
+  /** Os agentes que o motor conhece, pela ordem do registo. */
+  agents: AgentDescriptor[];
   /** Ids das sessões, da mais recente para a mais antiga. */
   sessionIds: string[];
   activeProjectId: string | null;
@@ -32,6 +36,7 @@ interface AppState {
 
 export const useApp = create<AppState>(() => ({
   projects: [],
+  agents: [],
   sessionIds: [],
   activeProjectId: null,
   activeSessionId: null,
@@ -53,7 +58,7 @@ const NONE = createSessionStore(
     cwd: '',
     title: '',
     state: 'idle',
-    settings: { model: null, effort: null, mode: 'default' },
+    settings: { model: null, effort: null, mode: null },
     agentSessionId: null,
   },
   '',
@@ -107,7 +112,21 @@ export function dispatch(event: EngineEvent): void {
   if (store) store.setState(reduceSession(store.getState(), event));
 }
 
+/** O agente das sessões abertas sem escolher: o primeiro pronto, senão o Claude. */
+function defaultAgent(): AgentId {
+  return useApp.getState().agents.find((a) => a.status === 'ready')?.id ?? 'claude';
+}
+
 export const actions = {
+  async loadAgents(): Promise<void> {
+    try {
+      const { agents } = await request('agents.list', {});
+      useApp.setState({ agents });
+    } catch (error) {
+      useApp.setState({ notice: `Não foi possível ver os agentes. ${message(error)}` });
+    }
+  },
+
   async loadProjects(): Promise<void> {
     const { projects } = await request('projects.list', {});
     useApp.setState((s) => ({
@@ -155,14 +174,14 @@ export const actions = {
     });
   },
 
-  async createSession(projectId: string): Promise<void> {
+  async createSession(projectId: string, agent: AgentId = defaultAgent()): Promise<void> {
     const project = useApp.getState().projects.find((p) => p.id === projectId);
     if (!project) return;
     useApp.setState({ creatingIn: projectId, activeProjectId: projectId, notice: null });
     try {
       const { session, capabilities } = await request('session.create', {
         projectId: project.id,
-        agent: 'claude',
+        agent,
       });
       sessionStores.set(session.id, createSessionStore(session, projectId, capabilities));
       useApp.setState((s) => ({

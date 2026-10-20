@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { AgentCapabilities, AgentKind, PermissionAnswer, SessionInfo } from './conversation.ts';
+import {
+  AgentCapabilities,
+  AgentDescriptor,
+  AgentId,
+  PermissionAnswer,
+  SessionInfo,
+} from './conversation.ts';
 
 /**
  * Contrato dos comandos da Ponte: interface -> main -> motor.
@@ -42,7 +48,7 @@ const MessageText = z.string().min(1).max(200_000);
 export const SessionCreatePayload = z
   .object({
     projectId: z.string().min(1).max(64),
-    agent: AgentKind,
+    agent: AgentId,
     mode: z.string().min(1).max(64).optional(),
     model: z.string().min(1).max(200).optional(),
     effort: z.string().min(1).max(32).optional(),
@@ -63,6 +69,8 @@ export const SessionCreateResult = z.object({
 
 export const commandSchemas = {
   'engine.ping': { payload: PingPayload, result: PingResult },
+  /** Os agentes que o motor conhece e o estado de cada um nesta máquina. */
+  'agents.list': { payload: Empty, result: z.object({ agents: z.array(AgentDescriptor) }) },
   'session.create': { payload: SessionCreatePayload, result: SessionCreateResult },
   'session.send': {
     payload: SessionRef.extend({ text: MessageText }).strict(),
