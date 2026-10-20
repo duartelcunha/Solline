@@ -134,6 +134,11 @@ export const CommandNameSchema = z.enum(commandNames as [CommandName, ...Command
  */
 export const internalCommandSchemas = {
   'session.start': { payload: SessionStartPayload, result: SessionCreateResult },
+  /** A confiança de um projeto mudou: as próximas retomas das suas sessões usam a nova. */
+  'projects.trustChanged': {
+    payload: z.object({ projectId: z.string().min(1).max(64), trusted: z.boolean() }).strict(),
+    result: Empty,
+  },
 } as const;
 
 type EngineSchemas = Omit<typeof commandSchemas, MainCommandName> & typeof internalCommandSchemas;

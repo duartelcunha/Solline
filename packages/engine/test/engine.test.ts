@@ -274,4 +274,86 @@ describe('Engine', () => {
     expect(fakes).toHaveLength(1);
     await engine.dispose();
   });
+
+  it('setMode recusa um modo que o agente não anuncia (Auto sem suporte)', async () => {
+    const { engine, fakes } = fakeEngine([], {
+      models: [
+        {
+          value: 'haiku',
+          displayName: 'Haiku',
+          description: 'Haiku 5.5',
+          supportsEffort: true,
+          supportedEffortLevels: ['low', 'medium'],
+        },
+      ],
+    });
+    const sessionId = await start(engine);
+    const auto = await call(engine, 'session.setMode', { sessionId, mode: 'auto' });
+    expect(auto).toMatchObject({ ok: false, error: { message: expect.stringContaining('Modo') } });
+    expect(fakes[0]!.calls).toEqual([]);
+    await engine.dispose();
+  });
+
+  it('modelo e effort pedidos no arranque têm de existir; senão fecha o agente', async () => {
+    const { engine, fakes } = fakeEngine([], {
+      models: [
+        {
+          value: 'haiku',
+          displayName: 'Haiku',
+          description: 'Haiku 5.5',
+          supportsEffort: true,
+          supportedEffortLevels: ['low', 'medium'],
+        },
+      ],
+    });
+    await expect(start(engine, { model: 'gpt-6' })).rejects.toThrow('Modelo desconhecido');
+    expect(fakes.at(-1)!.closed()).toBe(true);
+    await expect(start(engine, { model: 'haiku', effort: 'max' })).rejects.toThrow('effort max');
+    expect(fakes.at(-1)!.closed()).toBe(true);
+    await expect(start(engine, { effort: 'turbo' })).rejects.toThrow('effort turbo');
+    const ok = await call(engine, 'session.start', {
+      projectId: 'p',
+      agent: 'claude',
+      cwd: tmpdir(),
+      trusted: true,
+      model: 'haiku',
+      effort: 'medium',
+    });
+    expect(ok).toMatchObject({
+      ok: true,
+      result: { session: { settings: { model: 'haiku', effort: 'medium' } } },
+    });
+    await engine.dispose();
+  });
+
+  it('se a troca de modo falha depois do arranque, o agente é fechado', async () => {
+    const fakes: ReturnType<typeof fakeQuery>[] = [];
+    const engine = new Engine({
+      adapters: {
+        claude: (options, sink) => {
+          const fake = fakeQuery(loadFixture('plain-answer'), {
+            models: [
+              {
+                value: 'haiku',
+                displayName: 'Haiku',
+                description: 'Haiku 5.5',
+                supportsEffort: true,
+                supportedEffortLevels: ['low', 'medium'],
+              },
+            ],
+          });
+          fakes.push(fake);
+          const adapter = new ClaudeSdkAdapter(
+            { ...options, queryFn: fake.queryFn, loadSettings: false },
+            sink,
+          );
+          adapter.setMode = () => Promise.reject(new Error('Mudar o modo: sem resposta'));
+          return adapter;
+        },
+      },
+    });
+    await expect(start(engine, { mode: 'auto' })).rejects.toThrow('sem resposta');
+    expect(fakes[0]!.closed()).toBe(true);
+    await engine.dispose();
+  });
 });

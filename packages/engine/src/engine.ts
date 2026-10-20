@@ -65,6 +65,7 @@ export class Engine {
         ),
       }),
       'session.start': (p) => s.create(p),
+      'projects.trustChanged': async (p) => (s.setProjectTrust(p.projectId, p.trusted), ok),
       'session.resume': (p) => s.resume(p.sessionId),
       'session.send': async (p) => ({ turnId: await s.send(p.sessionId, p.text) }),
       'session.interrupt': async (p) => (await s.interrupt(p.sessionId), ok),

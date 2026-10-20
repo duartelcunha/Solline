@@ -2,6 +2,7 @@ import { stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import {
   findModel,
+  type AgentCapabilities,
   type EngineCommandResult,
   type EngineEvent,
   type PermissionAnswer,
@@ -81,7 +82,20 @@ export class SessionManager {
       },
       agentSessionId: null,
     };
-    return this.#start(info, definition, payload.trusted);
+    return this.#start(info, definition, payload.trusted, undefined, {
+      model: payload.model,
+      effort: payload.effort,
+    });
+  }
+
+  /**
+   * A confiança de um projeto mudou no main. As sessões abertas continuam como arrancaram;
+   * a próxima retoma já usa a confiança nova, para os dois lados.
+   */
+  setProjectTrust(projectId: string, trusted: boolean): void {
+    for (const entry of this.#sessions.values()) {
+      if (entry.info.projectId === projectId) entry.trusted = trusted;
+    }
   }
 
   /** Abre de novo uma sessão que caiu, com resume no agente e as mesmas definições. */
@@ -148,6 +162,8 @@ export class SessionManager {
     definition: AgentDefinition,
     trusted: boolean,
     resume?: string,
+    /** Só numa sessão nova: o modelo e o effort pedidos têm de existir no agente. */
+    requested?: { model?: string | undefined; effort?: string | undefined },
   ): Promise<SessionResult> {
     const { model, effort, mode } = info.settings;
     const entry: Partial<Entry> = {};
@@ -166,8 +182,10 @@ export class SessionManager {
     entry.adapter = adapter;
     const isNew = !this.#sessions.has(info.id);
     this.#sessions.set(info.id, { info, adapter, definition, trusted });
+    let started: Awaited<ReturnType<AgentAdapter['start']>> | undefined;
     try {
-      const started = await adapter.start();
+      started = await adapter.start();
+      if (requested) checkRequested(started.capabilities, requested);
       info.settings = started.settings;
       info.state = 'idle';
       // Um modo que o agente aceitou no arranque mas não anuncia (por exemplo Auto num modelo
@@ -185,6 +203,8 @@ export class SessionManager {
       }
       return { session: { ...info }, capabilities: started.capabilities };
     } catch (error) {
+      // O agente arrancou mas algo depois falhou: fecha-o, senão o processo ficava sem dono.
+      if (started) await adapter.close().catch(() => undefined);
       // Uma sessão que nunca arrancou não fica; uma retomada fica, em erro, para tentar outra vez.
       if (isNew) this.#sessions.delete(info.id);
       throw error;
@@ -247,4 +267,20 @@ function withoutUnreportedCost(
       ...(usage.models ? { models: usage.models.map((m) => ({ ...m, costUsd: null })) } : {}),
     },
   };
+}
+
+/** O modelo e o effort de uma sessão nova têm de vir das capacidades, como no setModel/setEffort. */
+function checkRequested(
+  capabilities: AgentCapabilities,
+  requested: { model?: string | undefined; effort?: string | undefined },
+): void {
+  const model = requested.model ? findModel(capabilities.models, requested.model) : undefined;
+  if (requested.model && !model) {
+    throw new Error(`Modelo desconhecido para este agente: ${requested.model}`);
+  }
+  if (!requested.effort) return;
+  const allowed = model ? model.efforts : capabilities.models.flatMap((m) => m.efforts);
+  if (!capabilities.effort || !allowed.includes(requested.effort)) {
+    throw new Error(`Este modelo não tem o effort ${requested.effort}`);
+  }
 }

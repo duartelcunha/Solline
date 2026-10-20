@@ -84,6 +84,8 @@ export interface FakeQueryControl {
   options(): Options;
   permissionResults: PermissionResult[];
   calls: { method: string; args: unknown[] }[];
+  /** true depois do close() do query. */
+  closed(): boolean;
   /** Faz o processo "morrer": o iterador lança como no bug #359. */
   crash(message?: string): void;
 }
@@ -97,6 +99,7 @@ export function fakeQuery(
   extra: { models?: ModelInfo[] } = {},
 ): FakeQueryControl {
   let captured: Options | undefined;
+  let closedFlag = false;
   let crashWith: ((error: Error) => void) | undefined;
   const control: FakeQueryControl = {
     options: () => {
@@ -105,6 +108,7 @@ export function fakeQuery(
     },
     permissionResults: [],
     calls: [],
+    closed: () => closedFlag,
     crash: (message = 'Stream closed') => crashWith?.(new Error(message)),
     queryFn: (({
       prompt,
@@ -187,6 +191,7 @@ export function fakeQuery(
         }),
         close: () => {
           closed = true;
+          closedFlag = true;
         },
       });
       return query as unknown as Query;

@@ -283,7 +283,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     this.#agentSessionId = options.resume ?? null;
     this.#settings = {
       model: options.model ?? null,
-      effort: options.effort ?? null,
+      // Só reporta o effort que chega mesmo ao SDK (ver #sdkOptions).
+      effort: options.effort && EFFORT_LEVELS.includes(options.effort) ? options.effort : null,
       mode: options.mode,
     };
   }

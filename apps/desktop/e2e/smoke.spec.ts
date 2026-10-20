@@ -87,34 +87,6 @@ test('a interface não tem acesso ao Node', async () => {
   });
 });
 
-test('a interface não escolhe a pasta de uma sessão', async () => {
-  const page = await app.firstWindow();
-  const errors = await page.evaluate(async () => {
-    const api = (
-      globalThis as unknown as { solline: { request(c: string, p: unknown): Promise<unknown> } }
-    ).solline;
-    const fail = (p: Promise<unknown>) =>
-      p.then(
-        () => 'aceite',
-        (e: unknown) => (e instanceof Error ? e.message : String(e)),
-      );
-    return {
-      cwd: await fail(
-        api.request('session.create', { agent: 'claude', cwd: 'C:\\', mode: 'default' }),
-      ),
-      unknown: await fail(
-        api.request('session.create', { projectId: 'nao-existe', agent: 'claude' }),
-      ),
-      internal: await fail(
-        api.request('session.start', { projectId: 'x', agent: 'claude', cwd: 'C:\\' }),
-      ),
-    };
-  });
-  expect(errors.cwd).not.toBe('aceite');
-  expect(errors.unknown).toContain('Projeto desconhecido');
-  expect(errors.internal).toContain('Comando desconhecido');
-});
-
 test('só links https abrem fora e as permissões do browser vêm negadas', async () => {
   const page = await app.firstWindow();
   await app.evaluate(({ shell }) => {
@@ -128,16 +100,25 @@ test('só links https abrem fora e as permissões do browser vêm negadas', asyn
     const g = globalThis as unknown as {
       open(url: string): unknown;
       navigator: { permissions: { query(d: { name: string }): Promise<{ state: string }> } };
+      Notification: { requestPermission(): Promise<string> };
     };
     return {
       https: g.open('https://example.com/') === null,
       http: g.open('http://example.com/') === null,
       creds: g.open('https://user:pw@example.com/') === null,
+      // Uma verificação (check handler) e um pedido (request handler).
       geolocation: (await g.navigator.permissions.query({ name: 'geolocation' })).state,
+      notifications: await g.Notification.requestPermission(),
     };
   });
   const opened = await app.evaluate(() => (globalThis as { opened?: string[] }).opened ?? []);
-  expect(result).toEqual({ https: true, http: true, creds: true, geolocation: 'denied' });
+  expect(result).toEqual({
+    https: true,
+    http: true,
+    creds: true,
+    geolocation: 'denied',
+    notifications: 'denied',
+  });
   expect(opened).toEqual(['https://example.com/']);
 });
 
@@ -148,17 +129,24 @@ test('só links https abrem fora e as permissões do browser vêm negadas', asyn
 async function stubDialogs(folder: string, trust: number): Promise<void> {
   await app.evaluate(
     ({ dialog }, { folder, trust }) => {
+      const g = globalThis as { trustDialogs?: number };
+      g.trustDialogs ??= 0;
       dialog.showOpenDialog = (async () => ({
         canceled: false,
         filePaths: [folder],
       })) as typeof dialog.showOpenDialog;
-      dialog.showMessageBox = (async () => ({
-        response: trust,
-        checkboxChecked: false,
-      })) as typeof dialog.showMessageBox;
+      dialog.showMessageBox = (async () => {
+        g.trustDialogs = (g.trustDialogs ?? 0) + 1;
+        return { response: trust, checkboxChecked: false };
+      }) as typeof dialog.showMessageBox;
     },
     { folder, trust },
   );
+}
+
+/** Quantas vezes o main mostrou o diálogo de confiança. */
+function trustDialogs(): Promise<number> {
+  return app.evaluate(() => (globalThis as { trustDialogs?: number }).trustDialogs ?? 0);
 }
 
 test('um projeto novo pergunta pela confiança e o escudo muda-a', async () => {
@@ -168,20 +156,56 @@ test('um projeto novo pergunta pela confiança e o escudo muda-a', async () => {
   await expect(page.getByTestId('project-row')).toHaveCount(1);
   const shield = page.getByTestId('project-trust');
   await expect(shield).toHaveAttribute('data-trusted', 'false');
+  expect(await trustDialogs()).toBe(1);
 
-  // Recusar a confirmação deixa como estava; aceitar liga a confiança.
+  // Recusar a confirmação deixa como estava (espera pelo diálogo antes de olhar).
   await shield.click();
+  await expect.poll(trustDialogs).toBe(2);
   await expect(shield).toHaveAttribute('data-trusted', 'false');
+  // Aceitar liga a confiança.
   await stubDialogs(project, 0);
   await shield.click();
   await expect(shield).toHaveAttribute('data-trusted', 'true');
+  expect(await trustDialogs()).toBe(3);
   // Tirar a confiança não pede nada.
-  await stubDialogs(project, 1);
   await shield.click();
   await expect(shield).toHaveAttribute('data-trusted', 'false');
-  await stubDialogs(project, 0);
+  expect(await trustDialogs()).toBe(3);
   await shield.click();
   await expect(shield).toHaveAttribute('data-trusted', 'true');
+});
+
+test('a interface não escolhe a pasta de uma sessão', async () => {
+  const page = await app.firstWindow();
+  const errors = await page.evaluate(async () => {
+    const api = (
+      globalThis as unknown as { solline: { request(c: string, p: unknown): Promise<unknown> } }
+    ).solline;
+    const fail = (p: Promise<unknown>) =>
+      p.then(
+        () => 'aceite',
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+    const { projects } = (await api.request('projects.list', {})) as {
+      projects: { id: string }[];
+    };
+    const projectId = projects[0]?.id ?? '';
+    return {
+      projectId,
+      // Um projeto que existe, mas com uma pasta escolhida pela interface: o pedido é estrito.
+      cwd: await fail(api.request('session.create', { projectId, agent: 'claude', cwd: 'C:\\' })),
+      unknown: await fail(
+        api.request('session.create', { projectId: 'nao-existe', agent: 'claude' }),
+      ),
+      internal: await fail(
+        api.request('session.start', { projectId, agent: 'claude', cwd: 'C:\\', trusted: true }),
+      ),
+    };
+  });
+  expect(errors.projectId).not.toBe('');
+  expect(errors.cwd).toMatch(/unrecognized|cwd/i);
+  expect(errors.unknown).toContain('Projeto desconhecido');
+  expect(errors.internal).toContain('Comando desconhecido');
 });
 
 test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)', async () => {

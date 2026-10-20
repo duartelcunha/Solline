@@ -5,6 +5,8 @@ import {
   CRASH_MESSAGE,
   ClaudeSdkAdapter,
   SessionManager,
+  builtinRegistry,
+  withFactories,
   askBlockFor,
   toPermissionMode,
   toPermissionResult,
@@ -208,6 +210,20 @@ describe('projetos sem confiança', () => {
     await untrusted.adapter.close();
   });
 
+  it('sem confiança, o cartão de permissão diz que o "sempre" fica na sessão', async () => {
+    const fake = fakeQuery(loadFixture('edit-with-permission'));
+    const sink = recordingSink();
+    const adapter = new ClaudeSdkAdapter(
+      { cwd: 'C:/tmp/proj', mode: 'default', queryFn: fake.queryFn, loadSettings: false },
+      sink,
+    );
+    await adapter.start();
+    const ask = sink.nextAsk();
+    await adapter.send('edita');
+    expect(await ask).toMatchObject({ kind: 'permission', alwaysScope: 'session' });
+    await adapter.close();
+  });
+
   it('sem confiança, "Permitir sempre" fica na sessão', () => {
     const suggestions = [
       {
@@ -357,6 +373,43 @@ describe('SessionManager', () => {
     await manager.resume(id);
     expect(fakes[1]!.options().resume).toBe(agentSessionId);
     expect(fakes[1]!.options().model).toBe('claude-haiku-5-5');
+    await manager.disposeAll();
+  });
+
+  it('a confiança chega ao agente e a retoma usa a confiança atual do projeto', async () => {
+    const fakes: ReturnType<typeof fakeQuery>[] = [];
+    const events: EngineEvent[] = [];
+    const manager = new SessionManager({
+      emit: (event) => events.push(event),
+      registry: withFactories(builtinRegistry(), {
+        claude: (options, sink) => {
+          const fake = fakeQuery(loadFixture('plain-answer'));
+          fakes.push(fake);
+          // Sem loadSettings: false, para ver as fontes de definições de verdade.
+          return new ClaudeSdkAdapter({ ...options, queryFn: fake.queryFn }, sink);
+        },
+      }),
+    });
+    const { session } = await manager.create({
+      projectId: 'p',
+      agent: 'claude',
+      cwd: tmpdir(),
+      trusted: false,
+    });
+    expect(fakes[0]!.options().settingSources).toEqual(['user']);
+    // Sem histórico no agente não há retoma: o init da fixture dá-lhe o id.
+    await manager.send(session.id, 'olá');
+    await waitFor(() =>
+      events.some((e) => e.type === 'session.event' && e.delta.type === 'turn.end'),
+    );
+    fakes[0]!.crash();
+    await manager.resume(session.id);
+    expect(fakes[1]!.options().settingSources).toEqual(['user']);
+
+    manager.setProjectTrust('p', true);
+    fakes[1]!.crash();
+    await manager.resume(session.id);
+    expect(fakes[2]!.options().settingSources).toEqual(['user', 'project', 'local']);
     await manager.disposeAll();
   });
 

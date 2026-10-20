@@ -28,6 +28,18 @@ describe('resolveSessionStart', () => {
     });
   });
 
+  it('uma pasta ou confiança que venham no pedido nunca ganham às do projeto', async () => {
+    const forged = {
+      projectId: 'p1',
+      agent: 'claude',
+      cwd: 'C:/Windows',
+      trusted: true,
+    } as unknown as Parameters<typeof resolveSessionStart>[1];
+    const start = await resolveSessionStart(store, forged, exists);
+    expect(start.cwd).toBe(project.path);
+    expect(start.trusted).toBe(false);
+  });
+
   it('um projeto desconhecido não abre sessão', async () => {
     await expect(
       resolveSessionStart(store, { projectId: 'outro', agent: 'claude' }, exists),

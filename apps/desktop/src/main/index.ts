@@ -80,7 +80,10 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       const project = await projects.get(projectId);
       if (!project) throw new Error('Projeto desconhecido');
       if (trusted && !project.trusted && !(await confirmTrust(project.name))) return { project };
-      return { project: await projects.setTrusted(projectId, trusted) };
+      const updated = await projects.setTrusted(projectId, trusted);
+      // As sessões abertas guardam a confiança com que arrancaram; a retoma passa a usar esta.
+      await engine.request('projects.trustChanged', { projectId, trusted });
+      return { project: updated };
     }
     case 'session.create': {
       // A interface pede pelo projeto; a pasta vem sempre do que está guardado aqui.
