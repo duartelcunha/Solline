@@ -69,6 +69,11 @@ base (diff, linha do tempo, estados), porque tudo o resto os usa.
 Inspiração: revisão por hunks do Zed e do Cursor 3, `/rewind` do Claude Code, `/restore` do Gemini
 CLI, comentários em linha do Codex e do Vibe Kanban.
 
+Estado (20/10/2026): feito. Checkpoint por turno num git sombra para todos os agentes, painel
+"Rever" hunk a hunk com comentários em linha, linha do tempo com mola que rebobina ficheiros e
+conversa (no Claude e no Codex no próprio agente, no ACP com resumo) e o motion system em
+`packages/ui`. Decisões e limites em `DECISIONS.md`.
+
 ### M3: vários agentes em paralelo, numa mesa
 
 Cada sessão pode ter a sua worktree e o seu branch, criados pelo motor e passados a qualquer agente.

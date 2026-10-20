@@ -229,3 +229,47 @@
   servidores MCP, que o agente arranca com o ambiente dele por baixo.
 - Sem modo por omissão (ACP), um modo que deixou de ser visível passa para o mais fechado.
 - A escolha de servidores MCP só segue para agentes que os aceitam (o Codex ainda não).
+
+## 2026-10-20: M2, rever e desfazer
+
+- **Checkpoints num git sombra**, um repositório por pasta de projeto na pasta de dados
+  (`checkpoints/run-…/<hash>.git`), partilhado pelas sessões dessa pasta, com um índice por
+  sessão. Corre só canalização (`add`, `write-tree`, `diff`, `apply`, `read-tree`) com a config
+  global e de sistema desligadas e `info/attributes` a guardar os bytes exatos (sem CRLF, LFS nem
+  filtros). O `.git`, o índice e os hooks do utilizador nunca entram. Respeita o `.gitignore` do
+  projeto; links simbólicos e submódulos ficam de fora.
+- **Cada chamada ao git custa ~130 ms nesta máquina.** Antes de enviar, o motor só espera pelo
+  `git add` (o `write-tree` corre a seguir); o resto vai por trás. Sem refs nem gc: os objetos
+  vivem enquanto a pasta desta execução existir e as de execuções antigas saem ao fim de 24 h.
+  Quando houver histórico de sessões (M3), passam a refs por sessão.
+- **Pastas recusadas:** a raiz do disco, a pasta pessoal, a temporária e qualquer uma com mais de
+  20 000 ficheiros (contados com o `.gitignore`). A sessão continua; a linha do tempo diz porquê.
+- **Rever = base de revisão contra o disco.** Aceitar move a base (o hunk passa pelo
+  `git apply --cached` num índice à parte); rejeitar aplica o hunk ao contrário no disco
+  (`git apply -R`, que recusa se o ficheiro mudou entretanto). Cada ação e cada rebobinar de
+  ficheiros deixa um passo de "Desfazer" (até 50). O id de um hunk é o hash do conteúdo: uma ação
+  sobre um diff velho é recusada em vez de mexer na linha errada.
+- **Rebobinar a conversa** no Claude usa `resume` + `resumeSessionAt` + `forkSession` (o ponto é a
+  última entrada da conversa antes do turno, guardada no envio); no Codex, `thread/fork` com
+  `lastTurnId`. O id da sessão na Solline não muda. Nos agentes ACP abre-se uma sessão nova e um
+  resumo das mensagens que ficaram (até 12 000 caracteres, as mais recentes) segue com a mensagem
+  seguinte, sem aparecer na conversa. A mensagem do turno rebobinado volta à caixa de texto.
+- **Desfazer nunca apaga o que mudou depois.** Desfazer um aceitar só mexe na base de revisão;
+  desfazer um rejeitar ou um rebobinar só escreve se os ficheiros ainda estiverem como a ação os
+  deixou (se não, o passo sai e o disco fica). Todos os destinos são verificados antes da primeira
+  escrita, e uma falha a meio deixa o passo de desfazer para o que já foi escrito.
+- **Com o agente a trabalhar** só se aceita (mexe na base, não no disco). Rejeitar, desfazer,
+  rebobinar e mandar outra mensagem ficam para quando ele parar.
+- **Ficheiros acima de 20 MB** ficam fora dos checkpoints (um exclude por sessão, revisto no
+  arranque e no fim de cada turno), e com eles fora do rever e do rebobinar.
+- **Limite conhecido:** rever e rebobinar comparam com o disco inteiro, por isso também apanham o
+  que tu mudaste à mão ou uma troca de branch no teu repositório. Fica à vista no diff antes de
+  rejeitar; limitar aos ficheiros que o agente tocou fica para o M5 (passagem de testemunho).
+- **Comentários em linha** seguem como uma mensagem normal, com a linha citada do diff.
+- **Motion system em `packages/ui`** (`motion.css`, `motion.ts`, `react.ts`): curvas
+  `cubic-bezier(0.23, 1, 0.32, 1)` e `cubic-bezier(0.77, 0, 0.175, 1)`, durações de 120 a 260 ms
+  com a saída (140 ms) mais rápida do que a entrada, molas à maneira da Apple (amortecimento e
+  resposta) para a pega da linha do tempo, que parte sempre do valor e da velocidade atuais.
+  Ações de teclado não animam (`data-input` no `<html>` e `detail === 0` nos clicks). O movimento
+  reduzido zera distâncias e escalas e deixa a opacidade; saiu a regra antiga que punha todas as
+  transições a 0 ms.
