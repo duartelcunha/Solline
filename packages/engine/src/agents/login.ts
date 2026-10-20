@@ -3,6 +3,14 @@ import type { AgentId } from '@solline/protocol';
 /** Um login a decorrer: o endereço para o browser, o fim e como desistir. */
 export interface LoginFlow {
   url: string;
+  /** Código de dispositivo a mostrar (o browser pede-o). */
+  code?: string;
+  /** O agente aceita um código colado do browser (ver submit). */
+  acceptsCode?: boolean;
+  /** O agente já abriu o browser sozinho. */
+  openedByAgent?: boolean;
+  /** Passa ao agente o código que o browser mostrou. */
+  submit?: ((code: string) => Promise<void>) | undefined;
   /** Resolve quando o agente diz que entrou; rejeita se falhou ou foi cancelado. */
   done: Promise<void>;
   cancel(): Promise<void>;
@@ -35,7 +43,18 @@ export class LoginManager {
     return this.#flows.has(agent) || this.#starting.has(agent);
   }
 
-  async start(agent: AgentId, begin: () => Promise<LoginFlow>): Promise<string> {
+  /** O login a decorrer (para mostrar o código ou deixar colar um). */
+  current(agent: AgentId): LoginFlow | undefined {
+    return this.#flows.get(agent)?.flow;
+  }
+
+  async submit(agent: AgentId, code: string): Promise<void> {
+    const flow = this.#flows.get(agent)?.flow;
+    if (!flow?.submit) throw new Error('Não há nenhum login à espera de um código');
+    await flow.submit(code);
+  }
+
+  async start(agent: AgentId, begin: () => Promise<LoginFlow>): Promise<LoginFlow> {
     if (this.#closed) throw new Error('O motor está a fechar');
     // Cada arranque tem um número, marcado já (sem esperar): se outro começar ou alguém
     // cancelar enquanto o agente prepara o login (até um minuto), este fecha o seu processo
@@ -74,7 +93,7 @@ export class LoginManager {
       (error: unknown) =>
         this.#finish(agent, flow, error instanceof Error ? error.message : String(error)),
     );
-    return flow.url;
+    return flow;
   }
 
   /** Desiste sem avisar de erro (foste tu que cancelaste). */

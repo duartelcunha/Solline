@@ -132,7 +132,7 @@ export class Engine {
       'agents.loginStart': async (p) => {
         const login = definitionOf(p.agent).login;
         if (!login) throw new Error('Este agente não tem login dentro da app');
-        return { url: await logins.start(p.agent, () => login.start()) };
+        return { url: (await logins.start(p.agent, () => login.start())).url };
       },
       'agents.loginCancel': async (p) => (await logins.cancel(p.agent), ok),
       'agents.keys': async (p) => {
