@@ -156,6 +156,7 @@ export function askBlockFor(
   toolName: string,
   input: Record<string, unknown>,
   options: Parameters<CanUseTool>[2],
+  projectTrusted = true,
 ): AskBlock {
   const id = options.requestId || options.toolUseID;
   if (toolName === 'ExitPlanMode') {
@@ -179,26 +180,35 @@ export function askBlockFor(
     ...(reason ? { description: reason } : {}),
     input,
     canAlwaysAllow: !options.suppressAlwaysAllowRule && (options.suggestions?.length ?? 0) > 0,
+    ...(projectTrusted ? {} : { alwaysScope: 'session' as const }),
     defaultToNo: options.defaultToNo === true,
     status: 'pending',
   };
 }
 
-/** A resposta da interface no formato que o SDK espera. */
+/**
+ * A resposta da interface no formato que o SDK espera. Num projeto sem confiança o "sempre"
+ * fica na sessão: senão o CLI gravava a regra em <projeto>/.claude/settings.local.json.
+ */
 export function toPermissionResult(
   entry: Pick<AskEntry, 'block' | 'input' | 'suggestions'>,
   outcome: BrokerOutcome,
+  projectTrusted = true,
 ): PermissionResult {
   const { block, input } = entry;
   switch (outcome.decision) {
     case 'allow-once':
       return { behavior: 'allow', updatedInput: input };
-    case 'allow-always':
+    case 'allow-always': {
+      const suggestions = entry.suggestions ?? [];
       return {
         behavior: 'allow',
         updatedInput: input,
-        updatedPermissions: entry.suggestions ?? [],
+        updatedPermissions: projectTrusted
+          ? suggestions
+          : suggestions.map((update) => ({ ...update, destination: 'session' as const })),
       };
+    }
     case 'answer':
       return { behavior: 'allow', updatedInput: { ...input, answers: outcome.answers } };
     case 'deny':
@@ -379,7 +389,13 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },
       systemPrompt: { type: 'preset', preset: 'claude_code' },
-      settingSources: options.loadSettings === false ? [] : ['user', 'project', 'local'],
+      // Sem confiança, só as definições do utilizador: nada do .claude/ nem do CLAUDE.md da pasta.
+      settingSources:
+        options.loadSettings === false
+          ? []
+          : options.projectTrusted
+            ? ['user', 'project', 'local']
+            : ['user'],
       canUseTool: this.#canUseTool,
       env: sanitizedEnv(),
       stderr: (data) => {
@@ -394,7 +410,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   readonly #canUseTool: CanUseTool = async (toolName, input, options) => {
     const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
     this.#emit(deltas);
-    const block = askBlockFor(toolName, input, options);
+    const trusted = this.#options.projectTrusted === true;
+    const block = askBlockFor(toolName, input, options, trusted);
     const entry: AskEntry = { turnId, block, input, suggestions: options.suggestions };
     this.#asks.set(block.id, entry);
     this.#sink.ask(turnId, block);
@@ -409,7 +426,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     this.#emit([{ type: 'block.upsert', turnId, block: resolved }]);
     if (!this.#crashed)
       this.#sink.state(this.#asks.size > 0 ? 'needs-you' : this.#running ? 'running' : 'idle');
-    return toPermissionResult(entry, outcome);
+    return toPermissionResult(entry, outcome, trusted);
   };
 
   async #runPump(q: Query): Promise<void> {

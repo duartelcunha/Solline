@@ -173,6 +173,7 @@ describe.skipIf(skip)('cenários reais do Claude', () => {
           projectId: 'p',
           agent: 'claude',
           cwd,
+          trusted: true,
           mode: 'default',
           model: 'haiku',
           effort: 'low',

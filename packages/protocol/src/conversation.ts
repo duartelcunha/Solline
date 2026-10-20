@@ -60,6 +60,8 @@ export const PermissionBlock = z.object({
   input: z.unknown(),
   /** false quando o agente não deixa gravar uma regra ("sempre") para este pedido. */
   canAlwaysAllow: z.boolean(),
+  /** Onde fica o "sempre": só nesta sessão ou gravado. Sem valor, é o que o agente sugerir. */
+  alwaysScope: z.enum(['session', 'persistent']).optional(),
   /** O cartão abre no "Negar" e não aceita aprovação com uma tecla. */
   defaultToNo: z.boolean(),
   status: AskStatus,

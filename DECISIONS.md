@@ -71,6 +71,12 @@
   integridade não cobre o `app.asar.unpacked` (onde vive o `claude.exe`) e a pasta de instalação
   por utilizador é gravável pelo próprio utilizador: o ganho principal é fechar o runAsNode, o
   NODE_OPTIONS e o inspect.
+- **Projetos com e sem confiança.** Um projeto novo pergunta (diálogo nativo, "Não confiar" por
+  omissão). Sem confiança, o Claude só lê as definições do utilizador (`settingSources: ['user']`,
+  sem `.claude/` nem `CLAUDE.md` da pasta) e "Permitir sempre" passa a "Permitir nesta sessão"
+  (o destino das sugestões é reescrito para `session`). Os projetos que já existiam ficam de
+  confiança (`projects.json` v1 → v2). Ligar a confiança pede confirmação nativa; vale para as
+  sessões novas.
 - **Smart App Control:** neste PC o Windows bloqueia o `Solline.exe` sem assinatura ("An Application
   Control policy has blocked this file"), por isso a app empacotada não arranca aqui. O smoke corre
   sobre o Electron de `node_modules`. Para usar a app instalada é preciso assinar o build ou desligar

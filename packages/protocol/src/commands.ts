@@ -24,6 +24,11 @@ export const Project = z.object({
   path: z.string(),
   name: z.string(),
   addedAt: z.number(),
+  /**
+   * Sem confiança, os agentes não leem as definições, hooks, MCP nem instruções do projeto
+   * (no Claude, o .claude/ e o CLAUDE.md da pasta) e "Permitir sempre" só vale na sessão.
+   */
+  trusted: z.boolean(),
 });
 export type Project = z.infer<typeof Project>;
 
@@ -44,9 +49,10 @@ export const SessionCreatePayload = z
   })
   .strict();
 
-/** main -> motor: o mesmo pedido já com a pasta do projeto. A interface nunca o manda. */
+/** main -> motor: o mesmo pedido já com a pasta e a confiança do projeto. A interface nunca o manda. */
 export const SessionStartPayload = SessionCreatePayload.extend({
   cwd: z.string().min(1),
+  trusted: z.boolean(),
 }).strict();
 export type SessionStartPayload = z.infer<typeof SessionStartPayload>;
 
@@ -84,6 +90,11 @@ export const commandSchemas = {
   'projects.list': { payload: Empty, result: z.object({ projects: z.array(Project) }) },
   /** Abre o seletor de pastas nativo; project é null se cancelares. */
   'projects.add': { payload: Empty, result: z.object({ project: Project.nullable() }) },
+  /** Ligar a confiança pede confirmação nativa; project volta igual se a recusares. */
+  'projects.setTrusted': {
+    payload: z.object({ projectId: z.string().min(1).max(64), trusted: z.boolean() }).strict(),
+    result: z.object({ project: Project }),
+  },
 } as const;
 
 /**
@@ -93,6 +104,7 @@ export const commandSchemas = {
 export const MAIN_COMMANDS = [
   'projects.list',
   'projects.add',
+  'projects.setTrusted',
   'session.create',
 ] as const satisfies CommandName[];
 export type MainCommandName = (typeof MAIN_COMMANDS)[number];

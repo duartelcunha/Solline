@@ -37,6 +37,7 @@ async function start(engine: Engine, payload: Record<string, unknown> = {}): Pro
     projectId: 'p',
     agent: 'claude',
     cwd: tmpdir(),
+    trusted: true,
     ...payload,
   });
   if (!created.ok) throw new Error(created.error.message);
@@ -192,6 +193,7 @@ describe('Engine', () => {
       projectId: 'p',
       agent: 'claude',
       cwd: tmpdir(),
+      trusted: true,
       mode: 'auto',
     });
     expect(created).toMatchObject({

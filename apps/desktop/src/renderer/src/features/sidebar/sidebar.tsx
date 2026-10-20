@@ -1,4 +1,4 @@
-import { FolderPlus, Folder, Plus } from 'lucide-react';
+import { FolderPlus, Folder, Plus, ShieldCheck, ShieldOff } from 'lucide-react';
 import { APP_NAME } from '@solline/protocol/app';
 import type { Project, SessionState } from '@solline/protocol';
 import { actions, useApp, useSession } from '../../stores/app.ts';
@@ -74,6 +74,30 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
         >
           <Folder size={14} strokeWidth={1.75} className="shrink-0 text-subtle" />
           <span className="truncate">{project.name}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => void actions.setProjectTrusted(project.id, !project.trusted)}
+          aria-pressed={project.trusted}
+          aria-label={
+            project.trusted
+              ? `Tirar a confiança a ${project.name}`
+              : `Confiar no projeto ${project.name}`
+          }
+          title={
+            project.trusted
+              ? 'Projeto de confiança: os agentes leem as definições da pasta'
+              : 'Sem confiança: os agentes não leem as definições da pasta'
+          }
+          data-testid="project-trust"
+          data-trusted={project.trusted}
+          className={`grid size-6 shrink-0 place-items-center rounded-sm transition-colors duration-150 hover:bg-surface-hover hover:text-fg ${project.trusted ? 'text-subtle' : 'text-accent-text'}`}
+        >
+          {project.trusted ? (
+            <ShieldCheck size={14} strokeWidth={1.9} />
+          ) : (
+            <ShieldOff size={14} strokeWidth={1.9} />
+          )}
         </button>
         <button
           type="button"

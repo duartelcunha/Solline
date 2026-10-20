@@ -25,5 +25,5 @@ export async function resolveSessionStart(
   const project = await store.get(payload.projectId);
   if (!project) throw new Error('Projeto desconhecido');
   if (!(await exists(project.path))) throw new Error('A pasta do projeto já não existe');
-  return { ...payload, cwd: project.path };
+  return { ...payload, cwd: project.path, trusted: project.trusted };
 }

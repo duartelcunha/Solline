@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { Project } from '@solline/protocol';
 import { resolveSessionStart, type ProjectLookup } from './session-policy.ts';
 
-const project: Project = { id: 'p1', path: 'C:/code/app', name: 'app', addedAt: 0 };
+const project: Project = {
+  id: 'p1',
+  path: 'C:/code/app',
+  name: 'app',
+  addedAt: 0,
+  trusted: false,
+};
 const store: ProjectLookup = { get: async (id) => (id === project.id ? project : undefined) };
 const exists = async () => true;
 
@@ -13,7 +19,13 @@ describe('resolveSessionStart', () => {
       { projectId: 'p1', agent: 'claude', mode: 'plan' },
       exists,
     );
-    expect(start).toEqual({ projectId: 'p1', agent: 'claude', mode: 'plan', cwd: project.path });
+    expect(start).toEqual({
+      projectId: 'p1',
+      agent: 'claude',
+      mode: 'plan',
+      cwd: project.path,
+      trusted: false,
+    });
   });
 
   it('um projeto desconhecido não abre sessão', async () => {

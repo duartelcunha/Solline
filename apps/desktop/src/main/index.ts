@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   BrowserWindow,
@@ -18,6 +18,7 @@ import {
   commandSchemas,
   isMainCommand,
   type CommandName,
+  type CommandPayload,
   type MainCommandName,
 } from '@solline/protocol';
 import { EngineHost } from './engine-host.ts';
@@ -35,6 +36,29 @@ const engine = new EngineHost((event) => {
 });
 const projects = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
 
+const TRUST_DETAIL =
+  'Num projeto de confiança, os agentes leem as definições, hooks, servidores MCP e instruções ' +
+  'da pasta (no Claude, o .claude/ e o CLAUDE.md). Sem confiança, só as tuas definições de ' +
+  'utilizador, e "Permitir sempre" vale só na sessão. Vale para as sessões novas.';
+
+/** Diálogo nativo: a confiança nunca se liga sem um clique teu fora da interface. */
+async function confirmTrust(name: string): Promise<boolean> {
+  const options = {
+    type: 'question' as const,
+    title: 'Confiança no projeto',
+    message: `Confias no projeto ${name}?`,
+    detail: TRUST_DETAIL,
+    buttons: ['Confiar', 'Não confiar'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options);
+  return response === 0;
+}
+
 async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
   switch (command) {
     case 'projects.list':
@@ -45,7 +69,18 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
         ? await dialog.showOpenDialog(mainWindow, options)
         : await dialog.showOpenDialog(options);
       const folder = picked.canceled ? undefined : picked.filePaths[0];
-      return { project: folder ? await projects.add(folder) : null };
+      if (!folder) return { project: null };
+      const existing = await projects.find(folder);
+      if (existing) return { project: existing };
+      const trusted = await confirmTrust(basename(folder) || folder);
+      return { project: await projects.add(folder, trusted) };
+    }
+    case 'projects.setTrusted': {
+      const { projectId, trusted } = payload as CommandPayload<'projects.setTrusted'>;
+      const project = await projects.get(projectId);
+      if (!project) throw new Error('Projeto desconhecido');
+      if (trusted && !project.trusted && !(await confirmTrust(project.name))) return { project };
+      return { project: await projects.setTrusted(projectId, trusted) };
     }
     case 'session.create': {
       // A interface pede pelo projeto; a pasta vem sempre do que está guardado aqui.

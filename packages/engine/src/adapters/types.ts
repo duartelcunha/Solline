@@ -24,6 +24,8 @@ export interface AgentStartOptions {
   mode: string;
   /** Id da sessão no agente, para retomar o histórico. */
   resume?: string | undefined;
+  /** Projeto de confiança: o agente pode ler as definições e instruções da pasta. */
+  projectTrusted?: boolean | undefined;
 }
 
 export interface AgentStartResult {

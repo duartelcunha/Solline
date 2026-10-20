@@ -182,7 +182,7 @@ export function PermissionCard({
             className={secondary}
             onClick={() => answer({ decision: 'allow-always' })}
           >
-            Permitir sempre
+            {block.alwaysScope === 'session' ? 'Permitir nesta sessão' : 'Permitir sempre'}
             {block.defaultToNo ? null : <Kbd>2</Kbd>}
           </button>
         ) : null}

@@ -27,6 +27,7 @@ async function defaultCheckCwd(cwd: string): Promise<void> {
 interface Entry {
   info: SessionInfo;
   adapter: AgentAdapter;
+  trusted: boolean;
 }
 
 /**
@@ -81,7 +82,7 @@ export class SessionManager {
       },
       agentSessionId: null,
     };
-    return this.#start(info);
+    return this.#start(info, payload.trusted);
   }
 
   /** Abre de novo uma sessão que caiu, com resume no agente e as mesmas definições. */
@@ -90,7 +91,7 @@ export class SessionManager {
     const resumeId = entry.adapter.agentSessionId();
     if (!resumeId) throw new Error('Esta sessão ainda não tem histórico no agente para retomar');
     await entry.adapter.close();
-    return this.#start(entry.info, resumeId);
+    return this.#start(entry.info, entry.trusted, resumeId);
   }
 
   send(sessionId: string, text: string): Promise<string> {
@@ -143,14 +144,21 @@ export class SessionManager {
     await Promise.all(entries.map((entry) => entry.adapter.close()));
   }
 
-  async #start(info: SessionInfo, resume?: string): Promise<SessionResult> {
+  async #start(info: SessionInfo, trusted: boolean, resume?: string): Promise<SessionResult> {
     const { model, effort, mode } = info.settings;
     const adapter = this.#adapters[info.agent](
-      { cwd: info.cwd, model: model ?? undefined, effort: effort ?? undefined, mode, resume },
+      {
+        cwd: info.cwd,
+        model: model ?? undefined,
+        effort: effort ?? undefined,
+        mode,
+        resume,
+        projectTrusted: trusted,
+      },
       this.#sinkFor(info),
     );
     const isNew = !this.#sessions.has(info.id);
-    this.#sessions.set(info.id, { info, adapter });
+    this.#sessions.set(info.id, { info, adapter, trusted });
     try {
       const started = await adapter.start();
       info.settings = started.settings;

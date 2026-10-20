@@ -132,6 +132,17 @@ export const actions = {
     }
   },
 
+  async setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
+    try {
+      const { project } = await request('projects.setTrusted', { projectId, trusted });
+      useApp.setState((s) => ({
+        projects: s.projects.map((p) => (p.id === project.id ? project : p)),
+      }));
+    } catch (error) {
+      useApp.setState({ notice: message(error) });
+    }
+  },
+
   selectProject(projectId: string): void {
     useApp.setState({ activeProjectId: projectId });
   },

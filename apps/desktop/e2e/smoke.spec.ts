@@ -141,19 +141,57 @@ test('só links https abrem fora e as permissões do browser vêm negadas', asyn
   expect(opened).toEqual(['https://example.com/']);
 });
 
+/**
+ * Os diálogos nativos não se conduzem por Playwright: trocam-se no main. trust é o botão
+ * do diálogo de confiança (0 = Confiar, 1 = Não confiar).
+ */
+async function stubDialogs(folder: string, trust: number): Promise<void> {
+  await app.evaluate(
+    ({ dialog }, { folder, trust }) => {
+      dialog.showOpenDialog = (async () => ({
+        canceled: false,
+        filePaths: [folder],
+      })) as typeof dialog.showOpenDialog;
+      dialog.showMessageBox = (async () => ({
+        response: trust,
+        checkboxChecked: false,
+      })) as typeof dialog.showMessageBox;
+    },
+    { folder, trust },
+  );
+}
+
+test('um projeto novo pergunta pela confiança e o escudo muda-a', async () => {
+  const page = await app.firstWindow();
+  await stubDialogs(project, 1);
+  await page.getByTestId('add-project').click();
+  await expect(page.getByTestId('project-row')).toHaveCount(1);
+  const shield = page.getByTestId('project-trust');
+  await expect(shield).toHaveAttribute('data-trusted', 'false');
+
+  // Recusar a confirmação deixa como estava; aceitar liga a confiança.
+  await shield.click();
+  await expect(shield).toHaveAttribute('data-trusted', 'false');
+  await stubDialogs(project, 0);
+  await shield.click();
+  await expect(shield).toHaveAttribute('data-trusted', 'true');
+  // Tirar a confiança não pede nada.
+  await stubDialogs(project, 1);
+  await shield.click();
+  await expect(shield).toHaveAttribute('data-trusted', 'false');
+  await stubDialogs(project, 0);
+  await shield.click();
+  await expect(shield).toHaveAttribute('data-trusted', 'true');
+});
+
 test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)', async () => {
   test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
   test.setTimeout(240_000);
   const page = await app.firstWindow();
   await setTheme(page, 'light');
 
-  // O seletor de pastas nativo não se conduz por Playwright: troca-se no main.
-  await app.evaluate(({ dialog }, folder) => {
-    dialog.showOpenDialog = (async () => ({
-      canceled: false,
-      filePaths: [folder],
-    })) as typeof dialog.showOpenDialog;
-  }, project);
+  // O projeto já foi adicionado (e ficou de confiança) no teste anterior.
+  await stubDialogs(project, 0);
   await page.getByTestId('add-project').click();
   await expect(page.getByTestId('project-row')).toHaveCount(1);
 

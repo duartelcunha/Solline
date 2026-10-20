@@ -187,6 +187,61 @@ describe('modos e effort que chegam ao SDK', () => {
   });
 });
 
+describe('projetos sem confiança', () => {
+  function withSettings(projectTrusted: boolean) {
+    const fake = fakeQuery(loadFixture('plain-answer'));
+    const adapter = new ClaudeSdkAdapter(
+      { cwd: 'C:/tmp/proj', mode: 'default', queryFn: fake.queryFn, projectTrusted },
+      recordingSink(),
+    );
+    return { fake, adapter };
+  }
+
+  it('com confiança lê utilizador, projeto e local; sem confiança só o utilizador', async () => {
+    const trusted = withSettings(true);
+    await trusted.adapter.start();
+    expect(trusted.fake.options().settingSources).toEqual(['user', 'project', 'local']);
+    await trusted.adapter.close();
+    const untrusted = withSettings(false);
+    await untrusted.adapter.start();
+    expect(untrusted.fake.options().settingSources).toEqual(['user']);
+    await untrusted.adapter.close();
+  });
+
+  it('sem confiança, "Permitir sempre" fica na sessão', () => {
+    const suggestions = [
+      {
+        type: 'addRules' as const,
+        rules: [{ toolName: 'Bash', ruleContent: 'npm test' }],
+        behavior: 'allow' as const,
+        destination: 'localSettings' as const,
+      },
+    ];
+    const options = {
+      signal: new AbortController().signal,
+      toolUseID: 't1',
+      requestId: 'r1',
+      suggestions,
+    };
+    const block = askBlockFor('Bash', { command: 'npm test' }, options, false);
+    expect(block).toMatchObject({
+      kind: 'permission',
+      canAlwaysAllow: true,
+      alwaysScope: 'session',
+    });
+    expect(askBlockFor('Bash', { command: 'npm test' }, options, true)).not.toHaveProperty(
+      'alwaysScope',
+    );
+    const entry = { block, input: { command: 'npm test' }, suggestions };
+    expect(toPermissionResult(entry, { decision: 'allow-always' }, false)).toMatchObject({
+      updatedPermissions: [{ type: 'addRules', destination: 'session' }],
+    });
+    expect(toPermissionResult(entry, { decision: 'allow-always' }, true)).toMatchObject({
+      updatedPermissions: [{ type: 'addRules', destination: 'localSettings' }],
+    });
+  });
+});
+
 describe('pedidos especiais', () => {
   const base = { signal: new AbortController().signal, toolUseID: 'tu1', requestId: 'r1' };
 
@@ -276,6 +331,7 @@ describe('SessionManager', () => {
       projectId: 'p',
       agent: 'claude',
       cwd: tmpdir(),
+      trusted: true,
       mode: 'default',
       model: 'haiku',
       effort: 'low',
