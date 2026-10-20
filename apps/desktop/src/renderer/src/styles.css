@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import '@solline/ui/fonts.css';
 @import '@solline/ui/tokens.css';
+@import '@solline/ui/motion.css';
 
 /* Os tokens da Solline passam a utilitários do Tailwind (bg-surface, text-muted, ...). */
 @theme inline {
@@ -48,9 +49,12 @@ body {
     color var(--sl-duration-base) var(--sl-ease-out);
 }
 
-:focus-visible {
-  outline: 2px solid var(--sl-focus);
-  outline-offset: 2px;
+/* Na camada base, para um outline-none de um componente ganhar. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--sl-focus);
+    outline-offset: 2px;
+  }
 }
 
 .drag {
@@ -59,15 +63,6 @@ body {
 
 .no-drag {
   -webkit-app-region: no-drag;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    transition-duration: 0ms !important;
-    animation-duration: 0ms !important;
-  }
 }
 
 /* ---------- Conversa ---------- */
@@ -245,7 +240,7 @@ body {
 @keyframes sl-appear {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(var(--sl-rise));
   }
 }
 .appear {
@@ -277,7 +272,7 @@ body {
 @keyframes sl-pop {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.98);
+    transform: translateY(var(--sl-rise)) scale(var(--sl-pop-scale));
   }
 }
 .menu-content {
@@ -296,7 +291,7 @@ body {
 @keyframes sl-dialog {
   from {
     opacity: 0;
-    scale: 0.985;
+    scale: var(--sl-pop-scale);
   }
 }
 .dialog-content {
