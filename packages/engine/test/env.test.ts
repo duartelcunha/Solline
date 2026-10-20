@@ -64,10 +64,10 @@ describe('agentEnv', () => {
       {
         base: 'no-secrets',
         drop: ['CLAUDE_CONFIG_DIR'],
-        fromEnv: { ANTHROPIC_AUTH_TOKEN: 'DEEPSEEK_API_KEY' },
+        fromEnv: { ANTHROPIC_AUTH_TOKEN: 'FORNECEDOR_API_KEY' },
         overlay: { ANTHROPIC_BASE_URL: 'https://api.example.com', PATH: '/outro' },
       },
-      { ...HOST, DEEPSEEK_API_KEY: 'd' },
+      { ...HOST, FORNECEDOR_API_KEY: 'd' },
     );
     expect(env).toMatchObject({
       ANTHROPIC_AUTH_TOKEN: 'd',
@@ -75,6 +75,6 @@ describe('agentEnv', () => {
       PATH: '/outro',
     });
     expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR');
-    expect(env).not.toHaveProperty('DEEPSEEK_API_KEY');
+    expect(env).not.toHaveProperty('FORNECEDOR_API_KEY');
   });
 });

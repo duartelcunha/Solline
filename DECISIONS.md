@@ -319,3 +319,17 @@
   (formato tirado do binário, testado só com o servidor falso: falta um turno real, que gasta
   quota): vira cartão; "Permitir sempre" responde `_meta.persist = "session"` e nunca existe num
   servidor que corre programas. As outras elicitações continuam recusadas com um aviso.
+
+## 2026-10-20: só agentes com login por subscrição
+
+- **Saem os perfis só com chave de API:** `claude:deepseek`, `claude:glm` e `claude:kimi` (o
+  Claude Code a falar com a API de outro fornecedor), com o leitor do Gestor de Credenciais e o
+  gancho `secrets` do registo, que só eles usavam. Substituem as entradas do M1d e dos modelos
+  GLM e Kimi acima.
+- **Regra:** um agente entra se tiver login por subscrição feito pelo próprio binário do
+  fabricante, arrancado de dentro da Solline (browser ou código de dispositivo). A Solline nunca
+  lê, copia nem guarda tokens, e nunca se faz passar pelo cliente de outro fabricante (é isso que
+  o jcode faz, contra os termos, e dá contas banidas).
+- **O Gemini CLI fica de fora:** o login de consumidor acabou a 18/06/2026. O Antigravity entra
+  pelo ACP com o login dele.
+

@@ -183,13 +183,8 @@ test('a nova sessão deixa escolher o agente e mostra porque um não está pront
   await expect(page.getByTestId('agent-opencode')).toContainText('OpenCode');
   // O REA aparece nos servidores MCP; sem estar instalado diz como instalar.
   await expect(page.getByTestId('mcp-rea')).toContainText('REA');
-  const deepseek = page.getByTestId('agent-claude:deepseek');
-  await expect(deepseek).toContainText('DeepSeek (experimental)');
-  // Sem chave fica desligado e diz onde a pôr; com chave fica pronto.
-  const disabled = await deepseek.getAttribute('data-disabled');
-  if (disabled !== null) await expect(deepseek).toContainText('Gestor de Credenciais');
-  await expect(page.getByTestId('agent-claude:glm')).toContainText('GLM (experimental)');
-  await expect(page.getByTestId('agent-claude:kimi')).toContainText('Kimi (experimental)');
+  // Só agentes com login por subscrição: nada que viva só de uma chave de API.
+  await expect(page.getByTestId('agent-claude:deepseek')).toHaveCount(0);
   await shot(page, 'agent-picker');
   // O seletor também abre o painel de agentes.
   await page.getByTestId('open-agents-panel').click();

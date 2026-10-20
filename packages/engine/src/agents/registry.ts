@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentDescriptor, AgentId, ModeOption } from '@solline/protocol';
 import { binaryName, platformPackageName } from '../adapters/claude/executable.ts';
-import { CLAUDE_MODES, ClaudeSdkAdapter, type ClaudeProfile } from '../adapters/claude/sdk.ts';
+import { CLAUDE_MODES, ClaudeSdkAdapter } from '../adapters/claude/sdk.ts';
 import type { AgentAdapterFactory } from '../adapters/types.ts';
 import { CodexAppServerAdapter } from '../adapters/codex/adapter.ts';
 import { codexNeedsLogin, startCodexLogin } from '../adapters/codex/account.ts';
@@ -20,7 +20,6 @@ import { CLAUDE_ENV_POLICY, agentEnv, type EnvPolicy } from '../env.ts';
 import { StderrTail } from '../rpc/json-rpc.ts';
 import { CATALOG, catalogDefinition } from './catalog.ts';
 import type { LoginFlow } from './login.ts';
-import { PROVIDER_PROFILES, profileDefinition } from './profiles.ts';
 
 export type Detected = Pick<AgentDescriptor, 'status' | 'detail' | 'version'>;
 
@@ -54,11 +53,6 @@ export interface AgentDefinition {
    * juntos ao envPolicy.keys no arranque de cada sessão.
    */
   configurableKeys?: boolean;
-  /**
-   * Segredos lidos só no arranque (por exemplo do Gestor de Credenciais) e juntos ao ambiente
-   * do agente. Lança com uma mensagem calma se faltar algum.
-   */
-  secrets?(): Promise<Record<string, string>>;
   create: AgentAdapterFactory;
 }
 
@@ -114,9 +108,7 @@ async function detectClaude(executable: string | undefined): Promise<Detected> {
   }
 }
 
-export function claudeDefinition(
-  options: BuiltinOptions & { profile?: ClaudeProfile } = {},
-): AgentDefinition {
+export function claudeDefinition(options: BuiltinOptions = {}): AgentDefinition {
   return {
     id: 'claude',
     label: 'Claude',
@@ -133,7 +125,6 @@ export function claudeDefinition(
           ...start,
           claudeExecutable: options.claudeExecutable,
           loadSettings: !options.isolated,
-          ...(options.profile ? { profile: options.profile } : {}),
         },
         sink,
       ),
@@ -244,7 +235,6 @@ export function builtinRegistry(options: BuiltinOptions = {}): AgentRegistry {
   return registryOf([
     claudeDefinition(options),
     codexDefinition({ packaged: options.packaged }),
-    ...PROVIDER_PROFILES.map((profile) => profileDefinition(profile, options)),
     ...CATALOG.map((entry) => catalogDefinition(entry)),
   ]);
 }

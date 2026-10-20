@@ -1,6 +1,6 @@
 # Solline: o melhor de cada harness, numa só ferramenta
 
-A Solline já corre o Claude Code, o Codex, modelos DeepSeek e qualquer agente ACP no mesmo motor
+A Solline já corre o Claude Code, o Codex e qualquer agente ACP no mesmo motor
 (`docs/plano.md`). Isso é a base. O objetivo é outro: pegar no que cada ferramenta faz melhor, dá-lo
 a todos os agentes por igual e embrulhá-lo numa experiência visual que dá gosto usar, como um jogo
 bem feito mas para trabalho a sério.
@@ -14,7 +14,7 @@ em marcos.
 Cada fabricante só junta funcionalidades dentro do próprio harness. A Solline fala com todos, por
 isso pode cruzá-los:
 
-1. O mesmo pedido corre no Claude, no Codex e no DeepSeek ao mesmo tempo, cada um na sua worktree.
+1. O mesmo pedido corre no Claude, no Codex e no Copilot ao mesmo tempo, cada um na sua worktree.
    Um quarto modelo avalia as três soluções e tu montas o resultado pedaço a pedaço, escolhendo os
    melhores hunks de cada uma. O Cursor faz best-of-N, mas só dentro do Cursor e fica com uma
    tentativa inteira.

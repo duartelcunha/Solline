@@ -6,7 +6,7 @@ import { z } from 'zod';
  * conhece isto.
  */
 
-/** Id de um agente no registo do motor: claude, claude:deepseek, codex, opencode… */
+/** Id de um agente no registo do motor: claude, codex, opencode… */
 export const AgentId = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}$/);
 export type AgentId = z.infer<typeof AgentId>;
 

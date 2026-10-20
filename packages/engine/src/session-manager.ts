@@ -492,8 +492,6 @@ export class SessionManager {
     }
     const { model, effort, mode } = info.settings;
     const entry: Partial<Entry> = {};
-    // Segredos só no arranque e só para este processo (por exemplo a chave de um fornecedor).
-    const secrets = definition.secrets ? await definition.secrets() : {};
     // As variáveis escolhidas no painel valem a partir da próxima sessão (ou retoma).
     const policy = definition.configurableKeys
       ? {
@@ -501,7 +499,7 @@ export class SessionManager {
           keys: [...(definition.envPolicy.keys ?? []), ...(await this.#keysFor(definition.id))],
         }
       : definition.envPolicy;
-    const env = { ...agentEnv(policy), ...secrets };
+    const env = agentEnv(policy);
     const adapter = definition.create(
       {
         cwd: info.cwd,

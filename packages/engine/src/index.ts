@@ -5,7 +5,6 @@ export { ClaudeNormalizer } from './adapters/claude/normalizer.ts';
 export {
   ClaudeSdkAdapter,
   CLAUDE_MODES,
-  type ClaudeProfile,
   CRASH_MESSAGE,
   askBlockFor,
   capabilitiesFrom,
@@ -35,15 +34,6 @@ export {
   type AgentDefinition,
   type AgentRegistry,
 } from './agents/registry.ts';
-export {
-  DEEPSEEK,
-  GLM,
-  KIMI,
-  PROVIDER_PROFILES,
-  profileDefinition,
-  type ProviderProfile,
-} from './agents/profiles.ts';
-export { readWindowsCredential, type CredentialReader } from './secrets/windows-credentials.ts';
 export {
   resolveClaudeExecutable,
   toUnpackedPath,
