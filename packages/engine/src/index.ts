@@ -1,7 +1,7 @@
 export { Engine, type EngineOptions } from './engine.ts';
 export { SessionManager } from './session-manager.ts';
 export { PermissionBroker, type BrokerOutcome } from './permission-broker.ts';
-export { ClaudeNormalizer } from './adapters/claude-normalizer.ts';
+export { ClaudeNormalizer } from './adapters/claude/normalizer.ts';
 export {
   ClaudeSdkAdapter,
   CLAUDE_MODES,
@@ -13,8 +13,8 @@ export {
   toPermissionModeOr,
   toPermissionResult,
   type ClaudeSdkOptions,
-} from './adapters/claude-sdk.ts';
-export { toolSummary, toolResultText, baseName } from './adapters/claude-tools.ts';
+} from './adapters/claude/sdk.ts';
+export { toolSummary, toolResultText, baseName } from './adapters/claude/tools.ts';
 export type {
   AgentAdapter,
   AgentAdapterFactory,
@@ -29,5 +29,5 @@ export {
   toUnpackedPath,
   platformPackageName,
   binaryName,
-} from './claude-executable.ts';
+} from './adapters/claude/executable.ts';
 export { ENGINE_VERSION } from './version.ts';

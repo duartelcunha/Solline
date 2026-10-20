@@ -1,6 +1,6 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Block, ConversationDelta, ToolBlock, Usage } from '@solline/protocol';
-import { toolResultText, toolSummary } from './claude-tools.ts';
+import { toolResultText, toolSummary } from './tools.ts';
 
 type StreamKind = 'text' | 'thinking' | 'tool';
 

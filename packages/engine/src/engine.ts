@@ -8,7 +8,7 @@ import {
   type EngineEvent,
   type ResponseEnvelope,
 } from '@solline/protocol';
-import { CLAUDE_MODES, ClaudeSdkAdapter } from './adapters/claude-sdk.ts';
+import { CLAUDE_MODES, ClaudeSdkAdapter } from './adapters/claude/sdk.ts';
 import type { AgentAdapterFactory } from './adapters/types.ts';
 import { SessionManager } from './session-manager.ts';
 import { ENGINE_VERSION } from './version.ts';

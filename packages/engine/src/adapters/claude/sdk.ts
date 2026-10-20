@@ -20,12 +20,12 @@ import type {
   Question,
   SessionSettings,
 } from '@solline/protocol';
-import { AsyncQueue } from '../async-queue.ts';
-import { sanitizedEnv } from '../env.ts';
-import { PermissionBroker, type BrokerOutcome } from '../permission-broker.ts';
-import { ClaudeNormalizer } from './claude-normalizer.ts';
-import { toolSummary } from './claude-tools.ts';
-import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from './types.ts';
+import { AsyncQueue } from '../../async-queue.ts';
+import { sanitizedEnv } from '../../env.ts';
+import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts';
+import { ClaudeNormalizer } from './normalizer.ts';
+import { toolSummary } from './tools.ts';
+import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
 
 export interface ClaudeSdkOptions extends AgentStartOptions {
   claudeExecutable?: string | undefined;
