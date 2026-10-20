@@ -26,6 +26,8 @@ export interface EnvPolicy {
   /** Segredos que passam mesmo em no-secrets (por exemplo OPENAI_API_KEY no Codex). */
   keys?: readonly string[];
   drop?: readonly string[];
+  /** Larga tudo o que o nome apanhar (por exemplo /^ANTHROPIC_/ num perfil de outro fornecedor). */
+  dropPattern?: RegExp;
   /** destino <- variável de origem, lida do ambiente original. */
   fromEnv?: Readonly<Record<string, string>>;
   /** Aplicado no fim: ganha a tudo o que veio do processo. */
@@ -41,7 +43,7 @@ export function agentEnv(
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(source)) {
     const upper = key.toUpperCase();
-    if (INHERITED.test(key) || drop.has(upper)) continue;
+    if (INHERITED.test(key) || drop.has(upper) || policy.dropPattern?.test(key)) continue;
     if (policy.base === 'no-secrets' && SECRET_NAME.test(key) && !keys.has(upper)) continue;
     env[key] = value;
   }

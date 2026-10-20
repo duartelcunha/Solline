@@ -72,6 +72,8 @@ export interface BuiltinOptions {
   isolated?: boolean | undefined;
   /** Pasta de dados da app (perfis de fornecedor). */
   dataDir?: string | undefined;
+  /** A correr da app instalada (os agentes não vêm com o motor). */
+  packaged?: boolean | undefined;
 }
 
 /** O binário do Claude Code vem no pacote de plataforma do SDK. */
@@ -123,9 +125,10 @@ export function claudeDefinition(
  * projetos de confiança. Recebe só as chaves da OpenAI, nenhum outro segredo do anfitrião.
  */
 export function codexDefinition(
-  options: { resolve?: () => CodexExecutable | null } = {},
+  options: { resolve?: () => CodexExecutable | null; packaged?: boolean | undefined } = {},
 ): AgentDefinition {
-  const resolve = options.resolve ?? (() => resolveCodexExecutable());
+  const resolve =
+    options.resolve ?? (() => resolveCodexExecutable({ packaged: options.packaged === true }));
   return {
     id: 'codex',
     label: 'Codex',
@@ -164,7 +167,7 @@ export function codexDefinition(
 export function builtinRegistry(options: BuiltinOptions = {}): AgentRegistry {
   return registryOf([
     claudeDefinition(options),
-    codexDefinition(),
+    codexDefinition({ packaged: options.packaged }),
     profileDefinition(DEEPSEEK, options),
   ]);
 }

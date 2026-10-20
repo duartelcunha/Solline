@@ -103,7 +103,9 @@ export function profileDefinition(
     staticModes: base.staticModes.filter((m) => !profile.claude.hideModes.includes(m.id)),
     envPolicy: {
       base: 'no-secrets',
-      drop: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CONFIG_DIR'],
+      drop: ['CLAUDE_CONFIG_DIR'],
+      // Nada da Anthropic chega a outro fornecedor: chaves, tokens, cabeçalhos próprios…
+      dropPattern: /^ANTHROPIC_/i,
       overlay: {
         CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP_ID,
         ANTHROPIC_BASE_URL: profile.baseUrl,

@@ -369,4 +369,38 @@ describe('Engine', () => {
     expect(fakes[0]!.closed()).toBe(true);
     await engine.dispose();
   });
+
+  it('tirar a confiança fecha a retoma a um agente que lê config do projeto', async () => {
+    const fakes: ReturnType<typeof fakeQuery>[] = [];
+    const strict: AgentDefinition = {
+      ...claudeDefinition({ isolated: true }),
+      id: 'estrito',
+      label: 'Estrito',
+      untrustedProjects: 'refused',
+      create: (options, sink) => {
+        const fake = fakeQuery(loadFixture('plain-answer'));
+        fakes.push(fake);
+        return new ClaudeSdkAdapter(
+          { ...options, queryFn: fake.queryFn, loadSettings: false },
+          sink,
+        );
+      },
+    };
+    const events: EngineEvent[] = [];
+    const engine = new Engine({ registry: registryOf([strict]), emit: (e) => events.push(e) });
+    const sessionId = await start(engine, { agent: 'estrito', trusted: true });
+    await call(engine, 'session.send', { sessionId, text: 'olá' });
+    await waitFor(() =>
+      events.some((e) => e.type === 'session.event' && e.delta.type === 'turn.end'),
+    );
+    await call(engine, 'projects.trustChanged', { projectId: 'p', trusted: false });
+    fakes[0]!.crash();
+    const resumed = await call(engine, 'session.resume', { sessionId });
+    expect(resumed).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('só corre em projetos de confiança') },
+    });
+    expect(fakes).toHaveLength(1);
+    await engine.dispose();
+  });
 });

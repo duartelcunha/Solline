@@ -36,7 +36,7 @@ public static class SollineCredential {
 }
 "@
 $value = [SollineCredential]::Read($env:SOLLINE_CREDENTIAL_TARGET)
-if ($null -eq $value) { exit 3 }
+if ([string]::IsNullOrWhiteSpace($value)) { exit 3 }
 if ($env:SOLLINE_CREDENTIAL_MODE -ne 'check') { [Console]::Out.Write($value) }
 exit 0
 `;

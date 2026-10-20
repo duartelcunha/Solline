@@ -134,6 +134,8 @@ export class CodexAppServerAdapter implements AgentAdapter {
     Pick<TurnStartParams, 'model' | 'effort' | 'approvalPolicy' | 'sandboxPolicy'>
   > = {};
   #running = false;
+  /** Interromper chegou antes de se saber o id do turno: manda-se assim que se souber. */
+  #interruptPending = false;
   #closing = false;
   #crashed = false;
 
@@ -265,19 +267,23 @@ export class CodexAppServerAdapter implements AgentAdapter {
     this.#emit(this.#normalizer.userTurn(turnId, text));
     this.#running = true;
     this.#sink.state('running');
+    this.#interruptPending = false;
+    const sent = this.#pending;
     const params: TurnStartParams = {
       threadId: this.#threadId,
       input: [{ type: 'text', text, text_elements: [] }],
-      ...this.#pending,
+      ...sent,
     };
     this.#pending = {};
     peer
       .request<TurnStartResponse>('turn/start', params, CONTROL_TIMEOUT_MS)
       .then((response) => {
-        this.#codexTurnId = response.turn.id;
+        this.#turnKnown(response.turn.id);
       })
       .catch((error: unknown) => {
         if (this.#crashed || this.#closing) return;
+        // O que não chegou ao Codex vai no turno seguinte; o que mudou entretanto ganha.
+        this.#pending = { ...sent, ...this.#pending };
         const { turnId: assistant, deltas } = this.#normalizer.ensureAssistantTurn();
         this.#emit([
           ...deltas,
@@ -295,12 +301,32 @@ export class CodexAppServerAdapter implements AgentAdapter {
     if (!peer || !this.#running || !this.#threadId) return;
     this.#normalizer.markInterrupted();
     this.#broker.cancelAll('interrupt');
-    if (!this.#codexTurnId) return;
-    await withTimeout(
-      peer.request('turn/interrupt', { threadId: this.#threadId, turnId: this.#codexTurnId }),
+    if (!this.#codexTurnId) {
+      this.#interruptPending = true;
+      return;
+    }
+    await this.#sendInterrupt(this.#codexTurnId);
+  }
+
+  #sendInterrupt(turnId: string): Promise<unknown> {
+    const peer = this.#peer;
+    if (!peer || !this.#threadId) return Promise.resolve();
+    return withTimeout(
+      peer.request('turn/interrupt', { threadId: this.#threadId, turnId }),
       CONTROL_TIMEOUT_MS,
       'Interromper',
     );
+  }
+
+  #turnKnown(turnId: string): void {
+    if (!this.#running) return;
+    this.#codexTurnId = turnId;
+    if (this.#interruptPending) {
+      this.#interruptPending = false;
+      void this.#sendInterrupt(turnId).catch((error: unknown) => {
+        console.error(`[codex] interromper falhou: ${String(error)}`);
+      });
+    }
   }
 
   async setMode(mode: string): Promise<void> {
@@ -352,7 +378,15 @@ export class CodexAppServerAdapter implements AgentAdapter {
       env: this.#options.env ?? {},
       cwd: this.#options.cwd,
     });
-    const exited = new Promise((resolve) => child.on('exit', resolve));
+    const exited = new Promise((resolve) => {
+      child.on('exit', resolve);
+      // Sem isto, um codex.exe que não arranca (apagado, bloqueado) derrubava o motor.
+      child.on('error', (error) => {
+        this.#stderr.push(String(error));
+        child.stdout.destroy();
+        resolve(error);
+      });
+    });
     return {
       input: child.stdout,
       output: child.stdin,
@@ -385,11 +419,13 @@ export class CodexAppServerAdapter implements AgentAdapter {
       return;
     }
     if (method === 'turn/started') {
-      this.#codexTurnId = (params as { turn?: { id?: string } }).turn?.id ?? this.#codexTurnId;
+      const id = (params as { turn?: { id?: string } }).turn?.id;
+      if (id) this.#turnKnown(id);
     }
     this.#emit(this.#normalizer.push(method, params));
     if (method === 'turn/completed') {
       this.#running = false;
+      this.#interruptPending = false;
       this.#codexTurnId = null;
       if (this.#asks.size === 0) this.#sink.state('idle');
     }

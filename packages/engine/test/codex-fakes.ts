@@ -55,6 +55,8 @@ export interface FakeCodexOptions {
   models?: unknown[];
   sandbox?: 'ready' | 'notConfigured';
   threadId?: string;
+  /** Quantos turn/start falham antes de os aceitar. */
+  failTurnStarts?: number;
 }
 
 const DEFAULT_MODELS = [
@@ -112,6 +114,7 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
   let killed = false;
   const threadId = options.threadId ?? 'thread-1';
   let turn = 0;
+  let failed = 0;
   let serverId = 100;
 
   const send = (msg: unknown) => fromServer.write(`${JSON.stringify(msg)}\n`);
@@ -160,6 +163,11 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
       'turn/interrupt': () => ({}),
     };
     if (id === undefined) return;
+    if (msg.method === 'turn/start' && (options.failTurnStarts ?? 0) > failed) {
+      failed++;
+      send({ id, error: { code: -32000, message: 'ocupado' } });
+      return;
+    }
     const result = results[msg.method];
     if (result) reply(id, result());
     else send({ id, error: { code: -32601, message: 'fake' } });

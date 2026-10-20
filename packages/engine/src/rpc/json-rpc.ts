@@ -61,6 +61,8 @@ export class JsonRpcPeer {
     this.closed = new Promise((resolve) => (this.#markClosed = resolve));
     options.input.on('data', (chunk: Buffer | string) => this.#onData(chunk));
     options.input.on('end', () => this.#close(new Error('O agente fechou a ligação')));
+    // Um stream destruído (o processo nem arrancou) fecha sem 'end'.
+    options.input.on('close', () => this.#close(new Error('O agente fechou a ligação')));
     options.input.on('error', (error: Error) => this.#close(error));
     options.output.on('error', (error: Error) => this.#close(error));
   }

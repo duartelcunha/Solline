@@ -16,6 +16,7 @@ import { fakeQuery, loadFixture, recordingSink, waitFor } from './helpers.ts';
 
 const HOST = {
   PATH: '/bin',
+  ANTHROPIC_CUSTOM_HEADERS: 'Authorization: Bearer da-anthropic',
   ANTHROPIC_API_KEY: 'chave-anthropic',
   ANTHROPIC_AUTH_TOKEN: 'token-anthropic',
   ANTHROPIC_BASE_URL: 'http://localhost:9999',
@@ -53,7 +54,13 @@ describe('perfil DeepSeek: ambiente', () => {
       CLAUDE_AGENT_SDK_CLIENT_APP: 'solline',
       CLAUDE_CONFIG_DIR: path.join(tmpdir(), 'solline-dados', 'profiles', 'deepseek'),
     });
-    for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GH_TOKEN']) {
+    for (const key of [
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_AUTH_TOKEN',
+      'ANTHROPIC_CUSTOM_HEADERS',
+      'OPENAI_API_KEY',
+      'GH_TOKEN',
+    ]) {
       expect(env).not.toHaveProperty(key);
     }
   });

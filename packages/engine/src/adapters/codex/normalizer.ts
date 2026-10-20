@@ -157,7 +157,12 @@ export class CodexNormalizer {
           {
             type: 'block.upsert',
             turnId: this.#turnId,
-            block: { kind: 'notice', id: `${this.#turnId}:warning`, tone: 'info', text: p.message },
+            block: {
+              kind: 'notice',
+              id: `${this.#turnId}:warning:${this.#newId()}`,
+              tone: 'info',
+              text: p.message,
+            },
           },
         ];
       }

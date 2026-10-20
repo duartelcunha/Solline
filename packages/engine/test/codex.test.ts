@@ -318,6 +318,71 @@ describe('CodexAppServerAdapter', () => {
     await resumed.adapter.close();
   });
 
+  it('interromper logo a seguir a enviar manda turn/interrupt quando o turno é conhecido', async () => {
+    const server = fakeCodexServer();
+    const { adapter: a } = adapter(server);
+    await a.start();
+    await a.send('trabalho longo');
+    await a.interrupt();
+    const interrupt = await server.waitFor((m) => m.method === 'turn/interrupt');
+    expect(interrupt.params).toEqual({ threadId: 'thread-1', turnId: 'turn-1' });
+    await a.close();
+  });
+
+  it('se o turn/start falha, modelo e modo pedidos vão no turno seguinte', async () => {
+    const server = fakeCodexServer({ failTurnStarts: 1 });
+    const { adapter: a, sink } = adapter(server);
+    await a.start();
+    await a.setModel('gpt-5.6-terra');
+    await a.setMode('read-only');
+    await a.send('primeira');
+    await waitFor(() => sink.deltas.some((d) => d.type === 'turn.end'));
+    await a.send('segunda');
+    await waitFor(() => server.received.filter((m) => m.method === 'turn/start').length === 2);
+    expect(server.received.filter((m) => m.method === 'turn/start')[1]!.params).toMatchObject({
+      model: 'gpt-5.6-terra',
+      sandboxPolicy: { type: 'readOnly' },
+    });
+    await a.close();
+  });
+
+  it('um codex.exe que não existe falha o arranque sem derrubar o motor', async () => {
+    const sink = recordingSink();
+    const a = new CodexAppServerAdapter(
+      { cwd: tmpdir(), mode: 'ask', executable: path.join(tmpdir(), 'nao-existe', 'codex.exe') },
+      sink,
+    );
+    await expect(a.start()).rejects.toThrow();
+  });
+
+  it('na recusa da gravação, a resposta ao Codex é decline', async () => {
+    const replay = replayCodex(declinedVariant(loadCodexFixture('edit-with-permission')));
+    const sink = recordingSink();
+    const a = new CodexAppServerAdapter(
+      { cwd: 'C:/p', mode: 'read-only', transport: replay.transport },
+      sink,
+    );
+    await a.start();
+    const asked = sink.nextAsk();
+    await a.send('edita');
+    a.answerPermission((await asked).id, { decision: 'deny' });
+    await waitFor(() => sink.deltas.some((d) => d.type === 'turn.end'), 5_000);
+    expect(replay.received.find((m) => m.method === undefined && m.id === 0)).toEqual({
+      id: 0,
+      result: { decision: 'decline' },
+    });
+    expect(
+      codexDecision('item/fileChange/requestApproval', { decision: 'cancelled', reason: 'x' }),
+    ).toBe('cancel');
+    expect(codexDecision('applyPatchApproval', { decision: 'deny' })).toEqual({
+      denied: { rejection: 'The user denied this action.' },
+    });
+    expect(codexDecision('execCommandApproval', { decision: 'cancelled', reason: 'x' })).toBe(
+      'abort',
+    );
+    await a.close();
+  });
+
   it('reproduz a gravação real da edição com aprovação', async () => {
     const replay = replayCodex(loadCodexFixture('edit-with-permission'));
     const sink = recordingSink();

@@ -51,6 +51,14 @@ describe('agentEnv', () => {
     expect(env).not.toHaveProperty('CLAUDE_CODE_ENTRYPOINT');
   });
 
+  it('o dropPattern larga uma família inteira de variáveis', () => {
+    const env = agentEnv(
+      { base: 'host', dropPattern: /^ANTHROPIC_/i },
+      { PATH: '/bin', ANTHROPIC_CUSTOM_HEADERS: 'Authorization: x', anthropic_model: 'm' },
+    );
+    expect(env).toEqual({ PATH: '/bin' });
+  });
+
   it('copia variáveis de origem, larga as pedidas e o overlay ganha no fim', () => {
     const env = agentEnv(
       {

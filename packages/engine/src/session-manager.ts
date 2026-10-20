@@ -165,6 +165,10 @@ export class SessionManager {
     /** Só numa sessão nova: o modelo e o effort pedidos têm de existir no agente. */
     requested?: { model?: string | undefined; effort?: string | undefined },
   ): Promise<SessionResult> {
+    // Também na retoma: tirar a confiança a um projeto fecha-o a estes agentes.
+    if (!trusted && definition.untrustedProjects === 'refused') {
+      throw new Error(`O ${definition.label} só corre em projetos de confiança`);
+    }
     const { model, effort, mode } = info.settings;
     const entry: Partial<Entry> = {};
     // Segredos só no arranque e só para este processo (por exemplo a chave de um fornecedor).

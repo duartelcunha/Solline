@@ -64,7 +64,12 @@ for (const [file, content] of Object.entries(scenario.files))
   await writeFile(path.join(cwd, file), content);
 
 const env = agentEnv({ base: 'no-secrets', keys: ['OPENAI_API_KEY', 'CODEX_API_KEY'] });
-const child = spawn(exe, ['app-server'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+const child = spawn(exe, ['app-server'], {
+  cwd,
+  env,
+  stdio: ['pipe', 'pipe', 'pipe'],
+  windowsHide: true,
+});
 child.stderr.on('data', (c) => process.stderr.write(`[codex] ${c}`));
 
 const records = [];
@@ -101,14 +106,19 @@ function send(msg) {
 function request(method, params) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    waiters.set(id, (msg) => (msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result)));
+    waiters.set(id, (msg) =>
+      msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result),
+    );
     send({ id, method, ...(params === undefined ? {} : { params }) });
   });
 }
 
 async function onServerRequest(msg) {
   const answer = scenario.answer ?? 'decline';
-  if (msg.method === 'item/commandExecution/requestApproval' || msg.method === 'item/fileChange/requestApproval') {
+  if (
+    msg.method === 'item/commandExecution/requestApproval' ||
+    msg.method === 'item/fileChange/requestApproval'
+  ) {
     send({ id: msg.id, result: { decision: answer } });
   } else if (msg.method === 'mcpServer/elicitation/request') {
     send({ id: msg.id, result: { action: 'decline', content: null, _meta: null } });
@@ -137,7 +147,15 @@ try {
   const models = await request('model/list', {});
   const model = models.data.find((m) => m.isDefault) ?? models.data[0];
   const efforts = model.supportedReasoningEfforts.map((e) => e.reasoningEffort);
-  console.log('modelos', models.data.map((m) => `${m.id}${m.isDefault ? '*' : ''}[${m.supportedReasoningEfforts.map((e) => e.reasoningEffort).join(',')}]`).join(' '));
+  console.log(
+    'modelos',
+    models.data
+      .map(
+        (m) =>
+          `${m.id}${m.isDefault ? '*' : ''}[${m.supportedReasoningEfforts.map((e) => e.reasoningEffort).join(',')}]`,
+      )
+      .join(' '),
+  );
   const sandbox = await request('windowsSandbox/readiness').catch((e) => ({ error: String(e) }));
   console.log('sandbox', JSON.stringify(sandbox));
   const policy = POLICIES[scenario.mode];
@@ -180,7 +198,9 @@ text = text
   .replace(/"planType":"[^"]*"/g, '"planType":"<plan>"');
 const out = path.join(here, '..', 'test', 'fixtures', 'codex', `${name}.jsonl`);
 await writeFile(out, text);
-const final = scenario.files['notes.txt'] ? await readFile(path.join(cwd, 'notes.txt'), 'utf8') : null;
+const final = scenario.files['notes.txt']
+  ? await readFile(path.join(cwd, 'notes.txt'), 'utf8')
+  : null;
 await rm(cwd, { recursive: true, force: true }).catch(() => undefined);
 console.log(`${kept.length} mensagens em ${out}; ficheiro final: ${JSON.stringify(final)}`);
 process.exit(0);

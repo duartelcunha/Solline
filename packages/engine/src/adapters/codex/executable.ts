@@ -36,6 +36,11 @@ function fromVendor(vendor: string, source: CodexExecutable['source']): CodexExe
 }
 
 export interface ResolveCodexOptions {
+  /**
+   * Na app instalada o Codex não vem com o motor: procurar o pacote subia pelas pastas
+   * node_modules de cima (até C:\\node_modules, que qualquer conta pode criar).
+   */
+  packaged?: boolean;
   resolve?: (specifier: string) => string;
   arch?: string;
   platform?: string;
@@ -54,6 +59,7 @@ export function resolveCodexExecutable(options: ResolveCodexOptions = {}): Codex
   const { pkg, target } = triple(options.arch ?? process.arch);
   const resolve = options.resolve ?? createRequire(import.meta.url).resolve;
   try {
+    if (options.packaged) throw new Error('app instalada');
     const bundled = fromVendor(
       path.join(path.dirname(resolve(`${pkg}/package.json`)), 'vendor', target),
       'bundled',
