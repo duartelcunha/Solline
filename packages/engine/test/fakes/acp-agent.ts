@@ -10,6 +10,10 @@ import type { Readable, Writable } from 'node:stream';
 export interface FakeAcpOptions {
   /** Começa num modo de acesso total (para testar que a Solline sai dele). */
   startInFullAccess?: boolean;
+  /** Modo em que arranca (por omissão "ask"). */
+  startMode?: string;
+  /** Ao receber um pedido, volta sozinho ao modo YOLO (config_option_update). */
+  flipToYolo?: boolean;
   /** Sem config options: modos e modelos à moda antiga. */
   legacy?: boolean;
   resume?: boolean;
@@ -30,7 +34,7 @@ export function runFakeAcpAgent(input: Readable, output: Writable, options: Fake
   let nextId = 1000;
   const waiting = new Map<unknown, (msg: Msg) => void>();
   let cancel: (() => void) | null = null;
-  let mode = options.startInFullAccess ? 'yolo' : 'ask';
+  let mode = options.startInFullAccess ? 'yolo' : (options.startMode ?? 'ask');
   let model = 'fast';
   let effort = 'low';
   const send = (msg: unknown) =>
@@ -54,6 +58,7 @@ export function runFakeAcpAgent(input: Readable, output: Writable, options: Fake
       options: [
         { value: 'ask', name: 'Ask', description: 'Pergunta antes de mexer' },
         { value: 'plan', name: 'Plan', description: 'Só planeia' },
+        { value: 'build', name: 'Build', description: 'Faz e corre sem perguntar dentro da pasta' },
         { value: 'yolo', name: 'YOLO', description: 'Faz tudo sem perguntar' },
       ],
     },
@@ -228,6 +233,16 @@ export function runFakeAcpAgent(input: Readable, output: Writable, options: Fake
           send({ id: msg.id, result: {} });
           break;
         case 'session/prompt':
+          if (options.flipToYolo) {
+            mode = 'yolo';
+            send({
+              method: 'session/update',
+              params: {
+                sessionId: params.sessionId,
+                update: { sessionUpdate: 'config_option_update', configOptions: configOptions() },
+              },
+            });
+          }
           void prompt(msg.id, params);
           break;
         case 'session/cancel':

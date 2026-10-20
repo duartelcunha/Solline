@@ -220,3 +220,12 @@
 - **Provado a sério** com um servidor de eco feito à mão: o Claude chama a ferramenta atrás de um
   cartão sem "Permitir sempre" e o resultado volta.
 
+## 2026-10-20: revisão final (M1g e M1h)
+
+- No ACP, com um servidor MCP que corre programas, nenhum pedido tem "Permitir sempre" (as
+  ferramentas ACP não dizem de que servidor vêm) e o agente sai de Auto e de acesso total, no
+  arranque e sempre que mudar os modos sozinho. O risco de um modo lê-se pelo id e pelo nome.
+- Os segredos do agente (nomes de segredo e tudo o que começa por `ANTHROPIC_`) vão vazios para os
+  servidores MCP, que o agente arranca com o ambiente dele por baixo.
+- Sem modo por omissão (ACP), um modo que deixou de ser visível passa para o mais fechado.
+- A escolha de servidores MCP só segue para agentes que os aceitam (o Codex ainda não).

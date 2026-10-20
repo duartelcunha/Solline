@@ -57,6 +57,8 @@ export interface FakeCodexOptions {
   threadId?: string;
   /** Quantos turn/start falham antes de os aceitar. */
   failTurnStarts?: number;
+  /** Segura a resposta ao turn/start até esta promessa resolver. */
+  holdTurnStart?: Promise<void>;
 }
 
 const DEFAULT_MODELS = [
@@ -163,6 +165,11 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
       'turn/interrupt': () => ({}),
     };
     if (id === undefined) return;
+    if (msg.method === 'turn/start' && options.holdTurnStart) {
+      const answer = results['turn/start']!;
+      void options.holdTurnStart.then(() => reply(id, answer()));
+      return;
+    }
     if (msg.method === 'turn/start' && (options.failTurnStarts ?? 0) > failed) {
       failed++;
       send({ id, error: { code: -32000, message: 'ocupado' } });

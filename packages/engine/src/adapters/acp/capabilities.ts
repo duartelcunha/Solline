@@ -21,6 +21,11 @@ export function classifyModeRisk(id: string, name: string): ModeRisk {
   return 'ask';
 }
 
+/** As escolhas de uma opção de seleção (com ou sem grupos). */
+export function modeChoices(option: SessionConfigOption): SessionConfigSelectOption[] {
+  return selectOptions(option);
+}
+
 function selectOptions(option: SessionConfigOption): SessionConfigSelectOption[] {
   if (option.type !== 'select') return [];
   const options = option.options as unknown[];

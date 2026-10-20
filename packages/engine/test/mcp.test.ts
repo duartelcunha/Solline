@@ -59,7 +59,7 @@ describe('servidores MCP por sessão', () => {
     const m = manager(fakes);
     const { session } = await m.create({ ...base, mcpServerIds: ['docs'] });
     expect(session.mcpServers).toEqual(['docs']);
-    expect(fakes[0]!.options().mcpServers).toEqual({
+    expect(fakes[0]!.options().mcpServers).toMatchObject({
       docs: {
         type: 'stdio',
         command: 'C:/node/node.exe',
@@ -70,6 +70,24 @@ describe('servidores MCP por sessão', () => {
     await m.create(base);
     expect(fakes[1]!.options().mcpServers).toBeUndefined();
     await m.disposeAll();
+  });
+
+  it('os segredos do agente chegam vazios ao servidor MCP', async () => {
+    process.env.SOLLINE_TESTE_API_KEY = 'segredo';
+    try {
+      const fakes: ReturnType<typeof fakeQuery>[] = [];
+      const m = manager(fakes);
+      await m.create({ ...base, mcpServerIds: ['docs'] });
+      const servers = fakes[0]!.options().mcpServers as Record<
+        string,
+        { env: Record<string, string> }
+      >;
+      expect(servers.docs!.env.SOLLINE_TESTE_API_KEY).toBe('');
+      expect(servers.docs!.env.RUNNER_MODE).toBe('safe');
+      await m.disposeAll();
+    } finally {
+      delete process.env.SOLLINE_TESTE_API_KEY;
+    }
   });
 
   it('um servidor que corre programas tira o Auto e não deixa arrancar nele', async () => {

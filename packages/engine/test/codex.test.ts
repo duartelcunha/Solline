@@ -319,11 +319,17 @@ describe('CodexAppServerAdapter', () => {
   });
 
   it('interromper logo a seguir a enviar manda turn/interrupt quando o turno é conhecido', async () => {
-    const server = fakeCodexServer();
+    let release: () => void = () => undefined;
+    const server = fakeCodexServer({ holdTurnStart: new Promise((r) => (release = r)) });
     const { adapter: a } = adapter(server);
     await a.start();
     await a.send('trabalho longo');
+    await server.waitFor((m) => m.method === 'turn/start');
     await a.interrupt();
+    await new Promise((r) => setTimeout(r, 20));
+    // Ainda não se sabe o turno: nada foi mandado.
+    expect(server.received.some((m) => m.method === 'turn/interrupt')).toBe(false);
+    release();
     const interrupt = await server.waitFor((m) => m.method === 'turn/interrupt');
     expect(interrupt.params).toEqual({ threadId: 'thread-1', turnId: 'turn-1' });
     await a.close();
@@ -409,6 +415,22 @@ describe('CodexAppServerAdapter', () => {
 });
 
 describe('Codex: versão e executável', () => {
+  it('na app instalada não procura o Codex pelos node_modules, só no PATH', () => {
+    let resolved = false;
+    const found = resolveCodexExecutable({
+      platform: 'win32',
+      arch: 'x64',
+      packaged: true,
+      resolve: () => {
+        resolved = true;
+        return 'C:/qualquer/package.json';
+      },
+      pathEnv: '',
+    });
+    expect(found).toBeNull();
+    expect(resolved).toBe(false);
+  });
+
   it('os tipos foram gerados da versão revista, que é a do package.json', () => {
     expect(GENERATED_FROM).toBe(REVIEWED_CODEX_VERSION);
     expect(pkg.dependencies['@openai/codex']).toBe(REVIEWED_CODEX_VERSION);

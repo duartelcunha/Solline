@@ -14,6 +14,7 @@ import type {
   AskBlock,
   ConversationDelta,
   PermissionAnswer,
+  ModeRisk,
   PermissionBlock,
   SessionSettings,
 } from '@solline/protocol';
@@ -22,13 +23,14 @@ import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts
 import { JsonRpcPeer, RpcError, StderrTail, type RequestId } from '../../rpc/json-rpc.ts';
 import { killTree, spawnAgent } from '../../rpc/spawn.ts';
 import { ENGINE_VERSION } from '../../version.ts';
-import { crashMessage, errorNotice, withTimeout } from '../shared/turns.ts';
+import { crashMessage, withTimeout } from '../shared/turns.ts';
 import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
 import {
   acpConfig,
   acpSettings,
   capabilitiesFromAcp,
   classifyModeRisk,
+  modeChoices,
   safestMode,
   type AcpConfig,
 } from './capabilities.ts';
@@ -117,8 +119,11 @@ export class AcpAdapter implements AgentAdapter {
   #running = false;
   #closing = false;
   #crashed = false;
+  /** Um servidor MCP ligado corre programas: sem Auto e sem "Permitir sempre" na sessão. */
+  readonly #restricted: boolean;
 
   constructor(options: AcpAdapterOptions, sink: AdapterSink) {
+    this.#restricted = (options.mcpServers ?? []).some((s) => s.executesCode);
     this.#options = options;
     this.#sink = sink;
     this.#sessionId = options.resume ?? null;
@@ -346,17 +351,29 @@ export class AcpAdapter implements AgentAdapter {
     throw new Error(`O ${this.#options.label} não sabe retomar sessões`);
   }
 
-  /** Um agente que arranca em acesso total passa para o modo mais fechado que tiver. */
-  async #leaveFullAccess(peer: JsonRpcPeer): Promise<void> {
+  #avoided(risk: ModeRisk): boolean {
+    return risk === 'full' || (this.#restricted && risk === 'auto');
+  }
+
+  /** O risco do modo em uso, pelo id e pelo nome que o agente lhe dá. */
+  #currentRisk(): ModeRisk | null {
     const current = this.#settings.mode;
-    if (!current) return;
-    const raw = this.#config.mode
-      ? null
-      : this.#config.legacyModes?.availableModes.find((m) => m.id === current);
-    const name = raw?.name ?? current;
-    if (classifyModeRisk(current, name) !== 'full') return;
-    const safe = safestMode(this.capabilities().modes);
-    if (!safe) throw new Error(`O ${this.#options.label} só oferece modos de acesso total`);
+    if (!current) return null;
+    const name = this.#config.mode
+      ? (modeChoices(this.#config.mode).find((o) => o.value === current)?.name ?? current)
+      : (this.#config.legacyModes?.availableModes.find((m) => m.id === current)?.name ?? current);
+    return classifyModeRisk(current, name);
+  }
+
+  /**
+   * Um agente em acesso total (ou em Auto, com um servidor MCP que corre programas) passa
+   * para o modo mais fechado que tiver. Corre no arranque e sempre que o agente muda os modos.
+   */
+  async #leaveFullAccess(peer: JsonRpcPeer): Promise<void> {
+    const risk = this.#currentRisk();
+    if (!risk || !this.#avoided(risk)) return;
+    const safe = safestMode(this.capabilities().modes.filter((m) => !this.#avoided(m.risk)));
+    if (!safe) throw new Error(`O ${this.#options.label} só oferece modos sem perguntas`);
     if (this.#config.mode) await this.#setConfig(peer, this.#config.mode.id, safe.id);
     else
       await peer.request(
@@ -367,11 +384,12 @@ export class AcpAdapter implements AgentAdapter {
     this.#settings.mode = safe.id;
   }
 
-  /** Modo e modelo pedidos na criação (ou guardados na retoma). */
+  /** Modo, modelo e effort pedidos na criação (ou guardados na retoma). */
   async #applyRequested(peer: JsonRpcPeer): Promise<void> {
-    const { mode, model } = this.#options;
+    const { mode, model, effort } = this.#options;
     const caps = this.capabilities();
-    if (mode && mode !== this.#settings.mode && caps.modes.some((m) => m.id === mode)) {
+    const allowed = caps.modes.find((m) => m.id === mode);
+    if (mode && mode !== this.#settings.mode && allowed && !this.#avoided(allowed.risk)) {
       if (this.#config.mode) await this.#setConfig(peer, this.#config.mode.id, mode);
       else
         await peer.request(
@@ -391,6 +409,15 @@ export class AcpAdapter implements AgentAdapter {
         );
       this.#settings.model = model;
     }
+    if (
+      effort &&
+      effort !== this.#settings.effort &&
+      this.#config.effort &&
+      caps.effortOrder.includes(effort)
+    ) {
+      await this.#setConfig(peer, this.#config.effort.id, effort);
+      this.#settings.effort = effort;
+    }
   }
 
   async #setConfig(peer: JsonRpcPeer, configId: string, value: string): Promise<void> {
@@ -407,7 +434,8 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   #updateConfig(options: SessionConfigOption[]): void {
-    this.#config = { ...this.#config, ...acpConfig({ configOptions: options }) };
+    const next = acpConfig({ configOptions: options });
+    this.#config = { ...this.#config, mode: next.mode, model: next.model, effort: next.effort };
     this.#refreshCapabilities();
     if (this.#capabilities)
       this.#emit([{ type: 'capabilities', capabilities: this.#capabilities }]);
@@ -428,7 +456,22 @@ export class AcpAdapter implements AgentAdapter {
       this.#updateConfig(update.configOptions);
       Object.assign(this.#settings, acpSettings(this.#config));
       this.#emit([{ type: 'settings', settings: { ...this.#settings } }]);
+      // O agente pode ter voltado sozinho a um modo sem perguntas.
+      const peer = this.#peer;
+      if (peer && !peer.isClosed) {
+        void this.#leaveFullAccess(peer)
+          .then(() => this.#emit([{ type: 'settings', settings: { mode: this.#settings.mode } }]))
+          .catch((error: unknown) => {
+            this.#notice(String(error));
+            void this.close();
+          });
+      }
       return;
+    }
+    if (update.sessionUpdate === 'current_mode_update') {
+      this.#settings.mode = update.currentModeId;
+      const peer = this.#peer;
+      if (peer && !peer.isClosed) void this.#leaveFullAccess(peer).catch(() => undefined);
     }
     // O primeiro custo em dólares liga o custo na interface.
     if (
@@ -458,9 +501,9 @@ export class AcpAdapter implements AgentAdapter {
       toolUseId: request.toolCall.toolCallId,
       title: request.toolCall.title ?? known?.summary ?? 'Pedido de autorização',
       input: request.toolCall.rawInput ?? known?.input ?? {},
-      canAlwaysAllow: Boolean(allowAlways),
+      canAlwaysAllow: Boolean(allowAlways) && !this.#restricted,
       canAlwaysDeny: Boolean(rejectAlways),
-      ...(allowAlways ? { allowAlwaysLabel: allowAlways.name } : {}),
+      ...(allowAlways && !this.#restricted ? { allowAlwaysLabel: allowAlways.name } : {}),
       ...(rejectAlways ? { denyAlwaysLabel: rejectAlways.name } : {}),
       defaultToNo: false,
       ...((request.toolCall.kind ?? known?.category)
@@ -492,11 +535,7 @@ export class AcpAdapter implements AgentAdapter {
 
   #endTurn(stopReason: PromptResponse['stopReason'] | 'error', message?: string): void {
     this.#broker.cancelAll('turn ended');
-    if (stopReason === 'error' && message) {
-      const { turnId } = this.#normalizer.ensureAssistantTurn();
-      this.#emit([errorNotice(turnId, message, 'prompt')]);
-    }
-    this.#emit(this.#normalizer.end(stopReason));
+    this.#emit(this.#normalizer.end(stopReason, message));
     this.#running = false;
     this.#sink.state('idle');
   }
@@ -532,6 +571,18 @@ export class AcpAdapter implements AgentAdapter {
       throw new Error('A sessão não está ligada');
     }
     return this.#peer;
+  }
+
+  #notice(text: string): void {
+    const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
+    this.#emit([
+      ...deltas,
+      {
+        type: 'block.upsert',
+        turnId,
+        block: { kind: 'notice', id: `${turnId}:${crypto.randomUUID()}`, tone: 'error', text },
+      },
+    ]);
   }
 
   #emit(deltas: ConversationDelta[]): void {

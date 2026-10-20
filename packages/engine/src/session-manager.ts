@@ -11,7 +11,8 @@ import {
 } from '@solline/protocol';
 import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/types.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
-import { agentEnv } from './env.ts';
+import { SECRET_NAME, agentEnv } from './env.ts';
+import { safestMode } from './adapters/acp/capabilities.ts';
 import type { McpCatalog } from './mcp/catalog.ts';
 
 /** Com um servidor MCP que corre programas ligado, nada de modos sem perguntas. */
@@ -224,6 +225,7 @@ export class SessionManager {
     const entry: Partial<Entry> = {};
     // Segredos só no arranque e só para este processo (por exemplo a chave de um fornecedor).
     const secrets = definition.secrets ? await definition.secrets() : {};
+    const env = { ...agentEnv(definition.envPolicy), ...secrets };
     const adapter = definition.create(
       {
         cwd: info.cwd,
@@ -232,8 +234,8 @@ export class SessionManager {
         mode,
         resume,
         projectTrusted: trusted,
-        env: { ...agentEnv(definition.envPolicy), ...secrets },
-        ...(mcp.length ? { mcpServers: mcp } : {}),
+        env,
+        ...(mcp.length ? { mcpServers: mcp.map((s) => withoutSecrets(s, env)) } : {}),
       },
       this.#sinkFor(
         info,
@@ -256,14 +258,16 @@ export class SessionManager {
       const fallback = definition.defaultMode;
       const visible = restrict(started.capabilities, restricted);
       const modes = visible.modes;
-      if (
-        fallback &&
-        fallback !== info.settings.mode &&
-        !modes.some((m) => m.id === info.settings.mode) &&
-        modes.some((m) => m.id === fallback)
-      ) {
-        await adapter.setMode(fallback);
-        info.settings = { ...info.settings, mode: fallback };
+      if (info.settings.mode && !modes.some((m) => m.id === info.settings.mode)) {
+        // Sem modo por omissão (agentes ACP), vai para o mais fechado que restar.
+        const target =
+          fallback && modes.some((m) => m.id === fallback) ? fallback : safestMode(modes)?.id;
+        if (target && target !== info.settings.mode) {
+          await adapter.setMode(target);
+          info.settings = { ...info.settings, mode: target };
+        } else if (restricted && !target) {
+          throw new Error('Este agente não tem um modo que pergunte antes; tira o servidor MCP');
+        }
       }
       return { session: { ...info }, capabilities: visible };
     } catch (error) {
@@ -355,4 +359,18 @@ function checkRequested(
   if (!capabilities.effort || !allowed.includes(requested.effort)) {
     throw new Error(`Este modelo não tem o effort ${requested.effort}`);
   }
+}
+
+/**
+ * O agente arranca os servidores MCP com o ambiente dele por baixo. Os segredos do agente
+ * (chaves, tokens, o que vem da Anthropic) vão vazios para o servidor, que não precisa deles.
+ */
+function withoutSecrets(
+  server: McpServerLaunch,
+  agentEnvironment: Record<string, string | undefined>,
+): McpServerLaunch {
+  const blanks = Object.keys(agentEnvironment).filter(
+    (key) => SECRET_NAME.test(key) || /^ANTHROPIC_/i.test(key),
+  );
+  return { ...server, env: { ...Object.fromEntries(blanks.map((k) => [k, ''])), ...server.env } };
 }

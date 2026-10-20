@@ -300,6 +300,8 @@ export const AgentDescriptor = z.object({
   detail: z.string().optional(),
   experimental: z.boolean(),
   untrustedProjects: z.enum(['allowed', 'refused']),
+  /** Aceita servidores MCP por sessão. */
+  mcp: z.boolean().optional(),
 });
 export type AgentDescriptor = z.infer<typeof AgentDescriptor>;
 

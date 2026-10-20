@@ -38,6 +38,7 @@ describe('AcpAdapter', () => {
     expect(started.capabilities.modes.map((m) => [m.id, m.risk])).toEqual([
       ['ask', 'ask'],
       ['plan', 'plan'],
+      ['build', 'auto'],
     ]);
     expect(started.capabilities.effortOrder).toEqual(['low', 'high']);
     expect(started.settings).toEqual({ mode: 'ask', model: 'fast', effort: 'low' });
@@ -236,6 +237,52 @@ describe('AcpAdapter', () => {
     });
     await a.close();
   }, 20_000);
+});
+
+describe('ACP com um servidor MCP que corre programas', () => {
+  const runner = { name: 'runner', command: 'x', args: [], env: {}, executesCode: true };
+
+  it('nenhum pedido tem "Permitir sempre" e a resposta é recusada', async () => {
+    const fake = fakeAcp();
+    const { adapter: a, sink } = adapter(fake, { mcpServers: [runner] });
+    await a.start();
+    const asked = sink.nextAsk();
+    await a.send('edit notes');
+    const block = await asked;
+    expect(block).toMatchObject({ kind: 'permission', canAlwaysAllow: false });
+    expect(block).not.toHaveProperty('allowAlwaysLabel');
+    expect(() => a.answerPermission(block.id, { decision: 'allow-always' })).toThrow();
+    a.answerPermission(block.id, { decision: 'allow-once' });
+    await a.close();
+  });
+
+  it('um agente que arranca em Auto passa para o modo mais fechado', async () => {
+    const fake = fakeAcp({ startMode: 'build' });
+    const { adapter: a } = adapter(fake, { mcpServers: [runner] });
+    const started = await a.start();
+    expect(started.settings.mode).toBe('plan');
+    await a.close();
+    // Sem o servidor, Auto fica.
+    const free = adapter(fakeAcp({ startMode: 'build' }));
+    expect((await free.adapter.start()).settings.mode).toBe('build');
+    await free.adapter.close();
+  });
+
+  it('se o agente volta sozinho a acesso total, a Solline tira-o de lá', async () => {
+    const fake = fakeAcp({ flipToYolo: true });
+    const { adapter: a, sink } = adapter(fake);
+    await a.start();
+    await a.send('olá');
+    await waitFor(() =>
+      fake.received.some(
+        (m) =>
+          m.method === 'session/set_config_option' &&
+          (m.params as { value?: string }).value === 'plan',
+      ),
+    );
+    await waitFor(() => sink.deltas.some((d) => d.type === 'turn.end'));
+    await a.close();
+  });
 });
 
 describe('risco dos modos ACP', () => {

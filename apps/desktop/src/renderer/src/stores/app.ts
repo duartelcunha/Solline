@@ -203,7 +203,9 @@ export const actions = {
     if (!project) return;
     useApp.setState({ creatingIn: projectId, activeProjectId: projectId, notice: null });
     try {
-      const mcpServerIds = useApp.getState().mcpSelection;
+      // Só os agentes que aceitam servidores MCP os recebem (o Codex ainda não).
+      const takesMcp = useApp.getState().agents.find((a) => a.id === agent)?.mcp === true;
+      const mcpServerIds = takesMcp ? useApp.getState().mcpSelection : [];
       const { session, capabilities } = await request('session.create', {
         projectId: project.id,
         agent,

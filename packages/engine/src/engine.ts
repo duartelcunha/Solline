@@ -71,6 +71,7 @@ export class Engine {
             transport: d.transport,
             experimental: d.experimental === true,
             untrustedProjects: d.untrustedProjects,
+            mcp: d.mcp === true,
             ...(await d.detect().catch((error: unknown): { status: 'error'; detail: string } => ({
               status: 'error',
               detail: error instanceof Error ? error.message : String(error),

@@ -5,10 +5,15 @@ Por agora é para uso pessoal, no Windows.
 
 ## Estado
 
-M1 (conversa a andar): projetos e sessões na barra lateral, conversa em streaming com
-Markdown, thinking e ferramentas (com vista detalhada), cartões de permissão, plano e
-pergunta, interromper, modelo, effort e modo por clique, custo e contexto ao vivo.
-Se o Claude cair a meio, a sessão mostra "Retomar".
+M1 (conversa a andar) mais o plano multi-agente (`docs/plano.md`), de M1b a M1h:
+
+- **Agentes:** Claude Code (Agent SDK), Codex (`codex app-server`), modelos DeepSeek pelo Claude
+  Code (experimental, chave no Gestor de Credenciais) e qualquer agente ACP do catálogo
+  (OpenCode primeiro). Escolhe-se na nova sessão.
+- **Confiança:** a interface só manda ids; projetos sem confiança não leem a config da pasta;
+  cada agente recebe só os segredos que declara; modos de acesso total nunca aparecem.
+- **Servidores MCP por sessão** de um catálogo revisto (REA opcional), sem tocar nas configs
+  globais dos agentes.
 
 ## Peças
 
@@ -31,7 +36,9 @@ pnpm dist         # instalador em apps/desktop/release
 ```
 
 Os testes de integração do motor fazem sessões curtas e reais com Haiku (effort low) com o
-login do Claude Code desta máquina. Para os saltar: `SOLLINE_SKIP_SDK=1 pnpm test`. O smoke
+login do Claude Code desta máquina. Para os saltar: `SOLLINE_SKIP_SDK=1 pnpm test`.
+`SOLLINE_AGENTS=claude,codex,claude:deepseek` escolhe que agentes correm a sério (o Codex gasta
+quota do ChatGPT; o DeepSeek precisa da chave). `SOLLINE_E2E_CODEX=1` abre uma sessão Codex no smoke. O smoke
 da app só faz a sessão real com `SOLLINE_E2E_SDK=1`; `SOLLINE_EXE=<caminho>` corre-o na app
 instalada e `SOLLINE_SHOTS=<pasta>` guarda capturas.
 
