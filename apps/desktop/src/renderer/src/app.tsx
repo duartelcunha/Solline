@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderPlus, Moon, Sun, X } from 'lucide-react';
+import { FolderPlus, Moon, SlidersHorizontal, Sun, X } from 'lucide-react';
 import type { CommandResult } from '@solline/protocol';
 import type { Theme } from '@solline/protocol/bridge';
 import { Composer } from './features/composer/composer.tsx';
+import { AgentsPanel } from './features/agents/agents-panel.tsx';
 import { NewSessionButton } from './features/agents/new-session-button.tsx';
 import { Conversation } from './features/conversation/conversation.tsx';
 import { Sidebar, StateDot } from './features/sidebar/sidebar.tsx';
@@ -146,7 +147,27 @@ export function App() {
 
   return (
     <div className="grid h-full grid-cols-[16rem_1fr]">
-      <Sidebar sessionsByProject={sessionsByProject} footer={<EngineStatus ping={ping} />} />
+      <Sidebar
+        sessionsByProject={sessionsByProject}
+        footer={
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <EngineStatus ping={ping} />
+            </div>
+            <button
+              type="button"
+              onClick={actions.openAgentsPanel}
+              aria-label="Agentes"
+              title="Agentes: estado, login e variáveis"
+              data-testid="sidebar-agents"
+              className="grid size-7 shrink-0 place-items-center rounded-sm text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg active:scale-95"
+            >
+              <SlidersHorizontal size={15} strokeWidth={1.75} />
+            </button>
+          </div>
+        }
+      />
+      <AgentsPanel />
 
       <main className="flex min-w-0 flex-col">
         <header className="drag flex h-11 shrink-0 items-center gap-3 pr-[9.5rem] pl-5">

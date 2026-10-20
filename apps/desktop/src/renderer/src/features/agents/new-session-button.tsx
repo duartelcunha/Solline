@@ -1,5 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronDown, Plus } from 'lucide-react';
+import { Check, ChevronDown, LogIn, Plus, SlidersHorizontal } from 'lucide-react';
 import type { AgentDescriptor, Project } from '@solline/protocol';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useApp } from '../../stores/app.ts';
@@ -38,6 +38,22 @@ function AgentMenu({
     >
       {agents.map((agent) => {
         const blocked = blockedReason(agent, project);
+        // Sem sessão iniciada, o próprio item é o botão de entrar (ou de desistir).
+        if (agent.status === 'needs-login' && agent.login) {
+          const pending = agent.login.pending;
+          return (
+            <ActionItem
+              key={agent.id}
+              title={`${agent.label}: ${pending ? 'à espera do browser…' : agent.login.label}`}
+              description={pending ? 'Carrega para desistir do login' : agent.detail}
+              icon={<LogIn size={14} strokeWidth={1.9} />}
+              onSelect={() =>
+                void (pending ? actions.cancelLogin(agent.id) : actions.login(agent.id))
+              }
+              testId={`agent-${agent.id}`}
+            />
+          );
+        }
         return (
           <ActionItem
             key={agent.id}
@@ -50,6 +66,13 @@ function AgentMenu({
         );
       })}
       <McpChoices />
+      <Menu.Separator className="my-1 h-px bg-line" />
+      <ActionItem
+        title="Gerir agentes…"
+        icon={<SlidersHorizontal size={14} strokeWidth={1.9} />}
+        onSelect={actions.openAgentsPanel}
+        testId="open-agents-panel"
+      />
     </MenuShell>
   );
 }

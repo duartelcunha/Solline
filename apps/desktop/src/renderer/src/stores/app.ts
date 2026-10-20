@@ -36,6 +36,10 @@ interface AppState {
   /** A criar uma sessão neste projeto. */
   creatingIn: string | null;
   notice: string | null;
+  /** O painel de agentes está aberto. */
+  agentsPanel: boolean;
+  /** A voltar a verificar os agentes (Verificar de novo). */
+  checkingAgents: boolean;
 }
 
 export const useApp = create<AppState>(() => ({
@@ -48,6 +52,8 @@ export const useApp = create<AppState>(() => ({
   activeSessionId: null,
   creatingIn: null,
   notice: null,
+  agentsPanel: false,
+  checkingAgents: false,
 }));
 
 const sessionStores = new Map<string, SessionStore>();
@@ -114,6 +120,11 @@ export function dispatch(event: EngineEvent): void {
     return;
   }
   if (event.type === 'engine.ready') return;
+  if (event.type === 'agents.changed') {
+    if (event.error) useApp.setState({ notice: event.error });
+    void actions.loadAgents();
+    return;
+  }
   const store = sessionStores.get(event.sessionId);
   if (store) store.setState(reduceSession(store.getState(), event));
 }
@@ -124,10 +135,10 @@ function defaultAgent(): AgentId {
 }
 
 export const actions = {
-  async loadAgents(): Promise<void> {
+  async loadAgents(refresh = false): Promise<void> {
     try {
       const [{ agents }, { servers }] = await Promise.all([
-        request('agents.list', {}),
+        request('agents.list', refresh ? { refresh } : {}),
         request('mcp.list', {}),
       ]);
       useApp.setState((s) => ({
@@ -141,6 +152,63 @@ export const actions = {
     } catch (error) {
       useApp.setState({ notice: `Não foi possível ver os agentes. ${message(error)}` });
     }
+  },
+
+  /** Verificar de novo: o motor volta a perguntar a cada agente (sessão iniciada, versão). */
+  async refreshAgents(): Promise<void> {
+    useApp.setState({ checkingAgents: true });
+    try {
+      await actions.loadAgents(true);
+    } finally {
+      useApp.setState({ checkingAgents: false });
+    }
+  },
+
+  /** Entrar no agente: o main abre o browser; o fim chega por agents.changed. */
+  async login(agent: AgentId): Promise<void> {
+    useApp.setState({ notice: null });
+    try {
+      await request('agents.login', { agent });
+    } catch (error) {
+      useApp.setState({ notice: `Não foi possível entrar. ${message(error)}` });
+    }
+    await actions.loadAgents();
+  },
+
+  async cancelLogin(agent: AgentId): Promise<void> {
+    await request('agents.loginCancel', { agent }).catch((error: unknown) =>
+      useApp.setState({ notice: message(error) }),
+    );
+    await actions.loadAgents();
+  },
+
+  /** Guarda as variáveis de um agente; false se recusaste a confirmação ou falhou. */
+  async setKeys(agent: AgentId, keys: string[]): Promise<boolean> {
+    try {
+      // A lista nova chega pelo agents.changed que o motor manda ao guardar.
+      const { saved } = await request('agents.setKeys', { agent, keys });
+      return saved;
+    } catch (error) {
+      useApp.setState({ notice: `Não foi possível guardar as variáveis. ${message(error)}` });
+      return false;
+    }
+  },
+
+  async keyCandidates(): Promise<string[]> {
+    try {
+      return (await request('agents.keyCandidates', {})).names;
+    } catch {
+      return [];
+    }
+  },
+
+  openAgentsPanel(): void {
+    useApp.setState({ agentsPanel: true });
+    void actions.loadAgents();
+  },
+
+  closeAgentsPanel(): void {
+    useApp.setState({ agentsPanel: false });
   },
 
   async loadProjects(): Promise<void> {

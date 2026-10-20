@@ -81,6 +81,11 @@ export class Engine {
       if (!found) throw new Error(`Agente desconhecido: ${id}`);
       return found;
     };
+    const configurable = (id: string) => {
+      const definition = definitionOf(id);
+      if (!definition.configurableKeys) throw new Error('Este agente não deixa escolher variáveis');
+      return definition;
+    };
     const s = this.sessions;
     const ok = {} as Record<string, never>;
     this.#handlers = {
@@ -117,10 +122,12 @@ export class Engine {
         return { url: await logins.start(p.agent, () => login.start()) };
       },
       'agents.loginCancel': async (p) => (await logins.cancel(p.agent), ok),
+      'agents.keys': async (p) => {
+        const definition = configurable(p.agent);
+        return { label: definition.label, keys: await settings.keys(p.agent) };
+      },
       'agents.saveKeys': async (p) => {
-        if (!definitionOf(p.agent).configurableKeys) {
-          throw new Error('Este agente não deixa escolher variáveis');
-        }
+        configurable(p.agent);
         await settings.setKeys(p.agent, p.keys);
         emit({ kind: 'event', type: 'agents.changed', agent: p.agent });
         return ok;

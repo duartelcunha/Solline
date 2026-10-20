@@ -178,6 +178,11 @@ export const internalCommandSchemas = {
     payload: AgentRef,
     result: z.object({ url: z.url({ protocol: /^https$/ }) }),
   },
+  /** O nome e as variáveis guardadas de um agente que deixa escolher (para a confirmação). */
+  'agents.keys': {
+    payload: AgentRef,
+    result: z.object({ label: z.string(), keys: z.array(EnvKeyName) }),
+  },
   /** Guarda as variáveis escolhidas para um agente (o main já pediu confirmação). */
   'agents.saveKeys': { payload: AgentRef.extend({ keys: EnvKeys }).strict(), result: Empty },
   /** A confiança de um projeto mudou: as próximas retomas das suas sessões usam a nova. */

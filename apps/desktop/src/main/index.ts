@@ -21,6 +21,7 @@ import {
   type CommandPayload,
   type MainCommandName,
 } from '@solline/protocol';
+import { addedKeys, isAllowedLoginUrl } from './agent-policy.ts';
 import { EngineHost } from './engine-host.ts';
 import { ProjectStore } from './projects.ts';
 import { resolveSessionStart } from './session-policy.ts';
@@ -59,8 +60,47 @@ async function confirmTrust(name: string): Promise<boolean> {
   return response === 0;
 }
 
+/** Diálogo nativo: um agente só recebe segredos novos depois de um clique teu fora da interface. */
+async function confirmKeys(label: string, keys: readonly string[]): Promise<boolean> {
+  const options = {
+    type: 'question' as const,
+    title: 'Variáveis do agente',
+    message: `Dar ao ${label} estas variáveis do teu ambiente?`,
+    detail:
+      `${keys.join('\n')}\n\nO agente recebe os valores destas variáveis em cada sessão nova. ` +
+      'A Solline só guarda os nomes.',
+    buttons: ['Dar', 'Cancelar'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options);
+  return response === 0;
+}
+
 async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
   switch (command) {
+    case 'agents.login': {
+      const { agent } = payload as CommandPayload<'agents.login'>;
+      const { url } = await engine.request('agents.loginStart', { agent });
+      // O motor pede, o main decide: só se abre o browser no sítio de login do agente.
+      if (!isAllowedLoginUrl(agent, url)) {
+        await engine.request('agents.loginCancel', { agent }).catch(() => undefined);
+        throw new Error('O endereço de login não é o esperado; não foi aberto.');
+      }
+      await shell.openExternal(url);
+      return {};
+    }
+    case 'agents.setKeys': {
+      const { agent, keys } = payload as CommandPayload<'agents.setKeys'>;
+      const current = await engine.request('agents.keys', { agent });
+      const added = addedKeys(current.keys, keys);
+      if (added.length > 0 && !(await confirmKeys(current.label, added))) return { saved: false };
+      await engine.request('agents.saveKeys', { agent, keys });
+      return { saved: true };
+    }
     case 'projects.list':
       return { projects: await projects.list() };
     case 'projects.add': {

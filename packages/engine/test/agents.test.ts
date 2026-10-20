@@ -269,6 +269,7 @@ describe('Entrar com ChatGPT pelo motor', () => {
     const { CommandNameSchema } = await import('@solline/protocol');
     expect(CommandNameSchema.safeParse('agents.loginStart').success).toBe(false);
     expect(CommandNameSchema.safeParse('agents.saveKeys').success).toBe(false);
+    expect(CommandNameSchema.safeParse('agents.keys').success).toBe(false);
     expect(CommandNameSchema.safeParse('agents.login').success).toBe(true);
     await engine.dispose();
   });
@@ -312,6 +313,10 @@ describe('variáveis escolhidas para os agentes ACP', () => {
     expect(
       await call(engine, 'agents.saveKeys', { agent: id, keys: ['SOLLINE_TESTE_API_KEY'] }),
     ).toMatchObject({ ok: true });
+    expect(await call(engine, 'agents.keys', { agent: id })).toMatchObject({
+      ok: true,
+      result: { label: 'OpenCode', keys: ['SOLLINE_TESTE_API_KEY'] },
+    });
     const listed = (await agents(engine)).find((a) => a.id === id);
     expect(listed?.keys).toEqual(['SOLLINE_TESTE_API_KEY']);
     await open();
