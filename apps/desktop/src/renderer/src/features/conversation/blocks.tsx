@@ -1,6 +1,15 @@
 import { useState } from 'react';
-import { AlertCircle, Check, ChevronRight, Info, X } from 'lucide-react';
-import type { NoticeBlock, ThinkingBlock, ToolBlock } from '@solline/protocol';
+import {
+  AlertCircle,
+  Check,
+  ChevronRight,
+  Circle,
+  CircleDot,
+  Info,
+  ListChecks,
+  X,
+} from 'lucide-react';
+import type { NoticeBlock, ThinkingBlock, TodoBlock, ToolBlock } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
 
 export function Spinner({ label }: { label: string }) {
@@ -87,5 +96,61 @@ export function NoticeView({ block }: { block: NoticeBlock }) {
       )}
       <span className="min-w-0 break-words select-text">{block.text}</span>
     </div>
+  );
+}
+
+const TODO_LABEL: Record<TodoBlock['entries'][number]['status'], string> = {
+  pending: 'por fazer',
+  in_progress: 'a decorrer',
+  completed: 'feita',
+};
+
+/** A lista de tarefas do agente, com o estado de cada uma. */
+export function TodoView({ block }: { block: TodoBlock }) {
+  const done = block.entries.filter((e) => e.status === 'completed').length;
+  return (
+    <section
+      aria-label={`Tarefas: ${done} de ${block.entries.length} feitas`}
+      data-testid="todo-block"
+      className="rounded-md border border-line bg-surface px-3 py-2.5"
+    >
+      <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-muted">
+        <ListChecks size={14} strokeWidth={1.9} />
+        Tarefas
+        <span className="ml-auto tabular-nums text-subtle">
+          {done}/{block.entries.length}
+        </span>
+      </div>
+      <ul className="space-y-1">
+        {block.entries.map((entry, i) => (
+          <li
+            key={entry.id ?? i}
+            data-status={entry.status}
+            className="flex items-start gap-2 text-[13px]"
+          >
+            <span className="mt-[3px] shrink-0" aria-label={TODO_LABEL[entry.status]}>
+              {entry.status === 'completed' ? (
+                <Check size={13} strokeWidth={2.25} className="text-success" />
+              ) : entry.status === 'in_progress' ? (
+                <CircleDot size={13} strokeWidth={2} className="text-accent-text" />
+              ) : (
+                <Circle size={13} strokeWidth={1.75} className="text-subtle" />
+              )}
+            </span>
+            <span
+              className={
+                entry.status === 'completed'
+                  ? 'text-muted line-through decoration-line-strong'
+                  : entry.status === 'in_progress'
+                    ? 'font-medium'
+                    : undefined
+              }
+            >
+              {entry.content}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

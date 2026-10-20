@@ -56,7 +56,7 @@ export function ToolDetail({ tool, onClose }: { tool: ToolBlock | null; onClose:
               </header>
               <div className="overflow-y-auto px-5 pb-5">
                 <Section title="Entrada">
-                  <ToolInput name={tool.name} input={tool.input} />
+                  <ToolInput content={tool.content} input={tool.input} />
                 </Section>
                 <Section title="Saída">
                   {tool.output === undefined ? (

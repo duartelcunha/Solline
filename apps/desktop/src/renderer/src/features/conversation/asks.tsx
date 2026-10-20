@@ -43,6 +43,7 @@ const STATUS_TEXT: Record<Exclude<AskStatus, 'pending'>, string> = {
   allowed: 'Permitido uma vez',
   'allowed-always': 'Permitido sempre',
   denied: 'Negado',
+  'denied-always': 'Negado sempre',
   cancelled: 'Cancelado',
 };
 
@@ -173,7 +174,7 @@ export function PermissionCard({
         </div>
       </div>
       <div className="mt-3 max-h-64 overflow-auto rounded-md border border-line bg-surface-sunken p-3 select-text">
-        <ToolInput name={block.toolName} input={block.input} compact />
+        <ToolInput content={block.content} input={block.input} compact />
       </div>
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         {allowOnce}
@@ -198,6 +199,16 @@ export function PermissionCard({
           Negar
           <Kbd>Esc</Kbd>
         </button>
+        {block.canAlwaysDeny ? (
+          <button
+            type="button"
+            disabled={sent}
+            className={quiet}
+            onClick={() => answer({ decision: 'deny-always' })}
+          >
+            Negar sempre
+          </button>
+        ) : null}
       </div>
     </Card>
   );

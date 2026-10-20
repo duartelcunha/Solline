@@ -126,3 +126,20 @@
   confirmar nela: se o `thinking` adaptativo e o effort passam, a primeira corrida com a pasta de
   config vazia e os nomes que o init devolve.
 
+## 2026-10-20: M1e, ferramentas neutras
+
+- **A interface desenha pelo conteúdo, não pelo nome:** cada ferramenta traz categoria (o ToolKind
+  do ACP), ficheiros e conteúdo estruturado (`diff`, `patch`, `command`, `text`). O motor do Claude
+  tira isto do input de cada ferramenta; o Codex e o ACP vão mandá-lo já assim. Já não há nomes de
+  ferramentas do Claude na interface.
+- **Lista de tarefas como bloco próprio** (`todo`), que substitui a lista inteira em cada
+  atualização. Do Claude vem do `TodoWrite` ou do `TaskCreate`/`TaskUpdate` (o id da tarefa só vem
+  no resultado). Numa sessão do SDK o Claude Code 2.1.304 não ofereceu ferramentas de tarefas
+  (gravação real), por isso estes dois caminhos estão testados com mensagens construídas; o Codex
+  (`turn/plan/updated`) e o ACP (`plan`) vão usar o mesmo bloco.
+- **"Negar sempre"** existe no contrato para os agentes que o têm (ACP `reject_always`). O Claude
+  pelo SDK não tem, por isso o cartão não o mostra e o motor recusa-o.
+- **Achado da gravação:** as sessões do SDK carregam os conectores MCP da conta claude.ai
+  (Vercel, Linear, Docs…) mesmo com `settingSources: []`. É igual ao CLI; no perfil DeepSeek não
+  acontece porque a pasta de config é outra e não há login do claude.ai.
+

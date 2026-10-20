@@ -136,6 +136,129 @@ describe('ClaudeNormalizer com mensagens reais', () => {
   });
 });
 
+describe('ferramentas neutras', () => {
+  it('a edição traz categoria, ficheiro e diff; a leitura traz o ficheiro', () => {
+    const turns = reduce(run('edit-with-permission').deltas);
+    const tools = turns[1]!.blocks.filter((b): b is ToolBlock => b.kind === 'tool');
+    const read = tools.find((t) => t.name === 'Read')!;
+    const edit = tools.find((t) => t.name === 'Edit')!;
+    expect(read).toMatchObject({
+      category: 'read',
+      locations: [{ path: expect.stringContaining('notes.txt') }],
+    });
+    expect(edit).toMatchObject({
+      category: 'edit',
+      locations: [{ path: expect.stringContaining('notes.txt') }],
+      content: [
+        {
+          type: 'diff',
+          path: expect.stringContaining('notes.txt'),
+          oldText: expect.stringContaining('alpha'),
+          newText: expect.stringContaining('beta'),
+        },
+      ],
+    });
+    expect(edit.hidden).toBeUndefined();
+  });
+
+  function toolUse(id: string, name: string, input: unknown): SDKMessage {
+    return {
+      type: 'assistant',
+      uuid: `u-${id}`,
+      session_id: 's',
+      parent_tool_use_id: null,
+      message: {
+        id: `m-${id}`,
+        role: 'assistant',
+        content: [{ type: 'tool_use', id, name, input }],
+      },
+    } as unknown as SDKMessage;
+  }
+
+  function toolResult(id: string, result: unknown, text = 'ok'): SDKMessage {
+    return {
+      type: 'user',
+      uuid: `r-${id}`,
+      session_id: 's',
+      parent_tool_use_id: null,
+      tool_use_result: result,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] },
+    } as unknown as SDKMessage;
+  }
+
+  it('Bash leva o comando; Write é um diff de ficheiro novo', () => {
+    const normalizer = new ClaudeNormalizer({ newId: ids() });
+    const deltas = [
+      ...normalizer.userTurn('u', 'x'),
+      ...normalizer.push(toolUse('b1', 'Bash', { command: 'npm test', description: 'Testes' })),
+      ...normalizer.push(toolUse('w1', 'Write', { file_path: 'C:/p/novo.txt', content: 'olá' })),
+    ];
+    const tools = reduce(deltas)[1]!.blocks.filter((b): b is ToolBlock => b.kind === 'tool');
+    expect(tools[0]).toMatchObject({
+      category: 'execute',
+      content: [{ type: 'command', command: 'npm test' }],
+    });
+    expect(tools[1]).toMatchObject({
+      category: 'edit',
+      content: [{ type: 'diff', path: 'C:/p/novo.txt', oldText: null, newText: 'olá' }],
+    });
+  });
+
+  it('TodoWrite fica escondido e vira a lista de tarefas do turno', () => {
+    const normalizer = new ClaudeNormalizer({ newId: ids() });
+    const todos = (status: string) => ({
+      todos: [
+        { content: 'Ler a.txt', status: 'completed', activeForm: 'A ler a.txt' },
+        { content: 'Ler b.txt', status, activeForm: 'A ler b.txt' },
+      ],
+    });
+    const deltas = [
+      ...normalizer.userTurn('u', 'x'),
+      ...normalizer.push(toolUse('t1', 'TodoWrite', todos('in_progress'))),
+      ...normalizer.push(toolResult('t1', {})),
+      ...normalizer.push(toolUse('t2', 'TodoWrite', todos('completed'))),
+      ...normalizer.push(toolResult('t2', {})),
+    ];
+    const blocks = reduce(deltas)[1]!.blocks;
+    expect(
+      blocks.filter((b) => b.kind === 'tool').every((b) => b.kind === 'tool' && b.hidden),
+    ).toBe(true);
+    const todo = blocks.filter((b) => b.kind === 'todo');
+    expect(todo).toHaveLength(1);
+    expect(todo[0]).toMatchObject({
+      entries: [
+        { content: 'Ler a.txt', status: 'completed' },
+        { content: 'Ler b.txt', status: 'completed' },
+      ],
+    });
+  });
+
+  it('TaskCreate/TaskUpdate constroem a lista pelo id que vem no resultado', () => {
+    const normalizer = new ClaudeNormalizer({ newId: ids() });
+    const deltas = [
+      ...normalizer.userTurn('u', 'x'),
+      ...normalizer.push(toolUse('c1', 'TaskCreate', { subject: 'Ler a.txt' })),
+      ...normalizer.push(toolResult('c1', { task: { id: '1', subject: 'Ler a.txt' } })),
+      ...normalizer.push(toolUse('c2', 'TaskCreate', { subject: 'Ler b.txt' })),
+      ...normalizer.push(toolResult('c2', { task: { id: '2', subject: 'Ler b.txt' } })),
+      ...normalizer.push(toolUse('u1', 'TaskUpdate', { taskId: '1', status: 'completed' })),
+      ...normalizer.push(toolResult('u1', {})),
+      ...normalizer.push(toolUse('u2', 'TaskUpdate', { taskId: '2', status: 'in_progress' })),
+      ...normalizer.push(toolResult('u2', {})),
+    ];
+    const blocks = reduce(deltas)[1]!.blocks;
+    const todo = blocks.filter((b) => b.kind === 'todo');
+    expect(todo).toHaveLength(1);
+    expect(todo[0]).toMatchObject({
+      entries: [
+        { id: '1', content: 'Ler a.txt', status: 'completed' },
+        { id: '2', content: 'Ler b.txt', status: 'in_progress' },
+      ],
+    });
+    expect(blocks.some((b) => b.kind === 'tool' && !b.hidden)).toBe(false);
+  });
+});
+
 describe('toolSummary', () => {
   it('resume cada ferramenta numa linha', () => {
     expect(toolSummary('Bash', { command: 'npm test', description: 'Correr os testes' })).toBe(

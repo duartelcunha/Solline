@@ -5,11 +5,8 @@ import { Markdown } from '../../components/markdown.tsx';
 import { actions, useSession } from '../../stores/app.ts';
 import { AgentLabelContext, useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { PermissionCard, PlanCard, QuestionCard } from './asks.tsx';
-import { NoticeView, Spinner, ThinkingView, ToolRow } from './blocks.tsx';
+import { NoticeView, Spinner, ThinkingView, TodoView, ToolRow } from './blocks.tsx';
 import { ToolDetail } from './tool-detail.tsx';
-
-/** Ferramentas que já aparecem como cartão próprio. */
-const SHOWN_AS_CARD = new Set(['AskUserQuestion', 'ExitPlanMode']);
 
 function UserTurn({ turn }: { turn: Turn }) {
   const text = turn.blocks.find((b) => b.kind === 'text');
@@ -35,7 +32,8 @@ function AssistantTurn({
 }) {
   // shortcut: os passos de subagentes (parentToolId) aparecem na mesma lista, sem
   // sub-conversa dobrável; isso é do M2.
-  const blocks = turn.blocks.filter((b) => !(b.kind === 'tool' && SHOWN_AS_CARD.has(b.name)));
+  // Ferramentas que já aparecem como cartão ou lista de tarefas não se repetem.
+  const blocks = turn.blocks.filter((b) => !(b.kind === 'tool' && b.hidden));
   return (
     <div className="space-y-3" data-testid="assistant-turn">
       {blocks.map((block) => {
@@ -67,6 +65,8 @@ function AssistantTurn({
             return (
               <QuestionCard key={block.id} block={block} onAnswer={(a) => onAnswer(block.id, a)} />
             );
+          case 'todo':
+            return <TodoView key={block.id} block={block} />;
           case 'notice':
             return <NoticeView key={block.id} block={block} />;
         }

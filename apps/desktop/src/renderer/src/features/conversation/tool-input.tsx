@@ -1,10 +1,9 @@
-/** Mostra o input de uma ferramenta da forma mais legível para essa ferramenta. */
+import type { ToolContent } from '@solline/protocol';
 
-function field(input: unknown, key: string): string | undefined {
-  if (typeof input !== 'object' || input === null) return undefined;
-  const value = (input as Record<string, unknown>)[key];
-  return typeof value === 'string' ? value : undefined;
-}
+/**
+ * Mostra o que uma ferramenta vai fazer pelo conteúdo estruturado (diffs, patches, comandos)
+ * que o motor tira de qualquer agente. Sem conteúdo, mostra o input em JSON.
+ */
 
 export function prettyJson(value: unknown): string {
   try {
@@ -14,66 +13,124 @@ export function prettyJson(value: unknown): string {
   }
 }
 
-function DiffLines({ oldText, newText, max }: { oldText: string; newText: string; max?: number }) {
-  const removed = oldText.split('\n');
+function cut(lines: string[], max?: number): string[] {
+  return max && lines.length > max ? [...lines.slice(0, max), '…'] : lines;
+}
+
+function Line({ kind, children }: { kind: 'add' | 'del' | 'ctx'; children: string }) {
+  const sign = kind === 'add' ? '+' : kind === 'del' ? '−' : ' ';
+  return (
+    <div className={kind === 'add' ? 'diff-add' : kind === 'del' ? 'diff-del' : undefined}>
+      <span aria-hidden className="select-none pr-2 opacity-60">
+        {sign}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/** oldText null: ficheiro novo, só linhas acrescentadas. */
+function DiffLines({
+  oldText,
+  newText,
+  max,
+}: {
+  oldText: string | null;
+  newText: string;
+  max?: number | undefined;
+}) {
+  const removed = oldText === null ? [] : oldText.split('\n');
   const added = newText.split('\n');
-  const cut = (lines: string[]) =>
-    max && lines.length > max ? [...lines.slice(0, max), '…'] : lines;
   return (
     <pre className="overflow-x-auto font-mono text-[12px] leading-[1.6]">
-      {cut(removed).map((line, i) => (
-        <div key={`r${i}`} className="diff-del">
-          <span aria-hidden className="select-none pr-2 opacity-60">
-            −
-          </span>
+      {cut(removed, max).map((line, i) => (
+        <Line key={`r${i}`} kind="del">
           {line}
-        </div>
+        </Line>
       ))}
-      {cut(added).map((line, i) => (
-        <div key={`a${i}`} className="diff-add">
-          <span aria-hidden className="select-none pr-2 opacity-60">
-            +
-          </span>
+      {cut(added, max).map((line, i) => (
+        <Line key={`a${i}`} kind="add">
           {line}
-        </div>
+        </Line>
       ))}
     </pre>
   );
 }
 
+/** Um diff unificado (o Codex manda patches assim): cores por linha, cabeçalhos discretos. */
+function UnifiedDiff({ unified, max }: { unified: string; max?: number | undefined }) {
+  const lines = cut(unified.replace(/\n$/, '').split('\n'), max);
+  return (
+    <pre className="overflow-x-auto font-mono text-[12px] leading-[1.6]">
+      {lines.map((line, i) =>
+        line.startsWith('+') && !line.startsWith('+++') ? (
+          <Line key={i} kind="add">
+            {line.slice(1)}
+          </Line>
+        ) : line.startsWith('-') && !line.startsWith('---') ? (
+          <Line key={i} kind="del">
+            {line.slice(1)}
+          </Line>
+        ) : (
+          <div key={i} className="text-subtle">
+            {line}
+          </div>
+        ),
+      )}
+    </pre>
+  );
+}
+
+function ContentView({ item, max }: { item: ToolContent; max?: number | undefined }) {
+  switch (item.type) {
+    case 'command':
+      return (
+        <pre className="overflow-x-auto font-mono text-[12px] leading-[1.6] whitespace-pre-wrap">
+          <span aria-hidden className="text-subtle select-none">
+            ${' '}
+          </span>
+          {item.command}
+        </pre>
+      );
+    case 'diff':
+      return (
+        <div>
+          <div className="mb-1.5 font-mono text-[11.5px] text-muted">{item.path}</div>
+          <DiffLines oldText={item.oldText} newText={item.newText} max={max} />
+        </div>
+      );
+    case 'patch':
+      return (
+        <div>
+          <div className="mb-1.5 font-mono text-[11.5px] text-muted">{item.path}</div>
+          <UnifiedDiff unified={item.unified} max={max} />
+        </div>
+      );
+    case 'text':
+      return (
+        <pre className="overflow-x-auto font-mono text-[12px] leading-[1.6] whitespace-pre-wrap">
+          {cut(item.text.split('\n'), max).join('\n')}
+        </pre>
+      );
+  }
+}
+
 export function ToolInput({
-  name,
+  content,
   input,
   compact = false,
 }: {
-  name: string;
+  content?: readonly ToolContent[] | undefined;
   input: unknown;
   compact?: boolean;
 }) {
-  const file = field(input, 'file_path') ?? field(input, 'notebook_path');
   const lines = compact ? 12 : undefined;
-  if (name === 'Bash') {
+  if (content && content.length > 0) {
     return (
-      <pre className="overflow-x-auto font-mono text-[12px] leading-[1.6] whitespace-pre-wrap">
-        <span aria-hidden className="text-subtle select-none">
-          ${' '}
-        </span>
-        {field(input, 'command') ?? ''}
-      </pre>
-    );
-  }
-  if (
-    name === 'Edit' &&
-    (field(input, 'old_string') !== undefined || field(input, 'new_string') !== undefined)
-  ) {
-    return (
-      <div>
-        {file ? <div className="mb-1.5 font-mono text-[11.5px] text-muted">{file}</div> : null}
-        <DiffLines
-          oldText={field(input, 'old_string') ?? ''}
-          newText={field(input, 'new_string') ?? ''}
-          {...(lines ? { max: lines } : {})}
-        />
+      <div className="space-y-3">
+        {content.map((item, i) => (
+          <ContentView key={i} item={item} max={lines} />
+        ))}
       </div>
     );
   }

@@ -18,7 +18,14 @@ export const ToolState = z.enum(['running', 'ok', 'error']);
 export type ToolState = z.infer<typeof ToolState>;
 
 /** Estado de qualquer pedido que espera por ti (permissão, plano ou pergunta). */
-export const AskStatus = z.enum(['pending', 'allowed', 'allowed-always', 'denied', 'cancelled']);
+export const AskStatus = z.enum([
+  'pending',
+  'allowed',
+  'allowed-always',
+  'denied',
+  'denied-always',
+  'cancelled',
+]);
 export type AskStatus = z.infer<typeof AskStatus>;
 
 export const TextBlock = z.object({
@@ -36,6 +43,38 @@ export const ThinkingBlock = z.object({
   parentToolId: z.string().nullable(),
 });
 
+/** O que a ferramenta faz, igual ao ToolKind do ACP. A interface desenha por aqui, não pelo nome. */
+export const ToolCategory = z.enum([
+  'read',
+  'edit',
+  'delete',
+  'move',
+  'search',
+  'execute',
+  'think',
+  'fetch',
+  'switch_mode',
+  'other',
+]);
+export type ToolCategory = z.infer<typeof ToolCategory>;
+
+/** Conteúdo estruturado de uma ferramenta: diffs, patches e comandos sem depender do agente. */
+export const ToolContent = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), text: z.string() }),
+  /** oldText null: ficheiro novo. */
+  z.object({
+    type: z.literal('diff'),
+    path: z.string(),
+    oldText: z.string().nullable(),
+    newText: z.string(),
+  }),
+  z.object({ type: z.literal('patch'), path: z.string(), unified: z.string() }),
+  z.object({ type: z.literal('command'), command: z.string(), cwd: z.string().optional() }),
+]);
+export type ToolContent = z.infer<typeof ToolContent>;
+
+export const ToolLocation = z.object({ path: z.string(), line: z.number().optional() });
+
 export const ToolBlock = z.object({
   kind: z.literal('tool'),
   /** O id da chamada no agente (tool_use_id no Claude). */
@@ -48,6 +87,12 @@ export const ToolBlock = z.object({
   output: z.string().optional(),
   state: ToolState,
   parentToolId: z.string().nullable(),
+  category: ToolCategory.optional(),
+  /** Ficheiros em que a ferramenta mexe (para seguir na interface). */
+  locations: z.array(ToolLocation).optional(),
+  content: z.array(ToolContent).optional(),
+  /** Já aparece de outra forma (cartão, lista de tarefas): não se desenha como ferramenta. */
+  hidden: z.boolean().optional(),
 });
 
 export const PermissionBlock = z.object({
@@ -65,6 +110,10 @@ export const PermissionBlock = z.object({
   alwaysScope: z.enum(['session', 'persistent']).optional(),
   /** O cartão abre no "Negar" e não aceita aprovação com uma tecla. */
   defaultToNo: z.boolean(),
+  /** O agente aceita recusar para sempre (regra gravada do lado dele). */
+  canAlwaysDeny: z.boolean().optional(),
+  category: ToolCategory.optional(),
+  content: z.array(ToolContent).optional(),
   status: AskStatus,
 });
 
@@ -92,6 +141,20 @@ export const QuestionBlock = z.object({
   status: AskStatus,
 });
 
+/** A lista de tarefas do agente; cada atualização substitui a lista toda. */
+export const TodoBlock = z.object({
+  kind: z.literal('todo'),
+  id: z.string(),
+  entries: z.array(
+    z.object({
+      id: z.string().optional(),
+      content: z.string(),
+      status: z.enum(['pending', 'in_progress', 'completed']),
+      priority: z.enum(['high', 'medium', 'low']).optional(),
+    }),
+  ),
+});
+
 export const NoticeBlock = z.object({
   kind: z.literal('notice'),
   id: z.string(),
@@ -106,9 +169,11 @@ export const Block = z.discriminatedUnion('kind', [
   PermissionBlock,
   PlanBlock,
   QuestionBlock,
+  TodoBlock,
   NoticeBlock,
 ]);
 export type Block = z.infer<typeof Block>;
+export type TodoBlock = z.infer<typeof TodoBlock>;
 export type TextBlock = z.infer<typeof TextBlock>;
 export type ThinkingBlock = z.infer<typeof ThinkingBlock>;
 export type ToolBlock = z.infer<typeof ToolBlock>;
@@ -279,6 +344,7 @@ export const PermissionAnswer = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('allow-once') }),
   z.object({ decision: z.literal('allow-always') }),
   z.object({ decision: z.literal('deny'), message: z.string().max(10_000).optional() }),
+  z.object({ decision: z.literal('deny-always') }),
   z.object({
     decision: z.literal('answer'),
     answers: z

@@ -1,6 +1,19 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Block, ConversationDelta, ToolBlock, Usage } from '@solline/protocol';
-import { toolResultText, toolSummary } from './tools.ts';
+import type { Block, ConversationDelta, TodoBlock, ToolBlock, Usage } from '@solline/protocol';
+import { HIDDEN_TOOLS, toolResultText, toolShape, toolSummary } from './tools.ts';
+
+type TodoEntry = TodoBlock['entries'][number];
+type TodoStatus = TodoEntry['status'];
+
+function todoStatus(value: unknown): TodoStatus {
+  return value === 'in_progress' || value === 'completed' ? value : 'pending';
+}
+
+function text(value: unknown, key: string): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const v = (value as Record<string, unknown>)[key];
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
 
 type StreamKind = 'text' | 'thinking' | 'tool';
 
@@ -32,6 +45,10 @@ export class ClaudeNormalizer {
   /** Último bloco aberto por message.id, para casar com a mensagem completa. */
   readonly #lastOpen = new Map<string, OpenBlock>();
   readonly #blocks = new Map<string, Block>();
+  /** Tarefas do TaskCreate/TaskUpdate, pela ordem em que nasceram (vivem a sessão toda). */
+  readonly #tasks = new Map<string, TodoEntry>();
+  /** Input de cada TaskCreate/TaskUpdate, para ler quando chega o resultado. */
+  readonly #taskCalls = new Map<string, { name: string; input: unknown }>();
   #interrupted = false;
 
   constructor(options: { newId?: () => string } = {}) {
@@ -252,8 +269,66 @@ export class ClaudeNormalizer {
       };
       this.#blocks.set(next.id, next);
       out.push({ type: 'block.upsert', turnId, block: next });
+      if (!part.is_error) {
+        out.push(...this.#taskResult(turnId, part.tool_use_id, message.tool_use_result));
+      }
     }
     return out;
+  }
+
+  /** TodoWrite traz a lista inteira; substitui a do turno. */
+  #todoWrite(turnId: string, input: unknown): ConversationDelta[] {
+    const raw =
+      typeof input === 'object' &&
+      input !== null &&
+      Array.isArray((input as { todos?: unknown }).todos)
+        ? ((input as { todos: unknown[] }).todos as unknown[])
+        : [];
+    const entries: TodoEntry[] = raw.flatMap((t) => {
+      const content = text(t, 'content') ?? text(t, 'subject');
+      if (!content) return [];
+      const id = text(t, 'id');
+      return [
+        { ...(id ? { id } : {}), content, status: todoStatus((t as { status?: unknown }).status) },
+      ];
+    });
+    const block: TodoBlock = { kind: 'todo', id: `${turnId}:todo`, entries };
+    return [{ type: 'block.upsert', turnId, block }];
+  }
+
+  /**
+   * TaskCreate/TaskUpdate constroem a lista chamada a chamada: o id da tarefa nova só vem no
+   * resultado. A lista mostra-se no turno em que mudou.
+   */
+  #taskResult(turnId: string, toolUseId: string, result: unknown): ConversationDelta[] {
+    const call = this.#taskCalls.get(toolUseId);
+    if (!call) return [];
+    this.#taskCalls.delete(toolUseId);
+    if (call.name === 'TaskCreate') {
+      const task = (result as { task?: { id?: unknown } } | undefined)?.task;
+      const id = typeof task?.id === 'string' ? task.id : toolUseId;
+      const content = text(call.input, 'subject') ?? text(call.input, 'description') ?? 'Tarefa';
+      this.#tasks.set(id, { id, content, status: 'pending' });
+    } else {
+      const id = text(call.input, 'taskId');
+      const current = id ? this.#tasks.get(id) : undefined;
+      if (!id || !current) return [];
+      const status = (call.input as { status?: unknown }).status;
+      if (status === 'deleted') this.#tasks.delete(id);
+      else {
+        this.#tasks.set(id, {
+          ...current,
+          content: text(call.input, 'subject') ?? current.content,
+          ...(status !== undefined ? { status: todoStatus(status) } : {}),
+        });
+      }
+    }
+    const block: TodoBlock = {
+      kind: 'todo',
+      id: `${turnId}:tasks`,
+      entries: [...this.#tasks.values()],
+    };
+    return [{ type: 'block.upsert', turnId, block }];
   }
 
   #result(message: Extract<SDKMessage, { type: 'result' }>): ConversationDelta[] {
@@ -334,8 +409,13 @@ export class ClaudeNormalizer {
       input,
       state: previous?.kind === 'tool' ? previous.state : 'running',
       parentToolId,
+      ...toolShape(name, input),
+      ...(HIDDEN_TOOLS.has(name) ? { hidden: true } : {}),
     };
     this.#blocks.set(id, next);
-    return [{ type: 'block.upsert', turnId, block: next }];
+    const out: ConversationDelta[] = [{ type: 'block.upsert', turnId, block: next }];
+    if (name === 'TodoWrite') out.push(...this.#todoWrite(turnId, input));
+    if (name === 'TaskCreate' || name === 'TaskUpdate') this.#taskCalls.set(id, { name, input });
+    return out;
   }
 }

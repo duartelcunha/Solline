@@ -258,6 +258,26 @@ describe('projetos sem confiança', () => {
   });
 });
 
+describe('cartões neutros', () => {
+  it('o pedido de permissão leva categoria e diff, e não aceita "Negar sempre"', async () => {
+    const { adapter, sink } = adapterFor('edit-with-permission');
+    await adapter.start();
+    const asked = sink.nextAsk();
+    await adapter.send('edita');
+    const ask = await asked;
+    expect(ask).toMatchObject({
+      kind: 'permission',
+      category: 'edit',
+      canAlwaysDeny: false,
+      content: [{ type: 'diff', oldText: expect.stringContaining('alpha') }],
+    });
+    expect(() => adapter.answerPermission(ask.id, { decision: 'deny-always' })).toThrow(
+      'Negar sempre',
+    );
+    await adapter.close();
+  });
+});
+
 describe('pedidos especiais', () => {
   const base = { signal: new AbortController().signal, toolUseID: 'tu1', requestId: 'r1' };
 

@@ -24,7 +24,7 @@ import { AsyncQueue } from '../../async-queue.ts';
 import { sanitizedEnv } from '../../env.ts';
 import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts';
 import { ClaudeNormalizer } from './normalizer.ts';
-import { toolSummary } from './tools.ts';
+import { toolShape, toolSummary } from './tools.ts';
 import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
 
 /**
@@ -207,12 +207,17 @@ export function askBlockFor(
     return { kind: 'question', id, questions: parseQuestions(input), status: 'pending' };
   }
   const reason = options.decisionReason ?? options.title;
+  const { category, content } = toolShape(toolName, input);
   return {
     kind: 'permission',
     id,
     toolName,
     toolUseId: options.toolUseID,
     title: toolSummary(toolName, input),
+    category,
+    ...(content ? { content } : {}),
+    // O SDK não tem "recusar sempre" num pedido: as regras de recusa vivem nas definições.
+    canAlwaysDeny: false,
     ...(reason ? { description: reason } : {}),
     input,
     canAlwaysAllow: !options.suppressAlwaysAllowRule && (options.suggestions?.length ?? 0) > 0,
@@ -258,6 +263,8 @@ export function toPermissionResult(
               ? 'The user chose not to answer.'
               : 'The user denied this action.'),
       };
+    case 'deny-always':
+      return { behavior: 'deny', message: 'The user denied this action.' };
     case 'cancelled':
       return { behavior: 'deny', message: 'The request was cancelled before the user answered.' };
   }
@@ -272,6 +279,8 @@ function statusFor(outcome: BrokerOutcome): AskBlock['status'] {
       return 'allowed-always';
     case 'deny':
       return 'denied';
+    case 'deny-always':
+      return 'denied-always';
     case 'cancelled':
       return 'cancelled';
   }
@@ -402,6 +411,12 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     }
     if (answer.decision === 'answer' && block.kind !== 'question') {
       throw new Error('Este pedido não é uma pergunta');
+    }
+    if (
+      answer.decision === 'deny-always' &&
+      !(block.kind === 'permission' && block.canAlwaysDeny === true)
+    ) {
+      throw new Error('Este pedido não aceita "Negar sempre"');
     }
     return this.#broker.answer(requestId, answer);
   }

@@ -1,3 +1,5 @@
+import type { ToolCategory, ToolContent } from '@solline/protocol';
+
 /**
  * Resumo de uma linha para cada ferramenta do Claude Code: o que aparece no bloco
  * compacto. O detalhe completo (input e output) fica na vista detalhada.
@@ -15,7 +17,7 @@ export function baseName(filePath: string): string {
   return parts.at(-1) ?? filePath;
 }
 
-function clip(text: string, max = 80): string {
+export function clip(text: string, max = 80): string {
   const line = text.replace(/\s+/g, ' ').trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
@@ -93,4 +95,121 @@ export function toolResultText(content: unknown): string {
     })
     .filter(Boolean)
     .join('\n');
+}
+
+/** Ferramentas que já aparecem de outra forma (cartões e lista de tarefas). */
+export const HIDDEN_TOOLS: ReadonlySet<string> = new Set([
+  'ExitPlanMode',
+  'AskUserQuestion',
+  'TodoWrite',
+  'TaskCreate',
+  'TaskUpdate',
+  'TaskList',
+  'TaskGet',
+]);
+
+export interface ToolShape {
+  category: ToolCategory;
+  locations?: { path: string; line?: number }[];
+  content?: ToolContent[];
+}
+
+function num(input: unknown, key: string): number | undefined {
+  if (typeof input !== 'object' || input === null) return undefined;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === 'number' ? value : undefined;
+}
+
+/**
+ * O que a interface precisa para desenhar a ferramenta sem saber o nome dela: categoria,
+ * ficheiros e conteúdo (diffs e comandos). A interface deixa de olhar para Edit ou Bash.
+ */
+export function toolShape(name: string, input: unknown): ToolShape {
+  const file = str(input, 'file_path') ?? str(input, 'notebook_path');
+  const at = file ? [{ path: file }] : undefined;
+  switch (name) {
+    case 'Read': {
+      const line = num(input, 'offset');
+      return {
+        category: 'read',
+        ...(file ? { locations: [{ path: file, ...(line !== undefined ? { line } : {}) }] } : {}),
+      };
+    }
+    case 'Edit':
+      return {
+        category: 'edit',
+        ...(at ? { locations: at } : {}),
+        ...(file
+          ? {
+              content: [
+                {
+                  type: 'diff',
+                  path: file,
+                  oldText: str(input, 'old_string') ?? '',
+                  newText: str(input, 'new_string') ?? '',
+                },
+              ],
+            }
+          : {}),
+      };
+    case 'MultiEdit': {
+      const edits =
+        typeof input === 'object' &&
+        input !== null &&
+        Array.isArray((input as { edits?: unknown }).edits)
+          ? ((input as { edits: unknown[] }).edits as unknown[])
+          : [];
+      return {
+        category: 'edit',
+        ...(at ? { locations: at } : {}),
+        ...(file
+          ? {
+              content: edits.map((e) => ({
+                type: 'diff' as const,
+                path: file,
+                oldText: str(e, 'old_string') ?? '',
+                newText: str(e, 'new_string') ?? '',
+              })),
+            }
+          : {}),
+      };
+    }
+    case 'Write':
+      return {
+        category: 'edit',
+        ...(at ? { locations: at } : {}),
+        ...(file
+          ? {
+              content: [
+                { type: 'diff', path: file, oldText: null, newText: str(input, 'content') ?? '' },
+              ],
+            }
+          : {}),
+      };
+    case 'NotebookEdit':
+      return { category: 'edit', ...(at ? { locations: at } : {}) };
+    case 'Bash': {
+      const command = str(input, 'command');
+      return {
+        category: 'execute',
+        ...(command ? { content: [{ type: 'command', command }] } : {}),
+      };
+    }
+    case 'Glob':
+    case 'Grep':
+      return { category: 'search' };
+    case 'WebFetch':
+    case 'WebSearch':
+      return { category: 'fetch' };
+    case 'ExitPlanMode':
+      return { category: 'switch_mode' };
+    case 'TodoWrite':
+    case 'TaskCreate':
+    case 'TaskUpdate':
+    case 'TaskList':
+    case 'TaskGet':
+      return { category: 'think' };
+    default:
+      return { category: 'other' };
+  }
 }
