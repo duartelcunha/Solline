@@ -19,6 +19,10 @@ interface Pending {
 const DEFAULT_TIMEOUT_MS = 20_000;
 const TIMEOUT_MS: Partial<Record<EngineCommandName, number>> = {
   'engine.ping': 5_000,
+  // O Codex arranca um app-server para dizer se tem sessão iniciada ou para começar o login.
+  'agents.list': 45_000,
+  // Acima do pior caso do motor (initialize + account/login/start, 30 s cada).
+  'agents.loginStart': 75_000,
   'session.start': 120_000,
   'session.resume': 120_000,
 };

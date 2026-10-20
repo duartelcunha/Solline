@@ -1,4 +1,3 @@
-import type { Readable, Writable } from 'node:stream';
 import type {
   AgentCapabilities,
   AskBlock,
@@ -8,11 +7,8 @@ import type {
   PermissionBlock,
   SessionSettings,
 } from '@solline/protocol';
-import { APP_NAME, CLIENT_APP_ID } from '@solline/protocol/app';
 import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts';
 import { JsonRpcPeer, StderrTail, type RequestId } from '../../rpc/json-rpc.ts';
-import { killTree, spawnAgent } from '../../rpc/spawn.ts';
-import { ENGINE_VERSION } from '../../version.ts';
 import { clip } from '../claude/tools.ts';
 import { crashMessage, errorNotice, withContext, withTimeout } from '../shared/turns.ts';
 import type {
@@ -23,13 +19,15 @@ import type {
   SendOptions,
 } from '../types.ts';
 import { CODEX_MODES, DEFAULT_CODEX_MODE, threadPolicy, turnOverrides } from './modes.ts';
+import { mcpApprovalResponse, mcpServersConfig, mcpToolApproval } from './mcp.ts';
 import { CodexNormalizer, displayCommand } from './normalizer.ts';
-import type { InitializeParams } from './protocol/InitializeParams';
+import { initializeCodex, spawnCodex, type CodexTransport } from './transport.ts';
 import type { ReviewDecision } from './protocol/ReviewDecision';
 import type { CommandExecutionApprovalDecision } from './protocol/v2/CommandExecutionApprovalDecision';
 import type { CommandExecutionRequestApprovalParams } from './protocol/v2/CommandExecutionRequestApprovalParams';
 import type { FileChangeRequestApprovalParams } from './protocol/v2/FileChangeRequestApprovalParams';
 import type { GetAccountResponse } from './protocol/v2/GetAccountResponse';
+import type { McpServerElicitationRequestParams } from './protocol/v2/McpServerElicitationRequestParams';
 import type { Model } from './protocol/v2/Model';
 import type { ModelListResponse } from './protocol/v2/ModelListResponse';
 import type { ThreadForkResponse } from './protocol/v2/ThreadForkResponse';
@@ -38,14 +36,7 @@ import type { TurnStartParams } from './protocol/v2/TurnStartParams';
 import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
 import type { WindowsSandboxReadinessResponse } from './protocol/v2/WindowsSandboxReadinessResponse';
 
-/** Os fios para o app-server: stdio do processo, ou streams falsos nos testes. */
-export interface CodexTransport {
-  input: Readable;
-  output: Writable;
-  stderr?: Readable | undefined;
-  exited: Promise<unknown>;
-  kill(): Promise<void>;
-}
+export type { CodexTransport } from './transport.ts';
 
 export interface CodexAdapterOptions extends AgentStartOptions {
   /** Caminho absoluto do codex.exe. */
@@ -61,7 +52,7 @@ const START_TIMEOUT_MS = 60_000;
 const CONTROL_TIMEOUT_MS = 30_000;
 
 export const CODEX_LOGIN_MESSAGE =
-  'O Codex não tem sessão iniciada. Entra com o ChatGPT no Codex (codex login) e volta a abrir a sessão.';
+  'O Codex não tem sessão iniciada. Carrega em "Entrar com ChatGPT" no seletor de agentes e volta a abrir a sessão.';
 
 function modelOption(model: Model): ModelOption {
   return {
@@ -205,12 +196,9 @@ export class CodexAppServerAdapter implements AgentAdapter {
     ] as const) {
       peer.onRequest(method, (params, id) => this.#approval(method, params, id));
     }
-    peer.onRequest('mcpServer/elicitation/request', () => {
-      this.#notice(
-        'Um servidor MCP do Codex pediu dados que a Solline ainda não mostra; foi recusado.',
-      );
-      return { action: 'decline', content: null, _meta: null };
-    });
+    peer.onRequest('mcpServer/elicitation/request', (params, id) =>
+      this.#elicitation(params as McpServerElicitationRequestParams, id),
+    );
     peer.onRequest('item/tool/requestUserInput', () => {
       this.#notice('O Codex fez uma pergunta que a Solline ainda não mostra; ficou sem resposta.');
       return { answers: {} };
@@ -220,12 +208,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
     });
 
     try {
-      const init: InitializeParams = {
-        clientInfo: { name: CLIENT_APP_ID, title: APP_NAME, version: ENGINE_VERSION },
-        capabilities: { experimentalApi: false, requestAttestation: false },
-      };
-      await peer.request('initialize', init, START_TIMEOUT_MS);
-      peer.notify('initialized');
+      await initializeCodex(peer, START_TIMEOUT_MS);
       const account = await peer.request<GetAccountResponse>(
         'account/read',
         {},
@@ -250,11 +233,14 @@ export class CodexAppServerAdapter implements AgentAdapter {
       const model =
         this.#settings.model ?? visible.find((m) => m.isDefault)?.id ?? visible[0]?.id ?? null;
       const policy = threadPolicy(this.#settings.mode);
+      // Os servidores MCP desta sessão vão na config do thread, nunca no config.toml.
+      const config = mcpServersConfig(this.#options.mcpServers ?? []);
       const params = {
         cwd: this.#options.cwd,
         ...(model ? { model } : {}),
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
+        ...(config ? { config } : {}),
       };
       const fork = this.#options.fork ? parseCodexPoint(this.#options.fork) : null;
       const started = fork
@@ -410,28 +396,12 @@ export class CodexAppServerAdapter implements AgentAdapter {
   #spawn(): CodexTransport {
     const executable = this.#options.executable;
     if (!executable) throw new Error('Não encontrei o codex.exe');
-    const child = spawnAgent({
-      command: executable,
-      args: ['app-server'],
+    return spawnCodex({
+      executable,
       env: this.#options.env ?? {},
       cwd: this.#options.cwd,
+      stderr: this.#stderr,
     });
-    const exited = new Promise((resolve) => {
-      child.on('exit', resolve);
-      // Sem isto, um codex.exe que não arranca (apagado, bloqueado) derrubava o motor.
-      child.on('error', (error) => {
-        this.#stderr.push(String(error));
-        child.stdout.destroy();
-        resolve(error);
-      });
-    });
-    return {
-      input: child.stdout,
-      output: child.stdin,
-      stderr: child.stderr,
-      exited,
-      kill: () => killTree(child.pid),
-    };
   }
 
   async #sandboxReady(peer: JsonRpcPeer): Promise<boolean> {
@@ -475,9 +445,51 @@ export class CodexAppServerAdapter implements AgentAdapter {
   }
 
   async #approval(method: ApprovalMethod, params: unknown, rpcId: RequestId): Promise<unknown> {
+    const outcome = await this.#ask(this.#approvalBlock(method, params, rpcId), rpcId);
+    return { decision: codexDecision(method, outcome) };
+  }
+
+  /**
+   * As ferramentas MCP pedem autorização por elicitação. Outras elicitações (formulários,
+   * endereços) a Solline ainda não mostra e recusa com um aviso.
+   */
+  async #elicitation(
+    params: McpServerElicitationRequestParams,
+    rpcId: RequestId,
+  ): Promise<unknown> {
+    const approval = mcpToolApproval(params);
+    if (!approval) {
+      this.#notice(
+        'Um servidor MCP do Codex pediu dados que a Solline ainda não mostra; foi recusado.',
+      );
+      return { action: 'decline', content: null, _meta: null };
+    }
+    // Um servidor desta sessão que corre programas pergunta sempre.
+    const risky = (this.#options.mcpServers ?? []).some(
+      (s) => s.executesCode && s.name === approval.server,
+    );
+    const id = `codex-${String(rpcId)}`;
+    const block: PermissionBlock = {
+      kind: 'permission',
+      id,
+      toolName: `mcp__${approval.server}__${approval.tool}`,
+      toolUseId: id,
+      title: approval.title,
+      ...(approval.description ? { description: approval.description } : {}),
+      input: approval.input,
+      category: 'other',
+      canAlwaysAllow: !risky && approval.persist.includes('session'),
+      alwaysScope: 'session',
+      canAlwaysDeny: false,
+      defaultToNo: false,
+      status: 'pending',
+    };
+    return mcpApprovalResponse(await this.#ask(block, rpcId));
+  }
+
+  async #ask(block: PermissionBlock, rpcId: RequestId): Promise<BrokerOutcome> {
     const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
     this.#emit(deltas);
-    const block = this.#approvalBlock(method, params, rpcId);
     this.#asks.set(block.id, { turnId, block, rpcId });
     this.#sink.ask(turnId, block);
     this.#sink.state('needs-you');
@@ -495,7 +507,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
     if (!this.#crashed) {
       this.#sink.state(this.#asks.size > 0 ? 'needs-you' : this.#running ? 'running' : 'idle');
     }
-    return { decision: codexDecision(method, outcome) };
+    return outcome;
   }
 
   #approvalBlock(method: ApprovalMethod, params: unknown, rpcId: RequestId): PermissionBlock {

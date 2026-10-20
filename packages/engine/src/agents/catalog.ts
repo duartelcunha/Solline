@@ -102,17 +102,21 @@ export function catalogDefinition(
     untrustedProjects: entry.untrustedProjects,
     // O ACP obriga os agentes a aceitar servidores MCP por stdio.
     mcp: true,
+    // Corre sem segredos do anfitrião: as chaves que precisar escolhes tu no painel.
+    configurableKeys: true,
     detect: async () => {
       const found = find();
       if (!found)
         return { status: 'not-found', detail: `Instala o ${entry.label}: ${entry.install}` };
+      const version = { installed: found.version, reviewed: entry.reviewedVersion };
       if (found.version !== entry.reviewedVersion) {
         return {
           status: 'unreviewed',
           detail: `Versão não revista (instalada ${found.version ?? '?'}, revista ${entry.reviewedVersion})`,
+          version,
         };
       }
-      return { status: 'ready' };
+      return { status: 'ready', version };
     },
     create: (start, sink) =>
       new AcpAdapter(

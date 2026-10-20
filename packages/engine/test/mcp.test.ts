@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AcpAdapter,
   ClaudeSdkAdapter,
+  CodexAppServerAdapter,
   MCP_CATALOG,
   SessionManager,
   claudeDefinition,
@@ -15,12 +16,14 @@ import {
   withFactories,
   type McpLaunch,
 } from '../src/index.ts';
+import { fakeCodexServer } from './codex-fakes.ts';
 import { fakeAcp } from './fakes/acp-transport.ts';
 import {
   fakeQuery,
   loadFixture,
   messagesOf,
   recordingSink,
+  waitFor,
   type FixtureRecord,
 } from './helpers.ts';
 
@@ -136,11 +139,8 @@ describe('servidores MCP por sessão', () => {
     await adapter.close();
   });
 
-  it('o Codex ainda não aceita servidores MCP por sessão; um id desconhecido falha', async () => {
+  it('um id desconhecido falha', async () => {
     const m = manager([]);
-    await expect(m.create({ ...base, agent: 'codex', mcpServerIds: ['docs'] })).rejects.toThrow(
-      'ainda não aceita',
-    );
     await expect(m.create({ ...base, mcpServerIds: ['nao-existe'] })).rejects.toThrow(
       'desconhecido',
     );
@@ -220,5 +220,162 @@ describe('catálogo MCP', () => {
     } finally {
       await rm(dataDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('servidores MCP por sessão no Codex', () => {
+  function codexManager(server = fakeCodexServer()) {
+    const m = new SessionManager({
+      emit: () => undefined,
+      mcp: fixedMcpCatalog([RUNNER, DOCS]),
+      registry: withFactories(registryOf([codexDefinition()]), {
+        codex: (options, sink) =>
+          new CodexAppServerAdapter({ ...options, transport: server.transport }, sink),
+      }),
+    });
+    return { m, server };
+  }
+  const codex = { ...base, agent: 'codex' };
+  const toolApproval = (server: string, persist: unknown = ['session', 'always']) => ({
+    threadId: 'thread-1',
+    turnId: null,
+    serverName: server,
+    mode: 'form',
+    message: 'Allow the MCP server to run tool "exec"?',
+    requestedSchema: { type: 'object', properties: {} },
+    _meta: {
+      codex_approval_kind: 'mcp_tool_call',
+      persist,
+      tool_name: 'exec',
+      tool_title: 'Executar',
+      tool_params: { cmd: 'dir' },
+    },
+  });
+
+  it('vão na config do thread (nunca no config.toml), com todas as ferramentas a pedir', async () => {
+    const { m, server } = codexManager();
+    const { session } = await m.create({ ...codex, mcpServerIds: ['docs'] });
+    expect(session.mcpServers).toEqual(['docs']);
+    const start = server.received.find((msg) => msg.method === 'thread/start');
+    const config = (start?.params as { config?: Record<string, unknown> }).config;
+    expect(config).toEqual({
+      'mcp_servers.docs': {
+        command: 'C:/node/node.exe',
+        args: ['runner.mjs'],
+        env: expect.objectContaining({ RUNNER_MODE: 'safe' }),
+        startup_timeout_sec: 30,
+        default_tools_approval_mode: 'prompt',
+      },
+    });
+    // Os segredos que o Codex recebe (a chave da OpenAI) vão vazios para o servidor.
+    const env = (config!['mcp_servers.docs'] as { env: Record<string, string> }).env;
+    for (const [key, value] of Object.entries(env)) {
+      if (key !== 'RUNNER_MODE') expect(value).toBe('');
+    }
+    await m.disposeAll();
+  });
+
+  it('sem servidores, o thread/start não leva config', async () => {
+    const { m, server } = codexManager();
+    await m.create(codex);
+    const start = server.received.find((msg) => msg.method === 'thread/start');
+    expect(start?.params).not.toHaveProperty('config');
+    await m.disposeAll();
+  });
+
+  it('um servidor que corre programas tira o Auto ao Codex', async () => {
+    const { m } = codexManager();
+    await expect(m.create({ ...codex, mode: 'auto', mcpServerIds: ['runner'] })).rejects.toThrow(
+      'pergunte antes',
+    );
+    const { capabilities } = await m.create({ ...codex, mcpServerIds: ['runner'] });
+    expect(capabilities.modes.map((mode) => mode.id)).not.toContain('auto');
+    await m.disposeAll();
+  });
+
+  function adapter(mcpServers: McpLaunch[]) {
+    const server = fakeCodexServer();
+    const sink = recordingSink();
+    const a = new CodexAppServerAdapter(
+      { cwd: 'C:/p', mode: 'ask', transport: server.transport, mcpServers },
+      sink,
+    );
+    return { a, sink, server };
+  }
+
+  it('o pedido de uma ferramenta MCP vira cartão; "sempre" fica na sessão', async () => {
+    const { a, sink, server } = adapter([DOCS]);
+    await a.start();
+    const asked = sink.nextAsk();
+    const reply = server.request('mcpServer/elicitation/request', toolApproval('docs'));
+    const block = await asked;
+    expect(block).toMatchObject({
+      kind: 'permission',
+      toolName: 'mcp__docs__exec',
+      title: 'docs: Executar',
+      input: { cmd: 'dir' },
+      canAlwaysAllow: true,
+      alwaysScope: 'session',
+    });
+    a.answerPermission(block.id, { decision: 'allow-always' });
+    expect((await reply).result).toEqual({
+      action: 'accept',
+      content: {},
+      _meta: { persist: 'session' },
+    });
+    await a.close();
+  });
+
+  it('um servidor que corre programas nunca tem "Permitir sempre"; negar recusa', async () => {
+    const { a, sink, server } = adapter([RUNNER]);
+    await a.start();
+    const asked = sink.nextAsk();
+    const reply = server.request('mcpServer/elicitation/request', toolApproval('runner'));
+    const block = await asked;
+    expect(block).toMatchObject({ canAlwaysAllow: false });
+    expect(() => a.answerPermission(block.id, { decision: 'allow-always' })).toThrow();
+    a.answerPermission(block.id, { decision: 'deny' });
+    expect((await reply).result).toEqual({ action: 'decline', content: null, _meta: null });
+    await a.close();
+  });
+
+  it('sem persist de sessão, só se permite uma vez', async () => {
+    const { a, sink, server } = adapter([DOCS]);
+    await a.start();
+    const asked = sink.nextAsk();
+    const reply = server.request('mcpServer/elicitation/request', toolApproval('docs', 'always'));
+    const block = await asked;
+    expect(block).toMatchObject({ canAlwaysAllow: false });
+    a.answerPermission(block.id, { decision: 'allow-once' });
+    expect((await reply).result).toEqual({ action: 'accept', content: {}, _meta: null });
+    await a.close();
+  });
+
+  it('outras elicitações continuam recusadas com um aviso', async () => {
+    const { a, sink, server } = adapter([DOCS]);
+    await a.start();
+    const reply = await server.request('mcpServer/elicitation/request', {
+      threadId: 'thread-1',
+      turnId: null,
+      serverName: 'docs',
+      mode: 'url',
+      _meta: null,
+      message: 'Entra',
+      url: 'https://example.com',
+      elicitationId: 'e1',
+    });
+    expect(reply.result).toEqual({ action: 'decline', content: null, _meta: null });
+    await waitFor(() =>
+      sink.deltas.some(
+        (d) =>
+          d.type === 'block.upsert' && d.block.kind === 'notice' && /recusado/.test(d.block.text),
+      ),
+    );
+    await a.close();
+  });
+
+  it('um nome que partia a chave da config não arranca', async () => {
+    const { a } = adapter([{ ...DOCS, name: 'a.b' }]);
+    await expect(a.start()).rejects.toThrow('inválido');
   });
 });

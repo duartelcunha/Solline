@@ -35,7 +35,14 @@ export {
   type AgentDefinition,
   type AgentRegistry,
 } from './agents/registry.ts';
-export { DEEPSEEK, profileDefinition, type ProviderProfile } from './agents/profiles.ts';
+export {
+  DEEPSEEK,
+  GLM,
+  KIMI,
+  PROVIDER_PROFILES,
+  profileDefinition,
+  type ProviderProfile,
+} from './agents/profiles.ts';
 export { readWindowsCredential, type CredentialReader } from './secrets/windows-credentials.ts';
 export {
   resolveClaudeExecutable,
@@ -54,6 +61,9 @@ export {
   type CodexTransport,
 } from './adapters/codex/adapter.ts';
 export { CodexNormalizer, displayCommand } from './adapters/codex/normalizer.ts';
+export { codexNeedsLogin, startCodexLogin } from './adapters/codex/account.ts';
+export { LoginManager, LOGIN_TIMEOUT_MS, type LoginFlow } from './agents/login.ts';
+export { fileAgentSettings, memoryAgentSettings, type AgentSettings } from './agents/settings.ts';
 export { CODEX_MODES, threadPolicy, turnOverrides } from './adapters/codex/modes.ts';
 export {
   REVIEWED_CODEX_VERSION,

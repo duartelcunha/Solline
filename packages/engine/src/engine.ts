@@ -10,8 +10,11 @@ import {
   type ResponseEnvelope,
 } from '@solline/protocol';
 import type { AgentAdapterFactory } from './adapters/types.ts';
+import { LoginManager } from './agents/login.ts';
 import { builtinRegistry, withFactories, type AgentRegistry } from './agents/registry.ts';
 import { CheckpointStore, type CheckpointStoreOptions } from './checkpoints/store.ts';
+import { fileAgentSettings, memoryAgentSettings, type AgentSettings } from './agents/settings.ts';
+import { SECRET_NAME } from './env.ts';
 import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { SessionManager } from './session-manager.ts';
 import { ENGINE_VERSION } from './version.ts';
@@ -34,6 +37,10 @@ export interface EngineOptions {
   mcp?: McpCatalog;
   /** Checkpoints por turno (por omissão na pasta de dados); false desliga-os. */
   checkpoints?: CheckpointStoreOptions | false;
+  /** Para testes: troca onde ficam as variáveis escolhidas para cada agente. */
+  settings?: AgentSettings;
+  /** Para testes: o ambiente onde se procuram nomes de segredos. */
+  env?: NodeJS.ProcessEnv;
 }
 
 type Handlers = {
@@ -43,6 +50,7 @@ type Handlers = {
 /** O motor recebe envelopes de pedido e devolve envelopes de resposta. Não sabe do Electron. */
 export class Engine {
   readonly sessions: SessionManager;
+  readonly logins: LoginManager;
   readonly #handlers: Handlers;
   readonly #checkpoints: CheckpointStore | undefined;
 
@@ -64,12 +72,33 @@ export class Engine {
             root: options.dataDir ? path.join(options.dataDir, 'checkpoints') : undefined,
             ...options.checkpoints,
           });
+    const emit = options.emit ?? (() => undefined);
+    const settings =
+      options.settings ??
+      (options.dataDir ? fileAgentSettings(options.dataDir) : memoryAgentSettings());
+    const env = options.env ?? process.env;
     this.sessions = new SessionManager({
-      emit: options.emit ?? (() => undefined),
+      emit,
       registry,
       mcp,
       checkpoints: this.#checkpoints,
+      keysFor: (agent) => settings.keys(agent),
     });
+    this.logins = new LoginManager({
+      onChange: (agent, error) =>
+        emit({ kind: 'event', type: 'agents.changed', agent, ...(error ? { error } : {}) }),
+    });
+    const logins = this.logins;
+    const definitionOf = (id: string) => {
+      const found = registry.get(id);
+      if (!found) throw new Error(`Agente desconhecido: ${id}`);
+      return found;
+    };
+    const configurable = (id: string) => {
+      const definition = definitionOf(id);
+      if (!definition.configurableKeys) throw new Error('Este agente não deixa escolher variáveis');
+      return definition;
+    };
     const s = this.sessions;
     const ok = {} as Record<string, never>;
     this.#handlers = {
@@ -80,7 +109,7 @@ export class Engine {
         receivedAt: Date.now(),
       }),
       'mcp.list': async () => ({ servers: await mcp.list() }),
-      'agents.list': async () => ({
+      'agents.list': async (p) => ({
         agents: await Promise.all(
           registry.list().map(async (d) => ({
             id: d.id,
@@ -89,12 +118,38 @@ export class Engine {
             experimental: d.experimental === true,
             untrustedProjects: d.untrustedProjects,
             mcp: d.mcp === true,
-            ...(await d.detect().catch((error: unknown): { status: 'error'; detail: string } => ({
-              status: 'error',
-              detail: error instanceof Error ? error.message : String(error),
-            }))),
+            ...(d.login ? { login: { label: d.login.label, pending: logins.pending(d.id) } } : {}),
+            ...(d.configurableKeys ? { keys: await settings.keys(d.id) } : {}),
+            ...(await d
+              .detect({ refresh: p.refresh === true })
+              .catch((error: unknown): { status: 'error'; detail: string } => ({
+                status: 'error',
+                detail: error instanceof Error ? error.message : String(error),
+              }))),
           })),
         ),
+      }),
+      'agents.loginStart': async (p) => {
+        const login = definitionOf(p.agent).login;
+        if (!login) throw new Error('Este agente não tem login dentro da app');
+        return { url: await logins.start(p.agent, () => login.start()) };
+      },
+      'agents.loginCancel': async (p) => (await logins.cancel(p.agent), ok),
+      'agents.keys': async (p) => {
+        const definition = configurable(p.agent);
+        return { label: definition.label, keys: await settings.keys(p.agent) };
+      },
+      'agents.saveKeys': async (p) => {
+        configurable(p.agent);
+        await settings.setKeys(p.agent, p.keys);
+        emit({ kind: 'event', type: 'agents.changed', agent: p.agent });
+        return ok;
+      },
+      // Só nomes, nunca valores: para o painel sugerir o que escolher.
+      'agents.keyCandidates': async () => ({
+        names: Object.keys(env)
+          .filter((name) => SECRET_NAME.test(name) && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name))
+          .sort(),
       }),
       'session.start': (p) => s.create(p),
       'projects.trustChanged': async (p) => (s.setProjectTrust(p.projectId, p.trusted), ok),
@@ -141,6 +196,7 @@ export class Engine {
   }
 
   async dispose(): Promise<void> {
+    await this.logins.cancelAll();
     await this.sessions.disposeAll();
     await this.#checkpoints?.dispose();
   }

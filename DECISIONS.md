@@ -183,7 +183,7 @@
   testes reais do Codex só correm com `SOLLINE_AGENTS=codex`. As gravações tiram ids da conta, nome
   do PC, limites e nomes dos servidores MCP.
 - **Fica para depois:** "Entrar com ChatGPT" dentro da app (`account/login/start`); hoje, sem sessão,
-  a mensagem manda fazer `codex login`.
+  a mensagem manda fazer `codex login`. (Feito: ver "login, painel de agentes e MCP no Codex".)
 
 ## 2026-10-20: M1g, adaptador ACP genérico
 
@@ -203,14 +203,14 @@
 - **Sem corrida real:** não há nenhum agente ACP instalado nesta máquina. O adaptador está testado
   contra um agente ACP falso, também como processo de verdade, e na suite de contrato.
 - **Fica para depois:** escolher que chaves cada agente ACP recebe (`agents.setKeys`) e um painel
-  de agentes; hoje o seletor já diz o estado e como instalar ou entrar.
+  de agentes; hoje o seletor já diz o estado e como instalar ou entrar. (Feito: ver abaixo.)
 
 ## 2026-10-20: M1h, servidores MCP por sessão e REA
 
 - **Catálogo MCP no código** (`mcp/catalog.ts`), como os agentes: cada servidor é revisto e vai só
   na sessão que o pede (Claude em `options.mcpServers`, ACP no `session/new`). Nunca se escreve nas
   configs globais dos agentes. O Codex ainda não recebe servidores por sessão (falta ver como pela
-  config do thread).
+  config do thread). (Feito: ver abaixo.)
 - **Correm no `node.exe` do PATH**, não no executável da app (os fuses tiraram o `runAsNode`).
 - **Servidores que correm programas** (`executesCode`) tiram o Auto (e qualquer modo de acesso
   total) da sessão e as ferramentas deles nunca têm "Permitir sempre".
@@ -273,3 +273,49 @@
   Ações de teclado não animam (`data-input` no `<html>` e `detail === 0` nos clicks). O movimento
   reduzido zera distâncias e escalas e deixa a opacidade; saiu a regra antiga que punha todas as
   transições a 0 ms.
+## 2026-10-20: modelos GLM e Kimi pelo Claude Code (experimental)
+
+- **Como o DeepSeek:** `claude:glm` (Z.ai, `https://api.z.ai/api/anthropic`) e `claude:kimi`
+  (Moonshot, `https://api.moonshot.ai/anthropic`), o mesmo `claude.exe` com outra API, pasta de
+  config própria, sem segredos do anfitrião e sem Auto. Chave no Gestor de Credenciais
+  (`solline/glm`, `solline/kimi`) ou em `ZAI_API_KEY` / `MOONSHOT_API_KEY`.
+- **Modelos dos guias oficiais** (docs.z.ai/devpack/tool/claude e
+  platform.kimi.ai/docs/guide/claude-code-kimi, lidos hoje): GLM-5.3 (`glm-5.3[1m]`, haiku e
+  subagentes em `glm-5.3-flash[1m]`, `API_TIMEOUT_MS` de 50 min como no guia) e Kimi K3
+  (`kimi-k3[1m]`). Desvio ao guia da Moonshot: o haiku fica no K3 e não no `kimi-k2.7-code`,
+  que obriga a pensar e dá 400 aos pedidos curtos do Claude Code sem thinking.
+- **Sem corrida real:** não há chaves nesta máquina. Os nomes dos modelos mudam depressa: rever
+  nos guias em cada subida.
+- **O Gemini fica de fora por agora:** entraria pelo ACP (`gemini --experimental-acp`), mas o
+  pacote `@google/gemini-cli` tem de ser revisto em quarentena antes de ir para o catálogo.
+
+## 2026-10-20: login, painel de agentes e MCP no Codex
+
+- **"Entrar com ChatGPT" dentro da app.** A interface manda `agents.login` ao main; o main pede
+  ao motor `agents.loginStart` (comando interno), que arranca um `codex app-server` auxiliar na
+  pasta pessoal e chama `account/login/start {type: chatgpt}`. O main só abre o `authUrl` com
+  `shell.openExternal` se for https em `auth.openai.com` (lista por agente em
+  `main/agent-policy.ts`, sem porta nem credenciais); senão cancela. O processo fica vivo até ao
+  `account/login/completed` (o Codex tem o servidor local do regresso do browser), no máximo 10
+  min; um segundo pedido cancela o primeiro. O fim emite `agents.changed` e a interface volta a
+  pedir a lista. A Solline nunca lê as credenciais: o Codex guarda-as onde costuma.
+- **Saber se o Codex tem sessão** custa arrancar um app-server e um `account/read` com
+  `refreshToken: false` (sem rede nem quota). A resposta vale 60 s; "Verificar de novo" manda
+  `agents.list {refresh: true}`. Se a pergunta falhar, o Codex aparece pronto e a sessão diz porquê.
+- **O seletor** mostra um agente sem sessão como "Entrar com ChatGPT" (ou "à espera do browser…",
+  que desiste ao carregar) e tem "Gerir agentes…".
+- **Painel de agentes** (Radix Dialog), aberto pelo seletor e pelo rodapé da barra lateral:
+  estado, versão instalada e revista, "Verificar de novo", login e, nos agentes ACP, as
+  variáveis que recebem. São só nomes (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`, até 32, sem repetidos),
+  guardados em `<userData>/agent-settings.json` pelo motor (`agents.saveKeys`, interno) depois de
+  uma confirmação nativa no main para os nomes novos (tirar não pergunta). Juntam-se ao
+  `envPolicy.keys` no arranque de cada sessão ou retoma. O painel sugere os nomes do ambiente
+  que parecem segredos (`agents.keyCandidates`, só nomes, nunca valores).
+- **Servidores MCP por sessão no Codex:** vão na config do thread (`mcp_servers.<nome>` em
+  `thread/start` e `thread/resume`, como o `-c` do CLI), nunca no `config.toml`. Provado no
+  0.163.0 real com um thread efémero e `mcpServerStatus/list` (o servidor de eco ligou e mostrou a
+  ferramenta), sem nenhum turno. Todas as ferramentas pedem (`default_tools_approval_mode =
+"prompt"`). O Codex pede-o por elicitação com `_meta.codex_approval_kind = "mcp_tool_call"`
+  (formato tirado do binário, testado só com o servidor falso: falta um turno real, que gasta
+  quota): vira cartão; "Permitir sempre" responde `_meta.persist = "session"` e nunca existe num
+  servidor que corre programas. As outras elicitações continuam recusadas com um aviso.

@@ -188,7 +188,85 @@ test('a nova sessão deixa escolher o agente e mostra porque um não está pront
   // Sem chave fica desligado e diz onde a pôr; com chave fica pronto.
   const disabled = await deepseek.getAttribute('data-disabled');
   if (disabled !== null) await expect(deepseek).toContainText('Gestor de Credenciais');
+  await expect(page.getByTestId('agent-claude:glm')).toContainText('GLM (experimental)');
+  await expect(page.getByTestId('agent-claude:kimi')).toContainText('Kimi (experimental)');
   await shot(page, 'agent-picker');
+  // O seletor também abre o painel de agentes.
+  await page.getByTestId('open-agents-panel').click();
+  await expect(page.getByTestId('agents-panel')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('agents-panel')).toBeHidden();
+});
+
+test('o painel de agentes mostra o estado e guarda as variáveis só depois de confirmares', async () => {
+  const page = await app.firstWindow();
+  await page.getByTestId('sidebar-agents').click();
+  const panel = page.getByTestId('agents-panel');
+  await expect(panel).toBeVisible();
+  await expect(page.getByTestId('panel-agent-codex')).toContainText('Codex');
+  await expect(page.getByTestId('panel-agent-opencode')).toContainText('Não instalado');
+  await page.getByTestId('agents-refresh').click();
+  await expect(page.getByTestId('agents-refresh')).toBeEnabled({ timeout: 45_000 });
+
+  // O diálogo nativo de confirmação troca-se no main: primeiro recusas, depois aceitas.
+  const answer = (response: number) =>
+    app.evaluate(({ dialog }, response) => {
+      const g = globalThis as { keyDialogs?: string[] };
+      g.keyDialogs ??= [];
+      dialog.showMessageBox = (async (...args: unknown[]) => {
+        const options = args.at(-1) as { detail?: string };
+        g.keyDialogs!.push(options.detail ?? '');
+        return { response, checkboxChecked: false };
+      }) as typeof dialog.showMessageBox;
+    }, response);
+  const input = page.getByTestId('keys-input-opencode');
+  await input.fill('nome inválido');
+  await expect(panel.getByRole('button', { name: 'Juntar' }).first()).toBeDisabled();
+  await input.fill('SOLLINE_E2E_API_KEY');
+  await input.press('Enter');
+  await answer(1);
+  await page.getByTestId('keys-save-opencode').click();
+  // Recusado: o rascunho volta ao que estava guardado (nada).
+  await expect(page.getByTestId('panel-agent-opencode')).not.toContainText('SOLLINE_E2E_API_KEY', {
+    timeout: 15_000,
+  });
+
+  await input.fill('SOLLINE_E2E_API_KEY');
+  await input.press('Enter');
+  await answer(0);
+  await page.getByTestId('keys-save-opencode').click();
+  await expect(page.getByTestId('keys-save-opencode')).toHaveText('Guardar', { timeout: 15_000 });
+  await expect(page.getByTestId('panel-agent-opencode')).toContainText('SOLLINE_E2E_API_KEY');
+  const dialogs = await app.evaluate(
+    () => (globalThis as { keyDialogs?: string[] }).keyDialogs ?? [],
+  );
+  expect(dialogs).toHaveLength(2);
+  expect(dialogs[1]).toContain('SOLLINE_E2E_API_KEY');
+  const saved = JSON.parse(await readFile(join(userData, 'agent-settings.json'), 'utf8')) as {
+    agents: Record<string, { keys: string[] }>;
+  };
+  expect(saved.agents.opencode?.keys).toEqual(['SOLLINE_E2E_API_KEY']);
+  await shot(page, 'agents-panel');
+
+  // A interface não consegue guardar sem o main nem pedir o login a um agente sem login.
+  const errors = await page.evaluate(async () => {
+    const api = (
+      globalThis as unknown as { solline: { request(c: string, p: unknown): Promise<unknown> } }
+    ).solline;
+    const fail = (p: Promise<unknown>) =>
+      p.then(
+        () => 'aceite',
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+    return {
+      save: await fail(api.request('agents.saveKeys', { agent: 'opencode', keys: [] })),
+      start: await fail(api.request('agents.loginStart', { agent: 'codex' })),
+      login: await fail(api.request('agents.login', { agent: 'claude' })),
+    };
+  });
+  expect(errors.save).toContain('Comando desconhecido');
+  expect(errors.start).toContain('Comando desconhecido');
+  expect(errors.login).toContain('login');
   await page.keyboard.press('Escape');
 });
 
