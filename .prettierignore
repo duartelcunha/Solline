@@ -4,3 +4,4 @@ out/
 dist/
 release/
 packages/ui/src/fonts/
+packages/engine/src/adapters/codex/protocol/

@@ -5,7 +5,15 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/out/**', '**/dist/**', '**/release/**', 'archive/**'],
+    ignores: [
+      '**/node_modules/**',
+      '**/out/**',
+      '**/dist/**',
+      '**/release/**',
+      'archive/**',
+      // Tipos gerados pelo codex app-server (scripts/codex-gen.mjs).
+      'packages/engine/src/adapters/codex/protocol/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strict,

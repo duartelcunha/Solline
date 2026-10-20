@@ -10,10 +10,13 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "record": "node scripts/record-fixtures.mjs"
+    "record": "node scripts/record-fixtures.mjs",
+    "record:codex": "node scripts/record-codex.mjs",
+    "codex:gen": "node scripts/codex-gen.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.304",
+    "@openai/codex": "0.163.0",
     "@solline/protocol": "workspace:*",
     "zod": "4.6.5"
   },

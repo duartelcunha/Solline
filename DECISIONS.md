@@ -143,3 +143,21 @@
   (Vercel, Linear, Docs…) mesmo com `settingSources: []`. É igual ao CLI; no perfil DeepSeek não
   acontece porque a pasta de config é outra e não há login do claude.ai.
 
+## 2026-10-20: M1f, Codex 0.163.0 (entrada)
+
+- **Revisto em quarentena** (`npm pack` de `@openai/codex@0.163.0` e do pacote win32): o lançador
+  `bin/codex.js` só procura o binário e define `CODEX_MANAGED_*`; sem scripts de instalação;
+  Apache-2.0. O `codex.exe` vem **assinado pela OpenAI OpCo, LLC** (Authenticode válido) e o pacote
+  tem proveniência SLSA do workflow `rust-release.yml` do `openai/codex` na tag `rust-v0.163.0`.
+  sha256 do `codex.exe`: `2692C8C7BB2CF8B0AEFE638741FC90236F4B824C59578CE84994F9DE58200993`.
+- **Não vai dentro do instalador** (desvio ao plano): o pacote do Windows tem 445 MB (o `codex.exe`
+  sozinho 326 MB). Fica como dependência do motor, para o desenvolvimento e os testes; a app
+  instalada usa o Codex que o Duarte instalar (com verificação de versão). Por ser assinado pela
+  OpenAI, o Smart App Control deixa-o correr.
+- **Tipos do `app-server` gerados** (`pnpm --filter @solline/engine codex:gen`) e guardados em
+  `adapters/codex/protocol` (747 ficheiros, fora do ESLint e do Prettier), com `GENERATED_FROM`
+  para um teste de deriva. O app-server é experimental: em cada subida, regenerar e correr os
+  testes reais do Codex.
+- **Login:** a app-server usa o login que o Codex já tem (`~/.codex`); a Solline nunca lê as
+  credenciais. ChatGPT login é aceite pela OpenAI para clientes locais e pessoais.
+
