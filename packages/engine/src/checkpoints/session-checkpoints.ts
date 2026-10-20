@@ -1,4 +1,15 @@
-import { lstat, mkdir, readdir, realpath, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  rm,
+  rmdir,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type {
@@ -22,6 +33,12 @@ import {
 /** Acima disto a pasta não leva checkpoints (copiá-la toda a cada turno não compensa). */
 const MAX_FILES = 20_000;
 
+/**
+ * Ficheiros maiores do que isto não entram nos checkpoints (um dataset ou um build a ser
+ * copiado a cada turno enche o disco). Ficam de fora do rever e do rebobinar.
+ */
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+
 const EMPTY_STATS: DiffStats = { files: 0, additions: 0, deletions: 0 };
 /** Modos que não se restauram nem se mostram: submódulos e links simbólicos. */
 const SKIPPED_MODES = new Set(['160000', '120000']);
@@ -32,16 +49,26 @@ interface Entry {
   before: string;
   /** Árvore no fim do turno; null enquanto corre. */
   after: string | null;
+  /** A base de revisão quando o turno começou (rebobinar volta a ela no que aceitaste depois). */
+  baseline: string;
 }
 
 interface UndoEntry {
   label: string;
   baseline: string;
-  /** Árvore do disco antes da ação; os paths voltam a ela. */
-  worktree: string;
-  paths: string[];
   acceptedAt: Map<string, number>;
   rewoundTo: string | null;
+  /**
+   * O que a ação escreveu no disco (aceitar não escreve). Desfazer só volta os paths a before
+   * se o disco ainda estiver como after: nunca apaga o que mudou depois.
+   */
+  write?: { before: string; after: string; paths: string[] };
+}
+
+interface RestoreStep {
+  rel: string;
+  target: string;
+  item: TreeItem | undefined;
 }
 
 interface TreeItem {
@@ -68,6 +95,8 @@ export class SessionCheckpoints {
   #rewoundTo: string | null = null;
   #unavailable: string | undefined;
   #lock: Promise<unknown> = Promise.resolve();
+  /** Ficheiros grandes demais, que ficam fora dos checkpoints (ver #scanLarge). */
+  #large = new Set<string>();
   readonly ready: Promise<void>;
 
   constructor(options: {
@@ -90,6 +119,7 @@ export class SessionCheckpoints {
         if (files > MAX_FILES) {
           throw new Error(`a pasta tem mais de ${MAX_FILES.toLocaleString('pt-PT')} ficheiros`);
         }
+        await this.#scanLarge();
         this.#base = await this.#snapshot();
         this.#baseline = this.#base;
       } catch (error) {
@@ -141,6 +171,7 @@ export class SessionCheckpoints {
         this.#entries.push({
           before,
           after: null,
+          baseline: this.#baseline,
           checkpoint: {
             turnId,
             index: this.#entries.length + 1,
@@ -160,12 +191,13 @@ export class SessionCheckpoints {
     return { staged, done };
   }
 
-  /** Fecha o turno que corre: guarda o disco no fim e conta o que mudou. */
-  endTurn(): Promise<void> {
+  /** Fecha um turno: guarda o disco no fim e conta o que mudou. */
+  endTurn(turnId: string): Promise<void> {
     return this.#serial(async () => {
-      const entry = this.#entries.at(-1);
+      const entry = this.#entries.find((e) => e.checkpoint.turnId === turnId);
       if (!this.available || !entry || entry.after) return;
       try {
+        await this.#scanLarge();
         entry.after = await this.#snapshot();
         entry.checkpoint = {
           ...entry.checkpoint,
@@ -200,8 +232,7 @@ export class SessionCheckpoints {
       this.#require();
       if (hunkId && !filePath) throw new Error('Falta o ficheiro do hunk');
       const now = await this.#snapshot();
-      const files = await this.#diff(this.#baseline, now);
-      const targets = filePath ? files.filter((f) => f.diff.path === filePath) : files;
+      const targets = await this.#diff(this.#baseline, now, filePath ? [filePath] : undefined);
       if (filePath && targets.length === 0) {
         throw new Error('Este ficheiro já não tem nada por rever');
       }
@@ -211,20 +242,25 @@ export class SessionCheckpoints {
       if (targets.length === 0) return this.timeline();
 
       const paths = targets.map((f) => f.diff.path);
-      this.#pushUndo(labelFor(action, filePath, hunkId), now, paths);
-      try {
-        if (action === 'accept') await this.#accept(now, paths, file, hunk, Boolean(filePath));
-        else if (file && hunk) {
-          await this.#git.run(['apply', '-R', '--whitespace=nowarn', '-'], {
-            input: hunkPatch(file, hunk),
-          });
-        } else await this.#restore(this.#baseline, paths);
-      } catch (error) {
-        this.#undo.pop();
-        if (!(error instanceof GitError)) throw error;
-        throw new Error('Não deu: o ficheiro mudou entretanto. Lê o diff de novo.', {
-          cause: error,
-        });
+      const label = labelFor(action, filePath, hunkId);
+      if (action === 'accept') {
+        const undo = this.#undoEntry(label);
+        try {
+          await this.#accept(now, paths, file, hunk, Boolean(filePath));
+        } catch (error) {
+          throw friendly(error);
+        }
+        this.#pushUndo(undo);
+      } else if (file && hunk) {
+        // O git apply é tudo ou nada: se o ficheiro mudou, recusa sem escrever.
+        await this.#writeAction(label, now, paths, () =>
+          this.#git
+            .run(['apply', '-R', '--whitespace=nowarn', '-'], { input: hunkPatch(file, hunk) })
+            .then(() => undefined),
+        );
+      } else {
+        const plan = await this.#plan(this.#baseline, paths);
+        await this.#writeAction(label, now, paths, () => this.#execute(plan));
       }
       this.#rewoundTo = null;
       this.#pending = await this.#stats(this.#baseline, await this.#snapshot());
@@ -260,9 +296,23 @@ export class SessionCheckpoints {
   undo(): Promise<Timeline> {
     return this.#serial(async () => {
       this.#require();
-      const entry = this.#undo.pop();
+      const entry = this.#undo.at(-1);
       if (!entry) throw new Error('Não há nada para desfazer');
-      await this.#restore(entry.worktree, entry.paths);
+      if (entry.write) {
+        const { before, after, paths } = entry.write;
+        const now = await this.#snapshot();
+        const wanted = new Set(paths);
+        const changed = (await this.#diffEntries(after, now)).some((e) => wanted.has(e.path));
+        if (changed) {
+          // Desfazer agora apagava o que mudou depois: o passo sai e o disco fica.
+          this.#undo.pop();
+          throw new Error(
+            'Já não dá para desfazer: estes ficheiros mudaram depois disso. Nada foi alterado.',
+          );
+        }
+        await this.#execute(await this.#plan(before, paths));
+      }
+      this.#undo.pop();
       this.#baseline = entry.baseline;
       this.#acceptedAt = entry.acceptedAt;
       this.#rewoundTo = entry.rewoundTo;
@@ -280,22 +330,23 @@ export class SessionCheckpoints {
       this.#require();
       const target = this.#entry(turnId);
       const now = await this.#snapshot();
-      const changed = (await this.#diffEntries(target.before, now)).map((e) => e.path);
-      this.#pushUndo(
-        `Rebobinar ficheiros para antes do turno ${target.checkpoint.index}`,
-        now,
-        changed,
-      );
-      if (changed.length > 0) await this.#restore(target.before, changed);
-      // O que aceitaste depois de este turno começar desapareceu do disco: sai também da base.
-      const since = target.checkpoint.index - 1;
-      const accepted = changed.filter((p) => (this.#acceptedAt.get(p) ?? -1) >= since);
+      const changed = (await this.#diffEntries(target.before, now))
+        .filter((e) => !e.skipped)
+        .map((e) => e.path);
+      const index = target.checkpoint.index;
+      const label = `Rebobinar ficheiros para antes do turno ${index}`;
+      const plan = await this.#plan(target.before, changed);
+      // O que aceitaste depois de este turno começar desapareceu do disco: na base volta ao que
+      // estava quando o turno começou (aceites de antes ficam).
+      const accepted = changed.filter((p) => (this.#acceptedAt.get(p) ?? -1) >= index);
+      const undo = await this.#writeAction(label, now, changed, () => this.#execute(plan));
       if (accepted.length > 0) {
-        this.#baseline = await this.#withReviewIndex(this.#baseline, (index) =>
-          this.#copyEntries(target.before, accepted, index),
+        this.#baseline = await this.#withReviewIndex(this.#baseline, (i) =>
+          this.#copyEntries(target.baseline, accepted, i),
         );
         for (const p of accepted) this.#acceptedAt.delete(p);
       }
+      if (!undo && changed.length === 0) this.#pushUndo(this.#undoEntry(label));
       this.#rewoundTo = turnId;
       this.#pending = await this.#stats(this.#baseline, await this.#snapshot());
     });
@@ -346,17 +397,44 @@ export class SessionCheckpoints {
     }
   }
 
-  #pushUndo(label: string, worktree: string, paths: string[]): void {
-    this.#undo.push({
+  #undoEntry(label: string): UndoEntry {
+    return {
       label,
       baseline: this.#baseline,
-      worktree,
-      paths,
       acceptedAt: new Map(this.#acceptedAt),
       rewoundTo: this.#rewoundTo,
-    });
+    };
+  }
+
+  #pushUndo(entry: UndoEntry): void {
+    this.#undo.push(entry);
     // Chega para desfazer uma sessão de revisão; os mais antigos saem.
     if (this.#undo.length > 50) this.#undo.shift();
+  }
+
+  /**
+   * Corre uma ação que escreve no disco e guarda o passo de desfazer com o disco antes e
+   * depois. Se falhar a meio (um ficheiro aberto noutro programa), o passo fica na mesma
+   * para desfazer o que já foi escrito. Devolve se houve passo.
+   */
+  async #writeAction(
+    label: string,
+    before: string,
+    paths: string[],
+    write: () => Promise<void>,
+  ): Promise<boolean> {
+    const undo = this.#undoEntry(label);
+    let failure: unknown;
+    try {
+      await write();
+    } catch (error) {
+      failure = error;
+    }
+    const after = await this.#snapshot();
+    const wrote = after !== before;
+    if (wrote) this.#pushUndo({ ...undo, write: { before, after, paths } });
+    if (failure !== undefined) throw friendly(failure);
+    return wrote;
   }
 
   /** A árvore do disco agora. O índice da sessão faz isto ser rápido a partir da segunda vez. */
@@ -368,9 +446,57 @@ export class SessionCheckpoints {
   /** Passa o disco para o índice da sessão (a parte que lê a pasta). */
   async #stage(): Promise<void> {
     // --ignore-errors: um ficheiro trancado (comum no Windows) não estraga o checkpoint todo.
-    await this.#git.run(['add', '--all', '--ignore-errors', '--', '.'], {
+    await this.#git.run(
+      [
+        '-c',
+        `core.excludesFile=${this.#excludeFile}`,
+        'add',
+        '--all',
+        '--ignore-errors',
+        '--',
+        '.',
+      ],
+      { index: this.#index, okCodes: [0, 1] },
+    );
+  }
+
+  get #excludeFile(): string {
+    return path.join(this.#git.gitDir, `exclude-${this.#sessionId}`);
+  }
+
+  /**
+   * Procura ficheiros novos ou mudados acima de MAX_FILE_BYTES e deixa-os fora dos
+   * checkpoints daqui para a frente (um exclude desta sessão; os que já lá estavam saem do
+   * índice). Corre fora do caminho do envio: no arranque e no fim de cada turno.
+   */
+  async #scanLarge(): Promise<void> {
+    const out = await this.#git.run(
+      [
+        '-c',
+        `core.excludesFile=${this.#excludeFile}`,
+        'ls-files',
+        '-z',
+        '--others',
+        '--modified',
+        '--exclude-standard',
+      ],
+      { index: this.#index },
+    );
+    const root = this.#git.workTree;
+    const found: string[] = [];
+    for (const rel of new Set(out.stdout.toString('utf8').split('\0'))) {
+      if (!rel || this.#large.has(rel)) continue;
+      const info = await stat(path.join(root, rel)).catch(() => null);
+      if (info?.isFile() && info.size > MAX_FILE_BYTES) found.push(rel);
+    }
+    if (found.length === 0) {
+      if (this.#large.size === 0) await writeFile(this.#excludeFile, '');
+      return;
+    }
+    for (const rel of found) this.#large.add(rel);
+    await writeFile(this.#excludeFile, [...this.#large].map(excludePattern).join('\n') + '\n');
+    await this.#git.run(['rm', '--cached', '--quiet', '--ignore-unmatch', '--', ...found], {
       index: this.#index,
-      okCodes: [0, 1],
     });
   }
 
@@ -406,8 +532,12 @@ export class SessionCheckpoints {
     });
   }
 
-  async #diff(from: string, to: string): Promise<RawFile[]> {
-    const entries = await this.#diffEntries(from, to);
+  /** O diff entre duas árvores, só com os ficheiros que se mostram (só paths, se vierem). */
+  async #diff(from: string, to: string, paths?: readonly string[]): Promise<RawFile[]> {
+    const wanted = paths ? new Set(paths) : null;
+    const entries = (await this.#diffEntries(from, to)).filter(
+      (e) => !e.skipped && (!wanted || wanted.has(e.path)),
+    );
     if (entries.length === 0) return [];
     const patch = await this.#git.run(
       [
@@ -421,10 +551,11 @@ export class SessionCheckpoints {
         '--dst-prefix=b/',
         from,
         to,
+        ...(paths ? ['--', ...paths] : []),
       ],
       { bare: true },
     );
-    return parsePatch(patch.stdout, entries).filter((_, i) => !entries[i]?.skipped);
+    return parsePatch(patch.stdout, entries);
   }
 
   /** Carrega uma árvore num índice à parte, deixa mexer e devolve a árvore nova. */
@@ -445,35 +576,49 @@ export class SessionCheckpoints {
     await this.#git.run(['update-index', '-z', '--index-info'], { index, input: lines.join('') });
   }
 
+  /** As entradas destes paths numa árvore (uma chamada, sem paths na linha de comandos). */
   async #lsTree(tree: string, paths: readonly string[]): Promise<Map<string, TreeItem>> {
     const items = new Map<string, TreeItem>();
-    for (let i = 0; i < paths.length; i += 200) {
-      const chunk = paths.slice(i, i + 200);
-      const out = await this.#git.run(['ls-tree', '-z', '-r', tree, '--', ...chunk], {
-        bare: true,
-      });
-      for (const record of out.stdout.toString('utf8').split('\0')) {
-        const tab = record.indexOf('\t');
-        if (tab === -1) continue;
-        const [mode, , sha] = record.slice(0, tab).split(' ');
-        if (mode && sha) items.set(record.slice(tab + 1), { mode, sha });
-      }
+    if (paths.length === 0) return items;
+    const wanted = new Set(paths);
+    const out = await this.#git.run(['ls-tree', '-z', '-r', tree], { bare: true });
+    for (const record of out.stdout.toString('utf8').split('\0')) {
+      const tab = record.indexOf('\t');
+      if (tab === -1) continue;
+      const file = record.slice(tab + 1);
+      if (!wanted.has(file)) continue;
+      const [mode, , sha] = record.slice(0, tab).split(' ');
+      if (mode && sha) items.set(file, { mode, sha });
     }
     return items;
   }
 
-  /** Escreve no disco estes paths como estão na árvore; os que lá não existem são apagados. */
-  async #restore(tree: string, paths: readonly string[]): Promise<void> {
+  /**
+   * Prepara pôr estes paths como estão na árvore. Verifica todos os destinos antes de escrever
+   * o primeiro, para uma recusa (link simbólico, pasta no lugar de um ficheiro) não deixar o
+   * disco a meio.
+   */
+  async #plan(tree: string, paths: readonly string[]): Promise<RestoreStep[]> {
     const root = await realpath(this.#git.workTree);
     const items = await this.#lsTree(tree, paths);
+    const steps: RestoreStep[] = [];
     for (const rel of paths) {
       const item = items.get(rel);
       if (item && SKIPPED_MODES.has(item.mode)) continue;
-      const target = await safeTarget(root, rel);
+      steps.push({ rel, target: await safeTarget(root, rel), item });
+    }
+    return steps;
+  }
+
+  /** Escreve o plano: os que existem na árvore ficam iguais, os outros são apagados. */
+  async #execute(steps: readonly RestoreStep[]): Promise<void> {
+    const root = await realpath(this.#git.workTree);
+    for (const { target, item } of steps) {
       if (item) {
         const blob = await this.#git.run(['cat-file', 'blob', item.sha], { bare: true });
         await mkdir(path.dirname(target), { recursive: true });
         await writeFile(target, blob.stdout);
+        if (item.mode === '100755' && process.platform !== 'win32') await chmod(target, 0o755);
       } else {
         await unlink(target).catch((error: NodeJS.ErrnoException) => {
           if (error.code !== 'ENOENT') throw error;
@@ -502,7 +647,8 @@ function parseRaw(out: Buffer): { path: string; status: FileEntry['status']; ski
     entries.push({
       path: file,
       status: code.startsWith('A') ? 'added' : code.startsWith('D') ? 'deleted' : 'modified',
-      skipped: SKIPPED_MODES.has(srcMode) || SKIPPED_MODES.has(dstMode),
+      // Mudança de tipo (ficheiro para link, por exemplo) também fica de fora.
+      skipped: code.startsWith('T') || SKIPPED_MODES.has(srcMode) || SKIPPED_MODES.has(dstMode),
     });
   }
   return entries;
@@ -568,6 +714,19 @@ function titleOf(text: string): string {
 function labelFor(action: ReviewAction, filePath?: string, hunkId?: string): string {
   const what = hunkId ? 'o hunk' : filePath ? path.basename(filePath) : 'tudo';
   return action === 'accept' ? `Aceitar ${what}` : `Rejeitar ${what}`;
+}
+
+/** Um path literal num ficheiro de exclusão do git, ancorado à raiz. */
+function excludePattern(rel: string): string {
+  return `/${rel.replace(/[\\*?[\]]/g, '\\$&').replace(/ $/, '\\ ')}`;
+}
+
+/** Os erros do git ao aplicar viram uma frase; os nossos (caminho recusado) passam como estão. */
+function friendly(error: unknown): Error {
+  if (error instanceof GitError) {
+    return new Error('Não deu: o ficheiro mudou entretanto. Lê o diff de novo.', { cause: error });
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function reasonFor(error: unknown): string {

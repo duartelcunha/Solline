@@ -64,8 +64,10 @@ interface Memory {
   checkpoints: SessionCheckpoints | undefined;
   /** Ponto de rebobinar do agente antes de cada turno do utilizador (null: do zero). */
   points: Map<string, string | null>;
-  /** Há um checkpoint aberto à espera do fim do turno. */
-  open: boolean;
+  /** O turno com checkpoint aberto, à espera de o agente parar. */
+  openTurn: string | null;
+  /** A enviar ou a rebobinar: um segundo pedido igual espera que este acabe. */
+  busy: boolean;
   /** Resumo que segue com a próxima mensagem, depois de rebobinar numa sessão nova. */
   context: string | undefined;
 }
@@ -152,7 +154,8 @@ export class SessionManager {
       turns: [],
       checkpoints: undefined,
       points: new Map(),
-      open: false,
+      openTurn: null,
+      busy: false,
       context: undefined,
     };
     this.#memory.set(info.id, memory);
@@ -199,30 +202,36 @@ export class SessionManager {
   async send(sessionId: string, text: string): Promise<string> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
-    const turnId = crypto.randomUUID();
-    const point = entry.adapter.rewindPoint?.();
-    const checkpoints = memory.checkpoints;
-    if (checkpoints) {
-      const { staged, done } = checkpoints.beginTurn(turnId, text);
-      await staged;
-      memory.open = true;
-      void done.then(() => this.#emitTimeline(sessionId));
-    }
-    const context = memory.context;
-    let sent: string;
+    this.#requireIdle(entry, memory, 'mandar outra mensagem');
+    memory.busy = true;
     try {
-      sent = await entry.adapter.send(text, { turnId, ...(context ? { context } : {}) });
-    } catch (error) {
+      const turnId = crypto.randomUUID();
+      const point = entry.adapter.rewindPoint?.();
+      const checkpoints = memory.checkpoints;
       if (checkpoints) {
-        memory.open = false;
-        await checkpoints.truncate(turnId);
-        this.#emitTimeline(sessionId);
+        const { staged, done } = checkpoints.beginTurn(turnId, text);
+        await staged;
+        memory.openTurn = turnId;
+        void done.then(() => this.#emitTimeline(sessionId));
       }
-      throw error;
+      const context = memory.context;
+      let sent: string;
+      try {
+        sent = await entry.adapter.send(text, { turnId, ...(context ? { context } : {}) });
+      } catch (error) {
+        if (checkpoints) {
+          memory.openTurn = null;
+          await checkpoints.truncate(turnId);
+          this.#emitTimeline(sessionId);
+        }
+        throw error;
+      }
+      memory.context = undefined;
+      if (point !== undefined) memory.points.set(sent, point);
+      return sent;
+    } finally {
+      memory.busy = false;
     }
-    memory.context = undefined;
-    if (point !== undefined) memory.points.set(sent, point);
-    return sent;
   }
 
   /** A linha do tempo, com o "por rever" contado de novo (o disco pode ter mudado por fora). */
@@ -244,12 +253,17 @@ export class SessionManager {
     path?: string,
     hunkId?: string,
   ): Promise<Timeline> {
+    // Aceitar só mexe na base; rejeitar escreve no disco e não pode correr com o agente.
+    if (action === 'reject') {
+      this.#requireIdle(this.#get(sessionId), this.#memoryOf(sessionId), 'rejeitar');
+    }
     const timeline = await this.#checkpoints(sessionId).apply(action, path, hunkId);
     this.#emitTimeline(sessionId, timeline);
     return timeline;
   }
 
   async undo(sessionId: string): Promise<Timeline> {
+    this.#requireIdle(this.#get(sessionId), this.#memoryOf(sessionId), 'desfazer');
     const timeline = await this.#checkpoints(sessionId).undo();
     this.#emitTimeline(sessionId, timeline);
     return timeline;
@@ -274,9 +288,22 @@ export class SessionManager {
   ): Promise<{ timeline: Timeline; text: string | null; conversation: ConversationRewind | null }> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
-    if (entry.info.state !== 'idle' && entry.info.state !== 'error') {
-      throw new Error('Espera que o agente acabe (ou interrompe-o) antes de rebobinar');
+    this.#requireIdle(entry, memory, 'rebobinar');
+    memory.busy = true;
+    try {
+      return await this.#rewind(entry, memory, turnId, options);
+    } finally {
+      memory.busy = false;
     }
+  }
+
+  async #rewind(
+    entry: Entry,
+    memory: Memory,
+    turnId: string,
+    options: { files: boolean; conversation: boolean },
+  ): Promise<{ timeline: Timeline; text: string | null; conversation: ConversationRewind | null }> {
+    const sessionId = entry.info.id;
     const index = memory.turns.findIndex((t) => t.id === turnId && t.role === 'user');
     if (index === -1) throw new Error('Este turno já não está na conversa');
     const userTurn = memory.turns[index];
@@ -292,16 +319,23 @@ export class SessionManager {
       const kept = memory.turns.slice(0, index);
       const dropped = memory.turns.slice(index).map((t) => t.id);
       await entry.adapter.close();
+      const previous = entry.info.agentSessionId;
       entry.info.agentSessionId = null;
-      await this.#start(
-        entry.info,
-        entry.definition,
-        entry.trusted,
-        entry.mcp,
-        undefined,
-        undefined,
-        kind === 'agent' && point ? point : undefined,
-      );
+      try {
+        await this.#start(
+          entry.info,
+          entry.definition,
+          entry.trusted,
+          entry.mcp,
+          undefined,
+          undefined,
+          kind === 'agent' && point ? point : undefined,
+        );
+      } catch (error) {
+        // A sessão antiga continua retomável pelo id que tinha.
+        entry.info.agentSessionId = previous;
+        throw error;
+      }
       memory.context = kind === 'summary' ? summaryOf(kept) : undefined;
       // Pelo sink, para os turnos guardados aqui e a interface cortarem no mesmo sítio.
       this.#deltaFor(entry.info, memory)({ type: 'rewind', turnId });
@@ -403,9 +437,18 @@ export class SessionManager {
   /** Fim de turno (o agente voltou a parar): fecha o checkpoint aberto. */
   #turnSettled(sessionId: string): void {
     const memory = this.#memory.get(sessionId);
-    if (!memory?.checkpoints || !memory.open) return;
-    memory.open = false;
-    void memory.checkpoints.endTurn().then(() => this.#emitTimeline(sessionId));
+    const turnId = memory?.openTurn;
+    if (!memory?.checkpoints || !turnId) return;
+    memory.openTurn = null;
+    void memory.checkpoints.endTurn(turnId).then(() => this.#emitTimeline(sessionId));
+  }
+
+  /** Mexer no disco ou na conversa só com o agente parado e nada a meio. */
+  #requireIdle(entry: Entry, memory: Memory, what: string): void {
+    const state = entry.info.state;
+    if (memory.busy || (state !== 'idle' && state !== 'error')) {
+      throw new Error(`Espera que o agente acabe (ou interrompe-o) antes de ${what}`);
+    }
   }
 
   async #mcpFor(definition: AgentDefinition, ids: readonly string[]): Promise<McpServerLaunch[]> {

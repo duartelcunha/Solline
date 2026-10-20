@@ -51,39 +51,73 @@ export function parseNumstat(
   return map;
 }
 
-/** git diff --name-status -z --no-renames: "A\0path\0M\0path\0…". */
-export function parseNameStatus(out: Buffer): { path: string; status: FileStatus }[] {
-  const parts = out.toString('utf8').split('\0');
-  const entries: { path: string; status: FileStatus }[] = [];
-  for (let i = 0; i + 1 < parts.length; i += 2) {
-    const code = parts[i];
-    const file = parts[i + 1];
-    if (!code || !file) continue;
-    const status: FileStatus = code.startsWith('A')
-      ? 'added'
-      : code.startsWith('D')
-        ? 'deleted'
-        : 'modified';
-    entries.push({ path: file, status });
-  }
-  return entries;
-}
-
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 /**
- * Parte o patch inteiro pelos "diff --git". As secções vêm pela mesma ordem que a lista de
- * ficheiros (o git ordena as duas da mesma forma), por isso casam uma a uma.
+ * Parte o patch inteiro pelos "diff --git" e casa cada secção com o ficheiro pelo caminho do
+ * cabeçalho (não pela ordem: uma mudança de tipo, ficheiro para link, dá duas secções). Um
+ * ficheiro com mais de uma secção fica sem hunks; quem chama já o deixa de fora.
  */
 export function parsePatch(patch: Buffer, files: readonly FileEntry[]): RawFile[] {
   const lines = patch.toString('latin1').split('\n');
   if (lines.at(-1) === '') lines.pop();
-  const sections: string[][] = [];
+  const byPath = new Map<string, string[][]>();
+  let current: string[] | undefined;
   for (const line of lines) {
-    if (line.startsWith('diff --git ')) sections.push([line]);
-    else sections.at(-1)?.push(line);
+    if (line.startsWith('diff --git ')) {
+      current = [line];
+      const file = headerPath(line);
+      if (file !== null) byPath.set(file, [...(byPath.get(file) ?? []), current]);
+    } else current?.push(line);
   }
-  return files.map((entry, index) => parseSection(entry, sections[index] ?? []));
+  return files.map((entry) => {
+    const sections = byPath.get(entry.path) ?? [];
+    return parseSection(entry, sections.length === 1 ? (sections[0] ?? []) : []);
+  });
+}
+
+/** O caminho de "diff --git a/P b/P" (sem renomeações, P é igual dos dois lados). */
+export function headerPath(line: string): string | null {
+  const rest = line.slice('diff --git '.length);
+  if (rest.startsWith('"')) {
+    const quoted = unquote(rest);
+    return quoted?.startsWith('a/') ? quoted.slice(2) : null;
+  }
+  const length = (rest.length - 5) / 2;
+  if (!Number.isInteger(length) || !rest.startsWith('a/')) return null;
+  return utf8(rest.slice(2, 2 + length));
+}
+
+/** Uma string entre aspas à maneira do C, como o git escreve caminhos com caracteres especiais. */
+function unquote(text: string): string | null {
+  const bytes: number[] = [];
+  const simple: Record<string, number> = {
+    n: 10,
+    t: 9,
+    r: 13,
+    '"': 34,
+    '\\': 92,
+    a: 7,
+    b: 8,
+    f: 12,
+    v: 11,
+  };
+  for (let i = 1; i < text.length; i++) {
+    const ch = text[i] ?? '';
+    if (ch === '"') return Buffer.from(bytes).toString('utf8');
+    if (ch !== '\\') {
+      bytes.push(ch.charCodeAt(0) & 0xff);
+      continue;
+    }
+    const next = text[++i] ?? '';
+    const octal = /^[0-7]{3}$/.exec(text.slice(i, i + 3));
+    if (octal) {
+      bytes.push(parseInt(octal[0], 8));
+      i += 2;
+    } else if (next in simple) bytes.push(simple[next] ?? 0);
+    else return null;
+  }
+  return null;
 }
 
 function parseSection(entry: FileEntry, section: string[]): RawFile {

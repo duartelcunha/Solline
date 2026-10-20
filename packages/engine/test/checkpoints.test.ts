@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CheckpointStore } from '../src/checkpoints/store.ts';
 import type { SessionCheckpoints } from '../src/checkpoints/session-checkpoints.ts';
+import { headerPath } from '../src/checkpoints/unified-diff.ts';
 
 let root: string;
 let project: string;
@@ -24,6 +25,13 @@ const write = (rel: string, text: string) =>
     writeFile(path.join(project, rel), text),
   );
 const read = (rel: string) => readFile(path.join(project, rel), 'utf8');
+
+/** O último turno aberto (endTurn fecha-o pelo id). */
+let last = '';
+async function begin(cp: SessionCheckpoints, turnId: string, text: string): Promise<void> {
+  last = turnId;
+  await cp.beginTurn(turnId, text).done;
+}
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'solline-cp-'));
@@ -44,10 +52,10 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
     execFileSync('git', ['init', '--quiet'], { cwd: project });
     await write('a.txt', 'um\ndois\ntrês\n');
     const cp = await open();
-    await cp.beginTurn('t1', 'Muda o a.txt\nmais texto').done;
+    await begin(cp, 't1', 'Muda o a.txt\nmais texto');
     await write('a.txt', 'um\nDOIS\ntrês\n');
     await write('novo/b.txt', 'b\n');
-    await cp.endTurn();
+    await cp.endTurn(last);
 
     const timeline = cp.timeline();
     expect(timeline.available).toBe(true);
@@ -88,12 +96,12 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
     const lines = Array.from({ length: 30 }, (_, i) => `linha ${i + 1}`);
     await write('f.txt', `${lines.join('\n')}\n`);
     const cp = await open();
-    await cp.beginTurn('t1', 'duas mudanças').done;
+    await begin(cp, 't1', 'duas mudanças');
     const changed = [...lines];
     changed[1] = 'linha 2 mudada';
     changed[27] = 'linha 28 mudada';
     await write('f.txt', `${changed.join('\n')}\n`);
-    await cp.endTurn();
+    await cp.endTurn(last);
 
     const [file] = await cp.diff({ kind: 'review' });
     expect(file!.hunks).toHaveLength(2);
@@ -111,10 +119,10 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
   it('aceitar tira da revisão sem mexer no disco', async () => {
     await write('a.txt', 'a\n');
     const cp = await open();
-    await cp.beginTurn('t1', 'x').done;
+    await begin(cp, 't1', 'x');
     await write('a.txt', 'A\n');
     await write('b.txt', 'b\n');
-    await cp.endTurn();
+    await cp.endTurn(last);
 
     const [a] = await cp.diff({ kind: 'review' });
     let timeline = await cp.apply('accept', 'a.txt', a!.hunks[0]!.id);
@@ -129,9 +137,9 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
 
   it('rejeitar um ficheiro novo apaga-o, e a pasta vazia também', async () => {
     const cp = await open();
-    await cp.beginTurn('t1', 'x').done;
+    await begin(cp, 't1', 'x');
     await write('src/novo/x.ts', 'export {};\n');
-    await cp.endTurn();
+    await cp.endTurn(last);
     await cp.apply('reject', 'src/novo/x.ts');
     expect(existsSync(path.join(project, 'src/novo/x.ts'))).toBe(false);
     expect(existsSync(path.join(project, 'src'))).toBe(false);
@@ -142,11 +150,11 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
   it('rejeitar tudo e aceitar tudo', async () => {
     await write('a.txt', 'a\n');
     const cp = await open();
-    await cp.beginTurn('t1', 'x').done;
+    await begin(cp, 't1', 'x');
     await write('a.txt', 'A\n');
     await rm(path.join(project, 'a.txt'));
     await write('b.txt', 'b\n');
-    await cp.endTurn();
+    await cp.endTurn(last);
     await cp.apply('reject');
     expect(await read('a.txt')).toBe('a\n');
     expect(existsSync(path.join(project, 'b.txt'))).toBe(false);
@@ -156,13 +164,13 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
   it('rebobina os ficheiros para antes de um turno e volta ao presente com desfazer', async () => {
     await write('a.txt', 'v0\n');
     const cp = await open();
-    await cp.beginTurn('t1', 'um').done;
+    await begin(cp, 't1', 'um');
     await write('a.txt', 'v1\n');
-    await cp.endTurn();
-    await cp.beginTurn('t2', 'dois').done;
+    await cp.endTurn(last);
+    await begin(cp, 't2', 'dois');
     await write('a.txt', 'v2\n');
     await write('c.txt', 'c\n');
-    await cp.endTurn();
+    await cp.endTurn(last);
 
     await cp.rewindFiles('t2');
     expect(await read('a.txt')).toBe('v1\n');
@@ -179,9 +187,9 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
   it('o que aceitaste depois do turno sai da revisão quando rebobinas', async () => {
     await write('a.txt', 'v0\n');
     const cp = await open();
-    await cp.beginTurn('t1', 'um').done;
+    await begin(cp, 't1', 'um');
     await write('a.txt', 'v1\n');
-    await cp.endTurn();
+    await cp.endTurn(last);
     await cp.apply('accept');
     await cp.rewindFiles('t1');
     expect(await read('a.txt')).toBe('v0\n');
@@ -193,10 +201,10 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
     await write('ignorado/x.txt', 'x\n');
     await write('crlf.txt', 'a\r\nb\r\n');
     const cp = await open();
-    await cp.beginTurn('t1', 'x').done;
+    await begin(cp, 't1', 'x');
     await write('ignorado/x.txt', 'mudou\n');
     await write('crlf.txt', 'a\r\nB\r\n');
-    await cp.endTurn();
+    await cp.endTurn(last);
     expect((await cp.diff({ kind: 'turn', turnId: 't1' })).map((f) => f.path)).toEqual([
       'crlf.txt',
     ]);
@@ -207,34 +215,138 @@ describe('checkpoints por turno', { timeout: 30_000 }, () => {
 
   it('truncate tira o turno e os seguintes da linha do tempo', async () => {
     const cp = await open();
-    await cp.beginTurn('t1', 'um').done;
-    await cp.endTurn();
-    await cp.beginTurn('t2', 'dois').done;
-    await cp.endTurn();
+    await begin(cp, 't1', 'um');
+    await cp.endTurn(last);
+    await begin(cp, 't2', 'dois');
+    await cp.endTurn(last);
     await cp.truncate('t2');
     expect(cp.timeline().checkpoints.map((c) => c.turnId)).toEqual(['t1']);
-    await cp.beginTurn('t3', 'três').done;
+    await begin(cp, 't3', 'três');
     expect(cp.timeline().checkpoints.map((c) => c.index)).toEqual([1, 2]);
   });
 
   it('um hunk velho é recusado', async () => {
     await write('a.txt', 'a\n');
     const cp = await open();
-    await cp.beginTurn('t1', 'x').done;
+    await begin(cp, 't1', 'x');
     await write('a.txt', 'b\n');
-    await cp.endTurn();
+    await cp.endTurn(last);
     const [file] = await cp.diff({ kind: 'review' });
     await write('a.txt', 'c\n');
     await expect(cp.apply('reject', 'a.txt', file!.hunks[0]!.id)).rejects.toThrow(/mudou/);
     expect(cp.timeline().undo).toBeNull();
   });
 
+  it('uma mudança de tipo (ficheiro para repositório) não baralha os hunks dos outros', async () => {
+    await write('a.txt', 'a\n');
+    await write('m', 'm\n');
+    await write('z.txt', 'z\n');
+    const cp = await open();
+    await begin(cp, 't1', 'x');
+    await write('a.txt', 'A\n');
+    await rm(path.join(project, 'm'));
+    await write('m/inner.txt', 'i\n');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: path.join(project, 'm') });
+    git('init', '--quiet');
+    git('add', '.');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'x');
+    await write('z.txt', 'Z\n');
+    await cp.endTurn(last);
+    const files = await cp.diff({ kind: 'review' });
+    expect(files.map((f) => f.path)).toEqual(['a.txt', 'z.txt']);
+    expect(files[1]!.hunks[0]!.lines.map((l) => l.text)).toEqual(['z', 'Z']);
+    await cp.apply('reject', 'z.txt', files[1]!.hunks[0]!.id);
+    expect(await read('z.txt')).toBe('z\n');
+    expect(await read('a.txt')).toBe('A\n');
+    // Rebobinar não tropeça no repositório aninhado.
+    await cp.rewindFiles('t1');
+    expect(await read('a.txt')).toBe('a\n');
+  });
+
+  it('desfazer não apaga o que mudou depois', async () => {
+    await write('a.txt', 'a\n');
+    const cp = await open();
+    await begin(cp, 't1', 'x');
+    await write('a.txt', 'b\n');
+    await cp.endTurn(last);
+    await cp.apply('reject', 'a.txt');
+    await write('a.txt', 'editado à mão\n');
+    await expect(cp.undo()).rejects.toThrow(/Já não dá para desfazer/);
+    expect(await read('a.txt')).toBe('editado à mão\n');
+    expect(cp.timeline().undo).toBeNull();
+  });
+
+  it('desfazer um aceitar só mexe na revisão, nunca no disco', async () => {
+    await write('a.txt', 'a\n');
+    const cp = await open();
+    await begin(cp, 't1', 'x');
+    await write('a.txt', 'b\n');
+    await cp.endTurn(last);
+    await cp.apply('accept', 'a.txt');
+    await write('a.txt', 'c\n');
+    const timeline = await cp.undo();
+    expect(await read('a.txt')).toBe('c\n');
+    expect(timeline.pending.files).toBe(1);
+  });
+
+  it('rebobinar não aceita hunks que ficaram por rever', async () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `linha ${i + 1}`);
+    await write(
+      'p.txt',
+      `${lines.join('\n')}
+`,
+    );
+    const cp = await open();
+    await begin(cp, 't1', 'um');
+    const one = [...lines];
+    one[1] = 'H1';
+    one[27] = 'H2';
+    await write(
+      'p.txt',
+      `${one.join('\n')}
+`,
+    );
+    await cp.endTurn(last);
+    const [file] = await cp.diff({ kind: 'review' });
+    await cp.apply('accept', 'p.txt', file!.hunks[0]!.id);
+    await begin(cp, 't2', 'dois');
+    await write(
+      'p.txt',
+      `${one.join('\n')}
+mais
+`,
+    );
+    await cp.endTurn(last);
+    await cp.rewindFiles('t2');
+    const [pending] = await cp.diff({ kind: 'review' });
+    expect(pending!.hunks.flatMap((h) => h.lines.map((l) => l.text))).toContain('H2');
+    expect(pending!.hunks.flatMap((h) => h.lines.map((l) => l.text))).not.toContain('H1');
+  });
+
+  it('ficheiros enormes ficam fora dos checkpoints', async () => {
+    const cp = await open();
+    await begin(cp, 't1', 'x');
+    await writeFile(path.join(project, 'grande.bin'), Buffer.alloc(21 * 1024 * 1024));
+    await write('pequeno.txt', 'p\n');
+    await cp.endTurn(last);
+    expect((await cp.diff({ kind: 'turn', turnId: 't1' })).map((f) => f.path)).toEqual([
+      'pequeno.txt',
+    ]);
+  });
+
+  it('o cabeçalho do patch dá o caminho, também entre aspas', () => {
+    expect(headerPath('diff --git a/src/a b.ts b/src/a b.ts')).toBe('src/a b.ts');
+    expect(headerPath('diff --git "a/tab\\there" "b/tab\\there"')).toBe('tab\there');
+    // Bytes UTF-8 em octal, como o git escreve com core.quotePath.
+    expect(headerPath('diff --git "a/\\303\\251.txt" "b/\\303\\251.txt"')).toBe('é.txt');
+  });
+
   it('sem git, fica indisponível e a conversa segue', async () => {
     const broken = new CheckpointStore({ root: path.join(root, 'd2'), git: 'git-que-nao-existe' });
     const cp = broken.open('s', project, () => 'summary');
     await cp.ready;
-    await cp.beginTurn('t1', 'x').done;
-    await cp.endTurn();
+    await begin(cp, 't1', 'x');
+    await cp.endTurn(last);
     expect(cp.timeline()).toMatchObject({
       available: false,
       reason: 'o git não está instalado nesta máquina',

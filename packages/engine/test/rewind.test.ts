@@ -269,6 +269,10 @@ describe('rever e rebobinar no SessionManager', { timeout: 60_000 }, () => {
     await expect(manager.rewind(id, t1, { files: true, conversation: true })).rejects.toThrow(
       /Espera que o agente acabe/,
     );
+    // Nada que escreva no disco ou mande outra mensagem corre a meio de um turno.
+    await expect(manager.review(id, 'reject')).rejects.toThrow(/antes de rejeitar/);
+    await expect(manager.undo(id)).rejects.toThrow(/antes de desfazer/);
+    await expect(manager.send(id, 'outra')).rejects.toThrow(/antes de mandar outra mensagem/);
   });
 
   it('os comentários seguem como mensagem, com a linha citada', async () => {
