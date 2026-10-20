@@ -1,0 +1,347 @@
+import { useState } from 'react';
+import { Check, ChevronRight, MessageSquarePlus, Undo2, X } from 'lucide-react';
+import type { DiffLine, FileDiff, Hunk, ReviewAction, ReviewComment } from '@solline/protocol';
+import { shouldAnimate } from '@solline/ui/motion';
+
+/**
+ * Um ficheiro do diff, hunk a hunk. Cada linha aceita um comentário (clicar no número ou no
+ * "+" que aparece ao passar); os comentários ficam guardados até seguirem para o agente.
+ */
+
+export type CommentKey = `${string}\u0000${'old' | 'new'}\u0000${number}`;
+
+export function commentKey(c: Pick<ReviewComment, 'path' | 'side' | 'line'>): CommentKey {
+  return `${c.path}\u0000${c.side}\u0000${c.line}`;
+}
+
+interface Props {
+  file: FileDiff;
+  /** Só no "Por rever" há aceitar e rejeitar. */
+  actionable: boolean;
+  comments: ReadonlyMap<CommentKey, ReviewComment>;
+  /** Texto vazio tira o comentário dessa linha. */
+  onComment: (at: { path: string; side: 'old' | 'new'; line: number }, text: string) => void;
+  onAction: (action: ReviewAction, hunk?: Hunk) => Promise<void>;
+}
+
+const STATUS: Record<FileDiff['status'], string | null> = {
+  added: 'Novo',
+  deleted: 'Apagado',
+  modified: null,
+};
+
+export function FileDiffView({ file, actionable, comments, onComment, onAction }: Props) {
+  const [open, setOpen] = useState(true);
+  const [leaving, setLeaving] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ side: 'old' | 'new'; line: number } | null>(null);
+  const slash = file.path.lastIndexOf('/');
+  const dir = slash === -1 ? '' : file.path.slice(0, slash + 1);
+  const name = file.path.slice(slash + 1);
+
+  async function act(action: ReviewAction, hunk: Hunk | undefined, event: React.MouseEvent) {
+    // A saída só anima quando veio do rato; no teclado o hunk sai logo.
+    const key = hunk?.id ?? '*';
+    if (shouldAnimate(event.nativeEvent)) setLeaving(key);
+    try {
+      await onAction(action, hunk);
+    } finally {
+      setLeaving(null);
+    }
+  }
+
+  return (
+    <section
+      className={`overflow-hidden rounded-lg border border-line bg-surface ${leaving === '*' ? 'sl-leave' : ''}`}
+      data-testid="diff-file"
+      data-path={file.path}
+    >
+      <header className="flex items-center gap-2 border-b border-line px-2.5 py-1.5">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={open ? `Fechar ${file.path}` : `Abrir ${file.path}`}
+          className="grid size-6 shrink-0 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
+        >
+          <ChevronRight size={14} className={open ? 'rotate-90' : ''} />
+        </button>
+        <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={file.path}>
+          <span className="text-subtle">{dir}</span>
+          <span className="font-medium text-fg">{name}</span>
+        </span>
+        {STATUS[file.status] ? (
+          <span className="shrink-0 rounded-full bg-surface-sunken px-1.5 text-[10.5px] leading-[18px] font-medium text-muted">
+            {STATUS[file.status]}
+          </span>
+        ) : null}
+        <span className="shrink-0 font-mono text-[11px] tabular-nums">
+          <span className="text-success">+{file.additions}</span>{' '}
+          <span className="text-danger">−{file.deletions}</span>
+        </span>
+        {actionable ? (
+          <span className="flex shrink-0 items-center gap-0.5">
+            <IconAction
+              label={`Aceitar ${file.path}`}
+              onClick={(e) => void act('accept', undefined, e)}
+              testId="accept-file"
+            >
+              <Check size={14} strokeWidth={2.25} />
+            </IconAction>
+            <IconAction
+              label={`Rejeitar ${file.path} (volta ao que estava)`}
+              onClick={(e) => void act('reject', undefined, e)}
+              testId="reject-file"
+            >
+              <Undo2 size={14} />
+            </IconAction>
+          </span>
+        ) : null}
+      </header>
+      {open ? (
+        file.binary || file.truncated ? (
+          <p className="px-3 py-2.5 text-[12px] text-muted">
+            {file.binary
+              ? 'Ficheiro binário: aceita ou rejeita o ficheiro inteiro.'
+              : 'Grande demais para mostrar linha a linha.'}
+          </p>
+        ) : file.hunks.length === 0 ? (
+          <p className="px-3 py-2.5 text-[12px] text-muted">Só mudou o modo do ficheiro.</p>
+        ) : (
+          <div className="divide-y divide-line">
+            {file.hunks.map((hunk) => (
+              <div
+                key={hunk.id}
+                className={leaving === hunk.id ? 'sl-leave' : ''}
+                data-testid="diff-hunk"
+              >
+                <div className="flex items-center gap-2 bg-surface-sunken/60 py-1 pr-1.5 pl-3">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-subtle">
+                    {hunk.header}
+                  </span>
+                  {actionable ? (
+                    <>
+                      <SmallAction
+                        onClick={(e) => void act('accept', hunk, e)}
+                        testId="accept-hunk"
+                        tone="accept"
+                      >
+                        <Check size={12} strokeWidth={2.5} /> Aceitar
+                      </SmallAction>
+                      <SmallAction
+                        onClick={(e) => void act('reject', hunk, e)}
+                        testId="reject-hunk"
+                        tone="reject"
+                      >
+                        <X size={12} strokeWidth={2.5} /> Rejeitar
+                      </SmallAction>
+                    </>
+                  ) : null}
+                </div>
+                <div className="font-mono text-[12px] leading-[1.6] select-text">
+                  {hunk.lines.map((line, i) => {
+                    const side: 'old' | 'new' = line.kind === 'del' ? 'old' : 'new';
+                    const no = side === 'old' ? line.oldNo : line.newNo;
+                    const comment =
+                      no === null
+                        ? undefined
+                        : comments.get(commentKey({ path: file.path, side, line: no }));
+                    const isEditing =
+                      editing && no !== null && editing.side === side && editing.line === no;
+                    return (
+                      <div key={i}>
+                        <Line
+                          line={line}
+                          onComment={no === null ? undefined : () => setEditing({ side, line: no })}
+                        />
+                        {isEditing ? (
+                          <CommentEditor
+                            initial={comment?.text ?? ''}
+                            onCancel={() => setEditing(null)}
+                            onSave={(text) => {
+                              onComment({ path: file.path, side, line: no }, text);
+                              setEditing(null);
+                            }}
+                          />
+                        ) : comment ? (
+                          <CommentChip
+                            comment={comment}
+                            onEdit={() => setEditing({ side, line: no ?? 0 })}
+                            onRemove={() => onComment({ path: file.path, side, line: no ?? 0 }, '')}
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : null}
+    </section>
+  );
+}
+
+function Line({ line, onComment }: { line: DiffLine; onComment: (() => void) | undefined }) {
+  const tone = line.kind === 'add' ? 'diff-add' : line.kind === 'del' ? 'diff-del' : '';
+  const marker = line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' ';
+  return (
+    <div
+      className={`group grid grid-cols-[2.75rem_2.75rem_1.25rem_1fr] ${tone}`}
+      data-kind={line.kind}
+    >
+      <span className="pr-1.5 text-right text-subtle/80 tabular-nums select-none">
+        {line.oldNo ?? ''}
+      </span>
+      <span className="pr-1.5 text-right text-subtle/80 tabular-nums select-none">
+        {line.newNo ?? ''}
+      </span>
+      <span className="relative text-center text-subtle select-none">
+        <span className="group-hover:opacity-0">{marker}</span>
+        {onComment ? (
+          <button
+            type="button"
+            onClick={onComment}
+            aria-label={`Comentar a linha ${line.newNo ?? line.oldNo}`}
+            data-testid="comment-line"
+            className="absolute inset-0 grid place-items-center text-accent-text opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <MessageSquarePlus size={12} />
+          </button>
+        ) : null}
+      </span>
+      <span className="pr-3 break-all whitespace-pre-wrap">{line.text || ' '}</span>
+    </div>
+  );
+}
+
+function CommentEditor({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(initial);
+  return (
+    <div className="sl-enter sl-motion border-y border-line bg-surface px-3 py-2 font-sans">
+      <textarea
+        autoFocus
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onCancel();
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim()) onSave(text.trim());
+        }}
+        rows={2}
+        placeholder="O que deve mudar aqui?"
+        aria-label="Comentário"
+        data-testid="comment-input"
+        className="block w-full resize-none rounded-md border border-line bg-bg px-2.5 py-1.5 text-[13px] outline-none [field-sizing:content] focus:border-line-strong"
+      />
+      <div className="mt-1.5 flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="sl-press h-7 rounded-md px-2.5 text-[12px] text-muted hover:bg-surface-hover hover:text-fg"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          disabled={!text.trim()}
+          onClick={() => onSave(text.trim())}
+          title="Guardar (Ctrl+Enter)"
+          data-testid="comment-save"
+          className="sl-press h-7 rounded-md bg-fg px-2.5 text-[12px] font-medium text-bg disabled:opacity-50"
+        >
+          Guardar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CommentChip({
+  comment,
+  onEdit,
+  onRemove,
+}: {
+  comment: ReviewComment;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="sl-enter sl-motion flex items-start gap-2 border-y border-accent/20 bg-accent-soft/50 px-3 py-1.5 font-sans">
+      <MessageSquarePlus size={13} className="mt-0.5 shrink-0 text-accent-text" aria-hidden />
+      <button
+        type="button"
+        onClick={onEdit}
+        className="min-w-0 flex-1 text-left text-[12.5px] whitespace-pre-wrap"
+        data-testid="comment-chip"
+      >
+        {comment.text}
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Tirar o comentário"
+        className="grid size-5 shrink-0 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
+function IconAction({
+  label,
+  onClick,
+  testId,
+  children,
+}: {
+  label: string;
+  onClick: (e: React.MouseEvent) => void;
+  testId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      className="sl-press grid size-7 place-items-center rounded-md text-muted hover:bg-surface-hover hover:text-fg"
+    >
+      {children}
+    </button>
+  );
+}
+
+function SmallAction({
+  onClick,
+  testId,
+  tone,
+  children,
+}: {
+  onClick: (e: React.MouseEvent) => void;
+  testId: string;
+  tone: 'accept' | 'reject';
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className={`sl-press inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium transition-colors duration-150 ${
+        tone === 'accept' ? 'text-success hover:bg-success/10' : 'text-danger hover:bg-danger/10'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}

@@ -293,6 +293,65 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await setTheme(page, 'light');
 });
 
+test('rever o diff, comentar, rejeitar, desfazer e rebobinar (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'depende da sessão real do teste anterior');
+  test.setTimeout(120_000);
+  const page = await app.firstWindow();
+  const notes = () => readFile(join(project, 'notes.txt'), 'utf8');
+
+  // O turno anterior mudou alpha para beta: aparece por rever, com as contas no botão.
+  await expect(page.getByTestId('review-pending')).toContainText('+1', { timeout: 15_000 });
+  await page.getByTestId('review-toggle').click();
+  const panel = page.getByTestId('review-panel');
+  await expect(panel).toBeVisible();
+  const file = panel.locator('[data-testid="diff-file"][data-path="notes.txt"]');
+  await expect(file).toBeVisible();
+  await expect(file.locator('[data-kind="del"]')).toContainText('alpha');
+  await expect(file.locator('[data-kind="add"]')).toContainText('beta');
+
+  // Um comentário numa linha fica guardado até seguir para o agente.
+  await file.locator('[data-kind="add"]').hover();
+  await file.locator('[data-kind="add"] [data-testid="comment-line"]').click();
+  await page.getByTestId('comment-input').fill('Porquê beta e não gamma?');
+  await page.getByTestId('comment-save').click();
+  await expect(page.getByTestId('comment-chip')).toContainText('gamma');
+  await expect(page.getByTestId('send-comments')).toBeEnabled();
+  await shot(page, 'review-panel');
+
+  // Rejeitar o hunk volta o disco atrás; desfazer repõe.
+  await file.getByTestId('reject-hunk').click();
+  await expect(page.getByTestId('review-empty')).toBeVisible();
+  await expect.poll(notes).toContain('alpha');
+  await shot(page, 'review-empty');
+  await page.getByTestId('review-undo').click();
+  await expect.poll(notes).toContain('beta');
+  await expect(file).toBeVisible();
+  await page.getByTestId('review-toggle').click();
+  await expect(panel).toBeHidden();
+
+  // A linha do tempo: um ponto antes do turno. Só ficheiros e depois voltar ao presente.
+  const timeline = page.getByTestId('timeline');
+  await expect(timeline).toBeVisible();
+  await timeline.getByTestId('timeline-stop').first().click();
+  await expect(page.getByTestId('rewind-confirm')).toBeVisible();
+  await shot(page, 'timeline-confirm');
+  await page.getByTestId('rewind-files').click();
+  await expect.poll(notes).toContain('alpha');
+  await expect(page.getByTestId('timeline-present')).toBeVisible();
+  await shot(page, 'timeline-files');
+  await page.getByTestId('timeline-present').click();
+  await expect.poll(notes).toContain('beta');
+
+  // Ficheiros e conversa: o turno sai da conversa e a mensagem volta à caixa de texto.
+  await timeline.getByTestId('timeline-stop').first().click();
+  await page.getByTestId('rewind-both').click();
+  await expect.poll(notes).toContain('alpha');
+  await expect(page.getByTestId('user-turn')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('composer-input')).toHaveValue(/replace the word "alpha"/);
+  await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 60_000 });
+  await shot(page, 'timeline-rewound');
+});
+
 test('Codex por clique: sessão, resposta e tokens (Codex real)', async () => {
   test.skip(
     process.env.SOLLINE_E2E_CODEX !== '1',

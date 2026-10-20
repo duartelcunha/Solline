@@ -7,9 +7,13 @@ import type {
   CommandName,
   CommandPayload,
   CommandResult,
+  DiffScope,
   EngineEvent,
+  FileDiff,
   PermissionAnswer,
   Project,
+  ReviewAction,
+  ReviewComment,
 } from '@solline/protocol';
 import {
   createSessionStore,
@@ -36,6 +40,8 @@ interface AppState {
   /** A criar uma sessão neste projeto. */
   creatingIn: string | null;
   notice: string | null;
+  /** O painel de rever está aberto (vale para a sessão ativa). */
+  reviewOpen: boolean;
 }
 
 export const useApp = create<AppState>(() => ({
@@ -48,6 +54,7 @@ export const useApp = create<AppState>(() => ({
   activeSessionId: null,
   creatingIn: null,
   notice: null,
+  reviewOpen: false,
 }));
 
 const sessionStores = new Map<string, SessionStore>();
@@ -274,6 +281,79 @@ export const actions = {
     } catch (error) {
       setActionError(sessionId, error);
     }
+  },
+
+  toggleReview(open?: boolean): void {
+    useApp.setState((s) => ({ reviewOpen: open ?? !s.reviewOpen }));
+  },
+
+  /** O diff de um âmbito; null se falhou (o erro fica na sessão). */
+  async diff(sessionId: string, scope: DiffScope): Promise<FileDiff[] | null> {
+    try {
+      return (await request('review.diff', { sessionId, scope })).files;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return null;
+    }
+  },
+
+  /** Aceitar ou rejeitar um hunk, um ficheiro ou tudo. A linha do tempo chega por evento. */
+  async review(
+    sessionId: string,
+    action: ReviewAction,
+    target: { path?: string; hunkId?: string } = {},
+  ): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('review.apply', { sessionId, action, ...target });
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
+  async undo(sessionId: string): Promise<void> {
+    await request('review.undo', { sessionId }).catch((error: unknown) =>
+      setActionError(sessionId, error),
+    );
+  },
+
+  async comment(sessionId: string, comments: ReviewComment[], note?: string): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('review.comment', { sessionId, comments, ...(note ? { note } : {}) });
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
+  /** Volta a antes de um turno; a mensagem desse turno regressa à caixa de texto. */
+  async rewind(
+    sessionId: string,
+    turnId: string,
+    what: { files: boolean; conversation: boolean },
+  ): Promise<boolean> {
+    const store = sessionStores.get(sessionId);
+    store?.setState({ actionError: null });
+    try {
+      const result = await request('session.rewind', { sessionId, turnId, ...what });
+      store?.setState({
+        timeline: result.timeline,
+        ...(result.text ? { draft: result.text } : {}),
+      });
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
+  /** A caixa de texto já usou o rascunho. */
+  takeDraft(sessionId: string): void {
+    sessionStores.get(sessionId)?.setState({ draft: null });
   },
 
   dismissNotice(): void {

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderPlus, Moon, Sun, X } from 'lucide-react';
+import { FileDiff, FolderPlus, Moon, Sun, X } from 'lucide-react';
 import type { CommandResult } from '@solline/protocol';
 import type { Theme } from '@solline/protocol/bridge';
 import { Composer } from './features/composer/composer.tsx';
 import { NewSessionButton } from './features/agents/new-session-button.tsx';
 import { Conversation } from './features/conversation/conversation.tsx';
+import { ReviewPanel } from './features/review/review-panel.tsx';
+import { Timeline } from './features/review/timeline.tsx';
 import { Sidebar, StateDot } from './features/sidebar/sidebar.tsx';
 import { actions, dispatch, sessionStore, useApp, useSession } from './stores/app.ts';
 
@@ -90,6 +92,32 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
   );
 }
 
+/** O botão de rever, com o que está por rever à vista. */
+function ReviewButton({ sessionId }: { sessionId: string }) {
+  const pending = useSession(sessionId, (s) => s.timeline?.pending ?? null);
+  const open = useApp((s) => s.reviewOpen);
+  const count = pending?.files ?? 0;
+  return (
+    <button
+      type="button"
+      onClick={() => actions.toggleReview()}
+      aria-pressed={open}
+      aria-label={count ? `Rever: ${count} ficheiros por rever` : 'Rever alterações'}
+      data-testid="review-toggle"
+      className={`no-drag sl-press inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium transition-colors duration-150 ${open ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover hover:text-fg'}`}
+    >
+      <FileDiff size={14} strokeWidth={1.75} />
+      Rever
+      {pending && count > 0 ? (
+        <span className="font-mono text-[11px] tabular-nums" data-testid="review-pending">
+          <span className="text-success">+{pending.additions}</span>{' '}
+          <span className="text-danger">−{pending.deletions}</span>
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
 function Welcome() {
   const projects = useApp((s) => s.projects);
   const activeProjectId = useApp((s) => s.activeProjectId);
@@ -151,19 +179,22 @@ export function App() {
       <main className="flex min-w-0 flex-col">
         <header className="drag flex h-11 shrink-0 items-center gap-3 pr-[9.5rem] pl-5">
           {activeSessionId ? <SessionHeaderTitle sessionId={activeSessionId} /> : null}
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
-            data-testid="theme-toggle"
-            className="no-drag ml-auto grid size-8 place-items-center rounded-sm text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg active:scale-95"
-          >
-            {theme === 'dark' ? (
-              <Sun size={16} strokeWidth={1.75} />
-            ) : (
-              <Moon size={16} strokeWidth={1.75} />
-            )}
-          </button>
+          <div className="ml-auto flex items-center gap-1">
+            {activeSessionId ? <ReviewButton sessionId={activeSessionId} /> : null}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+              data-testid="theme-toggle"
+              className="no-drag sl-press grid size-8 place-items-center rounded-sm text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg"
+            >
+              {theme === 'dark' ? (
+                <Sun size={16} strokeWidth={1.75} />
+              ) : (
+                <Moon size={16} strokeWidth={1.75} />
+              )}
+            </button>
+          </div>
         </header>
 
         {notice ? (
@@ -189,10 +220,17 @@ export function App() {
         ) : null}
 
         {activeSessionId ? (
-          <>
-            <Conversation key={activeSessionId} sessionId={activeSessionId} />
-            <Composer key={`c-${activeSessionId}`} sessionId={activeSessionId} />
-          </>
+          <div className="flex min-h-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <Conversation key={activeSessionId} sessionId={activeSessionId} />
+              <Composer
+                key={`c-${activeSessionId}`}
+                sessionId={activeSessionId}
+                above={<Timeline sessionId={activeSessionId} />}
+              />
+            </div>
+            <ReviewPanel key={`r-${activeSessionId}`} sessionId={activeSessionId} />
+          </div>
         ) : (
           <Welcome />
         )}

@@ -4,6 +4,7 @@ import {
   type AgentCapabilities,
   type EngineEvent,
   type SessionInfo,
+  type Timeline,
   type Turn,
   type Usage,
 } from '@solline/protocol';
@@ -19,6 +20,10 @@ export interface SessionData {
   error: string | null;
   /** O último comando que falhou (mudar modelo, enviar...). */
   actionError: string | null;
+  /** Checkpoints, o que está por rever e o que "Desfazer" desfaz. Chega do motor. */
+  timeline: Timeline | null;
+  /** Texto que volta à caixa de mensagem (depois de rebobinar a conversa). */
+  draft: string | null;
 }
 
 export type SessionStore = StoreApi<SessionData>;
@@ -38,6 +43,8 @@ export function createSessionStore(
     usage: EMPTY_USAGE,
     error: null,
     actionError: null,
+    timeline: null,
+    draft: null,
   }));
 }
 
@@ -78,6 +85,8 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
           block: event.request,
         }),
       };
+    case 'session.timeline':
+      return { ...data, timeline: event.timeline };
     case 'session.state':
       return {
         ...data,

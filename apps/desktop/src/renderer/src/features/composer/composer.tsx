@@ -68,7 +68,7 @@ function TokenCount({ usage }: { usage: TokenUsage }) {
   );
 }
 
-export function Composer({ sessionId }: { sessionId: string }) {
+export function Composer({ sessionId, above }: { sessionId: string; above?: React.ReactNode }) {
   const state = useSession(sessionId, (s) => s.info.state);
   const settings = useSession(sessionId, (s) => s.info.settings);
   const capabilities = useSession(sessionId, (s) => s.capabilities);
@@ -78,6 +78,18 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const features = capabilities?.features;
   const [text, setText] = useState('');
   const input = useRef<HTMLTextAreaElement>(null);
+  // A mensagem de um turno rebobinado volta para aqui, para editar e mandar de novo.
+  const draft = useSession(sessionId, (s) => s.draft);
+  const [seenDraft, setSeenDraft] = useState<string | null>(null);
+  if (draft !== seenDraft) {
+    setSeenDraft(draft);
+    if (draft !== null) setText(draft);
+  }
+  useEffect(() => {
+    if (draft === null) return;
+    actions.takeDraft(sessionId);
+    input.current?.focus();
+  }, [draft, sessionId]);
 
   // O componente monta de novo por sessão (key), por isso basta focar à entrada.
   useEffect(() => {
@@ -101,6 +113,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
   return (
     <div className="shrink-0 px-8 pb-5">
       <div className="mx-auto max-w-3xl">
+        {above}
         {actionError ? (
           <p
             role="alert"
