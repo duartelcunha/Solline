@@ -13,6 +13,7 @@ import { clip } from '../claude/tools.ts';
 import { crashMessage, errorNotice, withTimeout } from '../shared/turns.ts';
 import type { AdapterSink, AgentAdapter, AgentStartOptions, AgentStartResult } from '../types.ts';
 import { CODEX_MODES, DEFAULT_CODEX_MODE, threadPolicy, turnOverrides } from './modes.ts';
+import { mcpApprovalResponse, mcpServersConfig, mcpToolApproval } from './mcp.ts';
 import { CodexNormalizer, displayCommand } from './normalizer.ts';
 import { initializeCodex, spawnCodex, type CodexTransport } from './transport.ts';
 import type { ReviewDecision } from './protocol/ReviewDecision';
@@ -20,6 +21,7 @@ import type { CommandExecutionApprovalDecision } from './protocol/v2/CommandExec
 import type { CommandExecutionRequestApprovalParams } from './protocol/v2/CommandExecutionRequestApprovalParams';
 import type { FileChangeRequestApprovalParams } from './protocol/v2/FileChangeRequestApprovalParams';
 import type { GetAccountResponse } from './protocol/v2/GetAccountResponse';
+import type { McpServerElicitationRequestParams } from './protocol/v2/McpServerElicitationRequestParams';
 import type { Model } from './protocol/v2/Model';
 import type { ModelListResponse } from './protocol/v2/ModelListResponse';
 import type { ThreadStartResponse } from './protocol/v2/ThreadStartResponse';
@@ -168,12 +170,9 @@ export class CodexAppServerAdapter implements AgentAdapter {
     ] as const) {
       peer.onRequest(method, (params, id) => this.#approval(method, params, id));
     }
-    peer.onRequest('mcpServer/elicitation/request', () => {
-      this.#notice(
-        'Um servidor MCP do Codex pediu dados que a Solline ainda não mostra; foi recusado.',
-      );
-      return { action: 'decline', content: null, _meta: null };
-    });
+    peer.onRequest('mcpServer/elicitation/request', (params, id) =>
+      this.#elicitation(params as McpServerElicitationRequestParams, id),
+    );
     peer.onRequest('item/tool/requestUserInput', () => {
       this.#notice('O Codex fez uma pergunta que a Solline ainda não mostra; ficou sem resposta.');
       return { answers: {} };
@@ -208,11 +207,14 @@ export class CodexAppServerAdapter implements AgentAdapter {
       const model =
         this.#settings.model ?? visible.find((m) => m.isDefault)?.id ?? visible[0]?.id ?? null;
       const policy = threadPolicy(this.#settings.mode);
+      // Os servidores MCP desta sessão vão na config do thread, nunca no config.toml.
+      const config = mcpServersConfig(this.#options.mcpServers ?? []);
       const params = {
         cwd: this.#options.cwd,
         ...(model ? { model } : {}),
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
+        ...(config ? { config } : {}),
       };
       const started = this.#threadId
         ? await peer.request<ThreadStartResponse>(
@@ -400,9 +402,51 @@ export class CodexAppServerAdapter implements AgentAdapter {
   }
 
   async #approval(method: ApprovalMethod, params: unknown, rpcId: RequestId): Promise<unknown> {
+    const outcome = await this.#ask(this.#approvalBlock(method, params, rpcId), rpcId);
+    return { decision: codexDecision(method, outcome) };
+  }
+
+  /**
+   * As ferramentas MCP pedem autorização por elicitação. Outras elicitações (formulários,
+   * endereços) a Solline ainda não mostra e recusa com um aviso.
+   */
+  async #elicitation(
+    params: McpServerElicitationRequestParams,
+    rpcId: RequestId,
+  ): Promise<unknown> {
+    const approval = mcpToolApproval(params);
+    if (!approval) {
+      this.#notice(
+        'Um servidor MCP do Codex pediu dados que a Solline ainda não mostra; foi recusado.',
+      );
+      return { action: 'decline', content: null, _meta: null };
+    }
+    // Um servidor desta sessão que corre programas pergunta sempre.
+    const risky = (this.#options.mcpServers ?? []).some(
+      (s) => s.executesCode && s.name === approval.server,
+    );
+    const id = `codex-${String(rpcId)}`;
+    const block: PermissionBlock = {
+      kind: 'permission',
+      id,
+      toolName: `mcp__${approval.server}__${approval.tool}`,
+      toolUseId: id,
+      title: approval.title,
+      ...(approval.description ? { description: approval.description } : {}),
+      input: approval.input,
+      category: 'other',
+      canAlwaysAllow: !risky && approval.persist.includes('session'),
+      alwaysScope: 'session',
+      canAlwaysDeny: false,
+      defaultToNo: false,
+      status: 'pending',
+    };
+    return mcpApprovalResponse(await this.#ask(block, rpcId));
+  }
+
+  async #ask(block: PermissionBlock, rpcId: RequestId): Promise<BrokerOutcome> {
     const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
     this.#emit(deltas);
-    const block = this.#approvalBlock(method, params, rpcId);
     this.#asks.set(block.id, { turnId, block, rpcId });
     this.#sink.ask(turnId, block);
     this.#sink.state('needs-you');
@@ -420,7 +464,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
     if (!this.#crashed) {
       this.#sink.state(this.#asks.size > 0 ? 'needs-you' : this.#running ? 'running' : 'idle');
     }
-    return { decision: codexDecision(method, outcome) };
+    return outcome;
   }
 
   #approvalBlock(method: ApprovalMethod, params: unknown, rpcId: RequestId): PermissionBlock {

@@ -190,6 +190,8 @@ export function codexDefinition(
     defaultMode: DEFAULT_CODEX_MODE,
     staticModes: CODEX_MODES,
     untrustedProjects: 'refused',
+    // Pela config do thread (mcp_servers.<nome>), só nesta sessão.
+    mcp: true,
     detect: async ({ refresh = false } = {}) => {
       const found = resolve();
       if (!found) {
