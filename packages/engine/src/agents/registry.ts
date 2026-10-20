@@ -5,6 +5,13 @@ import type { AgentDescriptor, AgentId, ModeOption } from '@solline/protocol';
 import { binaryName, platformPackageName } from '../adapters/claude/executable.ts';
 import { CLAUDE_MODES, ClaudeSdkAdapter, type ClaudeProfile } from '../adapters/claude/sdk.ts';
 import type { AgentAdapterFactory } from '../adapters/types.ts';
+import { CodexAppServerAdapter } from '../adapters/codex/adapter.ts';
+import {
+  REVIEWED_CODEX_VERSION,
+  resolveCodexExecutable,
+  type CodexExecutable,
+} from '../adapters/codex/executable.ts';
+import { CODEX_MODES, DEFAULT_CODEX_MODE } from '../adapters/codex/modes.ts';
 import { CLAUDE_ENV_POLICY, type EnvPolicy } from '../env.ts';
 import { DEEPSEEK, profileDefinition } from './profiles.ts';
 
@@ -111,6 +118,53 @@ export function claudeDefinition(
   };
 }
 
+/**
+ * O Codex pelo codex app-server. Lê AGENTS.md e config do projeto, por isso só corre em
+ * projetos de confiança. Recebe só as chaves da OpenAI, nenhum outro segredo do anfitrião.
+ */
+export function codexDefinition(
+  options: { resolve?: () => CodexExecutable | null } = {},
+): AgentDefinition {
+  const resolve = options.resolve ?? (() => resolveCodexExecutable());
+  return {
+    id: 'codex',
+    label: 'Codex',
+    transport: 'codex-app-server',
+    envPolicy: { base: 'no-secrets', keys: ['OPENAI_API_KEY', 'CODEX_API_KEY'] },
+    defaultMode: DEFAULT_CODEX_MODE,
+    staticModes: CODEX_MODES,
+    untrustedProjects: 'refused',
+    detect: async () => {
+      const found = resolve();
+      if (!found) {
+        return {
+          status: 'not-found',
+          detail: `Instala o Codex: npm install -g @openai/codex@${REVIEWED_CODEX_VERSION}`,
+        };
+      }
+      if (found.version !== REVIEWED_CODEX_VERSION) {
+        return {
+          status: 'unreviewed',
+          detail: `Versão não revista (instalada ${found.version ?? '?'}, revista ${REVIEWED_CODEX_VERSION})`,
+        };
+      }
+      return { status: 'ready' };
+    },
+    create: (start, sink) => {
+      const found = resolve();
+      if (!found) throw new Error('Não encontrei o Codex nesta máquina');
+      if (found.version !== REVIEWED_CODEX_VERSION) {
+        throw new Error(`O Codex instalado (${found.version ?? '?'}) não é a versão revista`);
+      }
+      return new CodexAppServerAdapter({ ...start, executable: found.path }, sink);
+    },
+  };
+}
+
 export function builtinRegistry(options: BuiltinOptions = {}): AgentRegistry {
-  return registryOf([claudeDefinition(options), profileDefinition(DEEPSEEK, options)]);
+  return registryOf([
+    claudeDefinition(options),
+    codexDefinition(),
+    profileDefinition(DEEPSEEK, options),
+  ]);
 }

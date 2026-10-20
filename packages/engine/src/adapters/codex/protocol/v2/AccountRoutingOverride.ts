@@ -5,4 +5,4 @@
 /**
  * Backend routing policy. Wire values match the accounts/check contract.
  */
-export type AccountRoutingOverride = "NO_CONSTRAINT" | "us" | "us_cr";
+export type AccountRoutingOverride = 'NO_CONSTRAINT' | 'us' | 'us_cr';

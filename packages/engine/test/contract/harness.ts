@@ -1,5 +1,6 @@
 import type { PermissionAnswer } from '@solline/protocol';
-import { ClaudeSdkAdapter, type AgentAdapter } from '../../src/index.ts';
+import { ClaudeSdkAdapter, CodexAppServerAdapter, type AgentAdapter } from '../../src/index.ts';
+import { declinedVariant, loadCodexFixture, replayCodex } from '../codex-fakes.ts';
 import { fakeQuery, loadFixture, recordingSink, type RecordingSink } from '../helpers.ts';
 
 /**
@@ -41,4 +42,26 @@ export const claudeHarness: Harness = {
   },
 };
 
-export const HARNESSES: readonly Harness[] = [claudeHarness];
+/** O Codex reproduz gravações reais do app-server (a recusa é a edição com a resposta trocada). */
+export const codexHarness: Harness = {
+  agent: 'codex',
+  scenarios: ['plain-answer', 'edit-with-permission', 'denied-edit'],
+  open(scenario) {
+    const records =
+      scenario === 'denied-edit'
+        ? declinedVariant(loadCodexFixture('edit-with-permission'))
+        : loadCodexFixture(scenario);
+    const sink = recordingSink();
+    const adapter = new CodexAppServerAdapter(
+      {
+        cwd: 'C:/tmp/proj',
+        mode: scenario === 'plain-answer' ? 'ask' : 'read-only',
+        transport: replayCodex(records).transport,
+      },
+      sink,
+    );
+    return { adapter, sink };
+  },
+};
+
+export const HARNESSES: readonly Harness[] = [claudeHarness, codexHarness];

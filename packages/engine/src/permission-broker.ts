@@ -33,6 +33,11 @@ export class PermissionBroker {
     return this.#settle(id, answer);
   }
 
+  /** Cancela um pedido (por exemplo o agente resolveu-o sozinho). */
+  cancel(id: string, reason: string): boolean {
+    return this.#settle(id, { decision: 'cancelled', reason });
+  }
+
   cancelAll(reason: string): string[] {
     const ids = [...this.#pending.keys()];
     for (const id of ids) this.#settle(id, { decision: 'cancelled', reason });

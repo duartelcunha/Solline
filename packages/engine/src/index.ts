@@ -28,6 +28,7 @@ export { sanitizedEnv, agentEnv, CLAUDE_ENV_POLICY, SECRET_NAME, type EnvPolicy 
 export {
   builtinRegistry,
   claudeDefinition,
+  codexDefinition,
   registryOf,
   withFactories,
   type AgentDefinition,
@@ -44,3 +45,18 @@ export {
 export { ENGINE_VERSION } from './version.ts';
 export { JsonRpcPeer, RpcError, StderrTail, type RequestId } from './rpc/json-rpc.ts';
 export { killTree, spawnAgent, type SpawnAgentOptions } from './rpc/spawn.ts';
+export {
+  CodexAppServerAdapter,
+  CODEX_LOGIN_MESSAGE,
+  codexDecision,
+  type CodexAdapterOptions,
+  type CodexTransport,
+} from './adapters/codex/adapter.ts';
+export { CodexNormalizer, displayCommand } from './adapters/codex/normalizer.ts';
+export { CODEX_MODES, threadPolicy, turnOverrides } from './adapters/codex/modes.ts';
+export {
+  REVIEWED_CODEX_VERSION,
+  resolveCodexExecutable,
+  type CodexExecutable,
+} from './adapters/codex/executable.ts';
+export { crashMessage, userTurnDelta } from './adapters/shared/turns.ts';

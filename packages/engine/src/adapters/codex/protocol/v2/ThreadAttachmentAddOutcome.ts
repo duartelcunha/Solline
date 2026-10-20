@@ -5,4 +5,4 @@
 /**
  * Result of attempting to associate an attachment with a thread.
  */
-export type ThreadAttachmentAddOutcome = "created" | "existing";
+export type ThreadAttachmentAddOutcome = 'created' | 'existing';

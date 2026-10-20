@@ -5,8 +5,10 @@
 /**
  * A thread that currently owns an attachment with the requested identity.
  */
-export type ThreadAttachmentOwner = { threadId: string,
-/**
- * Whether the owning thread is archived, not whether it is currently executing a turn.
- */
-archived: boolean, };
+export type ThreadAttachmentOwner = {
+  threadId: string;
+  /**
+   * Whether the owning thread is archived, not whether it is currently executing a turn.
+   */
+  archived: boolean;
+};

@@ -161,3 +161,27 @@
 - **Login:** a app-server usa o login que o Codex já tem (`~/.codex`); a Solline nunca lê as
   credenciais. ChatGPT login é aceite pela OpenAI para clientes locais e pessoais.
 
+## 2026-10-20: M1f, Codex pelo app-server
+
+- **Um `codex app-server` por sessão**, JSON-RPC por stdio (sem o campo `jsonrpc`). Arranque:
+  `initialize` (com `experimentalApi: false`, fica na superfície estável) → `account/read` (sem
+  sessão, não arranca e diz porquê) → `model/list` (só os visíveis; effort por modelo) →
+  `windowsSandbox/readiness` → `thread/start` ou `thread/resume`.
+- **Modos:** Ler (`on-request` + `read-only`), Ask (`untrusted` + `workspace-write`, por omissão) e
+  Auto (`on-request` + `workspace-write`). Acesso total não existe. Sem o sandbox do Windows pronto
+  só fica o Ask (Ler e Auto dependem dele) e aparece um aviso. Modelo, effort e modo valem a partir
+  do turno seguinte (`turn/start`).
+- **Aprovações:** comandos e edições viram cartões com o comando (tirado de dentro do
+  `powershell -Command`) ou o patch; "Permitir sempre" é o `acceptForSession` do Codex (só nesta
+  sessão); um `serverRequest/resolved` fecha o cartão. Perguntas (`requestUserInput`, experimental)
+  e elicitações MCP são recusadas com um aviso, por agora.
+- **Uso:** tokens totais e contexto (último pedido sobre a janela do modelo); sem custo.
+- **Só em projetos de confiança** (o Codex lê o `AGENTS.md` e a config do projeto) e só com as
+  chaves da OpenAI no ambiente.
+- **Achados da gravação:** as sessões carregam os servidores MCP do `~/.codex/config.toml` do Duarte
+  (paridade com o CLI); a conta é do plano gratuito e ia em 78% do limite de 30 dias, por isso os
+  testes reais do Codex só correm com `SOLLINE_AGENTS=codex`. As gravações tiram ids da conta, nome
+  do PC, limites e nomes dos servidores MCP.
+- **Fica para depois:** "Entrar com ChatGPT" dentro da app (`account/login/start`); hoje, sem sessão,
+  a mensagem manda fazer `codex login`.
+
