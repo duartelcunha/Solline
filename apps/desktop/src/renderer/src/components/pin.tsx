@@ -1,6 +1,6 @@
 /**
  * O Solline Pin: um meio sol atravessado pela linha do tempo, com a pega no corte. Herda a
- * cor do texto (currentColor); a geometria é a do ícone da app (scripts/brand-icons.py).
+ * cor do texto (currentColor); a geometria é a dos bots (packages/ui/src/bot/geometry.ts).
  */
 export function Pin({ size = 18, className }: { size?: number; className?: string }) {
   return (

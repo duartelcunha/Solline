@@ -65,7 +65,7 @@ test('a janela abre com o nome certo e o motor responde ao ping', async () => {
   await expect(page.getByTestId('ping-reply')).toContainText('Motor ligado', { timeout: 15_000 });
   await expect(page.getByTestId('ping-reply')).toContainText(/\d+ ms · v/);
   // Sem projetos, o familiar recebe-te ao portátil.
-  await expect(page.getByTestId('familiar-laptop')).toBeVisible();
+  await expect(page.getByTestId('familiar')).toBeVisible();
 });
 
 test('o tema alterna entre claro e escuro', async () => {
@@ -317,10 +317,10 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await page.getByTestId('new-session').click();
   await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
   await expect(page.getByTestId('session-row')).toHaveAttribute('data-state', 'idle');
-  // A sessão do Claude é o Áureo, à espera.
-  const avatar = page.getByTestId('session-row').getByTestId('crew-avatar');
-  await expect(avatar).toHaveAttribute('data-character', 'aureo');
-  await expect(avatar).toHaveAttribute('data-pose', 'waiting');
+  // A sessão do Claude tem o bot cor de barro, à espera.
+  const bot = page.getByTestId('session-row').getByTestId('bot');
+  await expect(bot).toHaveAttribute('data-hood', 'claude');
+  await expect(bot).toHaveAttribute('data-mood', 'waiting');
 
   // Modelo e effort pelos botões da barra.
   await page.getByTestId('pill-model').click();

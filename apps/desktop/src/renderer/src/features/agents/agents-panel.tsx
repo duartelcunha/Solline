@@ -5,7 +5,8 @@ import { EnvKeyName, type AgentDescriptor } from '@solline/protocol';
 import { DURATION, EASE } from '@solline/ui/motion';
 import { actions, useApp } from '../../stores/app.ts';
 import { Spinner } from '../conversation/blocks.tsx';
-import { CrewAvatar, characterOf } from './crew.tsx';
+import { Bot } from '@solline/ui/bot';
+import { hoodOf } from './bot-mood.ts';
 
 type Status = AgentDescriptor['status'];
 
@@ -58,8 +59,8 @@ function shake(element: HTMLElement | null): void {
 }
 
 /**
- * O feiticeiro do agente, cinzento enquanto não está pronto. Ao passar de "falta entrar" a
- * pronto, celebra uma vez.
+ * O bot do agente, cinzento enquanto não está pronto. Ao passar de "falta entrar" a pronto,
+ * fica contente uns segundos.
  */
 function AgentAvatar({ agent }: { agent: AgentDescriptor }) {
   // Compara com o estado anterior durante o desenho (sem efeito): a pose muda no mesmo frame.
@@ -76,11 +77,11 @@ function AgentAvatar({ agent }: { agent: AgentDescriptor }) {
   }, [celebrate]);
   const ready = agent.status === 'ready';
   return (
-    <CrewAvatar
-      character={characterOf(agent.id, agent.transport)}
-      pose={celebrate ? 'celebrate' : agent.login?.pending ? 'working' : 'waiting'}
+    <Bot
+      hood={hoodOf(agent.id, agent.transport)}
+      mood={celebrate ? 'done' : agent.login?.pending ? 'working' : 'waiting'}
       size={40}
-      className={ready ? '' : 'opacity-60 grayscale'}
+      className={ready ? undefined : 'opacity-60 grayscale'}
     />
   );
 }

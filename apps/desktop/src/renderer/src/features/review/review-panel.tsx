@@ -12,7 +12,7 @@ import type {
 import { usePresence } from '@solline/ui/react';
 import { MenuShell, triggerClass } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { CrewAvatar } from '../agents/crew.tsx';
+import { Bot } from '@solline/ui/bot';
 import { FindingRow } from '../quality/quality.tsx';
 import { commentKey, FileDiffView, type CommentKey } from './diff-view.tsx';
 
@@ -264,7 +264,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               className={celebrate ? 'sl-reward' : undefined}
               onAnimationEnd={() => setCelebrate(false)}
             >
-              <CrewAvatar character="vertice" pose="done" size={64} />
+              <Bot hood="reviewer" mood="done" size={64} />
             </span>
             <p className="text-[13px] font-medium" data-testid="review-empty">
               {validScope.kind === 'review' ? 'Nada por rever' : 'Sem alterações'}

@@ -11,7 +11,8 @@
     "./fonts.css": "./src/fonts.css",
     "./motion.css": "./src/motion.css",
     "./motion": "./src/motion.ts",
-    "./react": "./src/react.ts"
+    "./react": "./src/react.ts",
+    "./bot": "./src/bot/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

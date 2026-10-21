@@ -365,3 +365,26 @@
   a gravidade dos achados tem forma além de cor e o ruído passa a cinzento (o violeta chocava com
   o Índigo); a cópia em pt-PT segue o AO90; a maqueta (agentes por fase, um gato como familiar)
   ficou só como inspiração.
+
+## 2026-10-21: bots no lugar dos feiticeiros (grilling)
+
+- **Cada sessão é um bot** (cara e personalidade) que é também o agente (o trabalho). Os
+  bots são o Solline Pin de olhos abertos, desenhados em código (`packages/ui/src/bot`); a
+  pixel art dos feiticeiros saiu. Inspirados nos bots do Grok; do repo `jeremy-prt/bloub`
+  (MIT) só entra o motor de animação, quando houver animação.
+- **Cor:** o capuz diz o agente, com tons suaves; o âmbar fica para a Solline e para "precisa
+  de ti"; o ACP passou a rosa (o vermelho é "caiu"). O estado vive na bainha e, quando é
+  urgente, nos olhos.
+- **Ícone:** o bot âmbar num quadrado de carvão, gerado por `scripts/brand-icons.mjs` a partir
+  da geometria (Node puro, sem dependências), com 24/20/16 px em pixel art à mão.
+- **Movimento mínimo:** parados por agora. A animação entra depois do M3 e só no bot da
+  sessão aberta; o olhar segue a ação, nunca o rato; nada anima por tecla; um turno acabado
+  dá olhos contentes 1,4 s, sem explosão.
+- **Esforço:** um ícone nosso (meio sol que nasce com o esforço) para todos os agentes, numa
+  barra de cinco paragens com mola; o pet do Claude Code fica como opção escondida (é IP da
+  Anthropic).
+- **Revisor:** do outro fabricante quando possível (o Codex revê o Claude e vice-versa); se não
+  estiver pronto ou sem quota, revê o mesmo; diffs pequenos não se revêem; uma revisão de cada
+  vez.
+- **Ordem:** bots parados e ícone → avisos do Windows ("precisa de ti", "turno acabado", só sem
+  foco) → verificações do projeto depois de cada turno → M3 (a mesa) → animação dos bots.

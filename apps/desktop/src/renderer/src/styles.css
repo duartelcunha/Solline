@@ -354,17 +354,6 @@ body {
     transform: translateY(2px);
   }
 }
-/* A tripulação respira quando espera: devagar, para não chamar a atenção. */
-@keyframes sl-breathe {
-  50% {
-    transform: translateY(-0.5px) scale(1.015);
-  }
-}
-.crew-idle {
-  transform-origin: 50% 100%;
-  animation: sl-breathe 2.8s ease-in-out infinite;
-}
-
 /* Um ícone que muda de estado (a correr → feito) nasce do anterior: desfocado e quase do mesmo tamanho. */
 @keyframes sl-icon-morph {
   from {
@@ -446,7 +435,6 @@ body {
   .row-in {
     animation-name: sl-fade !important;
   }
-  .crew-idle,
   .icon-spin {
     animation: none !important;
   }

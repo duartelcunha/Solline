@@ -4,35 +4,44 @@ Direção "Meridiano": carvão e âmbar quente, Geist como voz única, cor só p
 
 ## Marca
 
-- **Solline Pin:** um meio sol atravessado pela linha do tempo, com a pega no corte. Em
-  `apps/desktop/src/renderer/src/components/pin.tsx` (herda a cor) e no ícone da app, gerado por
-  `scripts/brand-icons.py` (`apps/desktop/build/icon.ico`, com um desenho próprio a 16 px).
+- **Solline Pin:** um meio sol atravessado pela linha do tempo, com a pega no corte. Fica
+  pequeno ao lado do wordmark (`apps/desktop/src/renderer/src/components/pin.tsx`).
+- **O bot é o Pin de olhos abertos:** a linha do tempo é a bainha do capuz, o meio sol é o
+  capuz, a abertura escura é outro meio sol e os olhos são meios sóis pequenos. Geometria em
+  `packages/ui/src/bot/geometry.ts`, numa grelha de 256.
+- **Ícone da app:** o bot âmbar da Solline num quadrado de carvão. Gerado por
+  `node scripts/brand-icons.mjs` a partir da mesma geometria; os 24, 20 e 16 px são pixel art
+  desenhada à mão (grelhas no script). O `.ico` traz 256, 64, 48, 40, 36, 32, 30, 24, 20 e 16 px.
 - **Wordmark:** "Solline" em Geist SemiBold, tracking −0,035em.
-- **Âmbar do Pin:** `oklch(0.68 0.145 78)` no claro, `oklch(0.79 0.145 82)` no escuro (`--sl-accent`).
+- **Âmbar:** `oklch(0.79 0.145 82)`. É da Solline e do estado "precisa de ti", de mais ninguém.
 
-## Tripulação
+## Bots
 
-Cada agente é um feiticeiro de capuz, com a cor e o amuleto dele. A pose diz o estado.
+Cada sessão é um bot: a cor do capuz diz o agente (mesma luminosidade e pouca saturação), a
+cara e a bainha dizem o estado.
 
-| Agente | Personagem | Amuleto |
-|---|---|---|
-| Claude | Áureo (âmbar) | sol |
-| Codex | Ciano | chevron duplo |
-| Segunda opinião | Vértice (verde) | anel |
-| Agentes ACP | Enlace (vermelho) | nó de três pontos |
-| Outros | Índigo (azul) | losango |
+| Agente | Capuz |
+|---|---|
+| Claude | barro, `oklch(0.7 0.09 45)` |
+| Codex | ciano, `oklch(0.7 0.09 210)` |
+| Revisor | verde, `oklch(0.7 0.09 150)` |
+| Agentes ACP | rosa, `oklch(0.7 0.09 350)` |
+| Outros | azul, `oklch(0.7 0.09 265)` |
+| Familiar | cinzento, `oklch(0.62 0.012 80)` |
 
-Poses: à espera (mãos juntas, respira devagar), a trabalhar (aponta), feito (polegar, 2 s),
-precisa de ti (mãos levantadas), caiu (braços cruzados), celebração (rara).
+Humores: à espera (olhos em meio sol), a trabalhar (três pontos), precisa de ti (olhos âmbar
+a olhar para cima e bainha âmbar), feito (olhos em arco, 1,4 s), caiu (olhos em X, capuz
+descaído, bainha vermelha), a dormir (parado há 10 min), a ler (uma fenda, só o revisor).
 
-O **familiar** (cinzento) é o companheiro do utilizador: ao portátil no primeiro arranque, à porta
-de um projeto vazio. A cena do merge (M7) volta quando houver PRs na app.
+**A regra da bainha:** a cor do agente quando está tudo bem, âmbar quando precisa de ti,
+vermelha quando cai. Os humores sem urgência não mexem na bainha.
 
-A tripulação vive dentro da app; nunca é o ícone nem o wordmark.
+O **familiar** é o bot cinzento: recebe-te no primeiro arranque e nos projetos vazios.
 
-**Arte provisória:** cortada por `scripts/slice-crew.py` de uma folha gerada por IA (bordas
-suaves). Os sprites finais desenham-se numa grelha de 48×48 e entram com os mesmos nomes em
-`apps/desktop/src/renderer/src/assets/crew/`.
+**Movimento (depois do M3):** só o bot da sessão aberta está vivo (respira, pisca, olha para a
+ação, nunca para o rato); os outros ficam na pose do estado. Um só relógio para todos, em
+pausa com a janela escondida. Motor de animação baseado no do
+[bloub](https://github.com/jeremy-prt/bloub) (MIT), com formas e estados nossos.
 
 ## Gravidade dos achados
 

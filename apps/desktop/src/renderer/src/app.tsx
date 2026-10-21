@@ -9,7 +9,7 @@ import { Conversation } from './features/conversation/conversation.tsx';
 import { QualityChip } from './features/quality/quality.tsx';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
-import { Familiar, SessionAvatar } from './features/agents/crew.tsx';
+import { Familiar, SessionBot } from './features/agents/bots.tsx';
 import { Sidebar } from './features/sidebar/sidebar.tsx';
 import { usePresence } from '@solline/ui/react';
 import { actions, dispatch, sessionStore, useApp, useSession } from './stores/app.ts';
@@ -92,7 +92,7 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
   const title = useSession(sessionId, (s) => s.info.title);
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <SessionAvatar sessionId={sessionId} size={30} />
+      <SessionBot sessionId={sessionId} size={30} />
       <h1
         className="truncate text-[13px] font-semibold tracking-[-0.01em]"
         data-testid="session-title"
@@ -136,7 +136,7 @@ function Welcome() {
   return (
     <section className="flex flex-1 flex-col items-center justify-center gap-6 px-8 text-center">
       {/* O familiar recebe-te: ao portátil no início, à porta de um projeto ainda vazio. */}
-      <Familiar scene={project ? 'door' : 'laptop'} size={168} />
+      <Familiar size={132} />
       <div>
         <h2 className="text-[2rem] leading-tight font-semibold tracking-[-0.025em]">
           {project ? project.name : 'Bem-vindo'}

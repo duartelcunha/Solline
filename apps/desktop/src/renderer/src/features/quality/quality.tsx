@@ -5,7 +5,7 @@ import type { Finding, FindingSeverity, Quality } from '@solline/protocol';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { useChangedSinceMount } from '../../lib/morph.ts';
 import { actions, useSession } from '../../stores/app.ts';
-import { CrewAvatar } from '../agents/crew.tsx';
+import { Bot } from '@solline/ui/bot';
 
 /** Cada gravidade tem cor e forma: lê-se mesmo sem distinguir as cores. */
 const SEVERITY: Record<FindingSeverity, { label: string; text: string }> = {
@@ -110,9 +110,9 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
             {current === 'off' ? (
               <EyeOff size={14} strokeWidth={1.75} className="text-subtle" />
             ) : current === 'running' ? (
-              <CrewAvatar character="vertice" pose="working" size={24} />
+              <Bot hood="reviewer" mood="reading" size={24} />
             ) : current === 'clean' ? (
-              <CrewAvatar character="vertice" pose="done" size={24} />
+              <Bot hood="reviewer" mood="done" size={24} />
             ) : current === 'found' ? (
               <Counts findings={review.findings} />
             ) : current === 'error' ? (

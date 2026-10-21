@@ -27,6 +27,10 @@ export interface SessionData {
   draft: string | null;
   /** A segunda opinião: se está ligada e o que o revisor achou do último turno. */
   quality: Quality | null;
+  /** Desde quando a sessão está no estado atual (ms). */
+  stateSince: number;
+  /** Quando acabou o último turno (ms), ou null se ainda não acabou nenhum. */
+  turnEndedAt: number | null;
 }
 
 export type SessionStore = StoreApi<SessionData>;
@@ -49,6 +53,8 @@ export function createSessionStore(
     timeline: null,
     draft: null,
     quality: null,
+    stateSince: Date.now(),
+    turnEndedAt: null,
   }));
 }
 
@@ -93,12 +99,18 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       return { ...data, timeline: event.timeline };
     case 'session.quality':
       return { ...data, quality: event.quality };
-    case 'session.state':
+    case 'session.state': {
+      if (event.state === data.info.state) return data;
+      const now = Date.now();
       return {
         ...data,
         info: { ...data.info, state: event.state },
+        stateSince: now,
+        turnEndedAt:
+          data.info.state === 'running' && event.state === 'idle' ? now : data.turnEndedAt,
         error: event.state === 'error' ? (event.error ?? 'A sessão parou.') : null,
       };
+    }
     default:
       return data;
   }

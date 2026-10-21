@@ -3,7 +3,7 @@ import { FolderPlus, Folder, ShieldCheck, ShieldOff } from 'lucide-react';
 import { APP_NAME } from '@solline/protocol/app';
 import type { Project, SessionState } from '@solline/protocol';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { SessionAvatar } from '../agents/crew.tsx';
+import { SessionBot } from '../agents/bots.tsx';
 import { NewSessionButton } from '../agents/new-session-button.tsx';
 
 const STATE_LABEL: Record<SessionState, string> = {
@@ -29,7 +29,7 @@ function SessionRow({ id }: { id: string }) {
         data-state={state}
         className={`flex w-full items-center gap-2 rounded-md py-1 pr-2 pl-5 text-left text-[13px] transition-colors duration-150 active:bg-surface-hover ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
       >
-        <SessionAvatar sessionId={id} size={26} />
+        <SessionBot sessionId={id} size={26} />
         <span className="min-w-0 flex-1 truncate">{title}</span>
       </button>
     </li>
