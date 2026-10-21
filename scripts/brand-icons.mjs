@@ -1,13 +1,14 @@
 /**
- * Gera o ícone da app (apps/desktop/build/icon.ico e icon.png) a partir da geometria dos
- * bots (packages/ui/src/bot/geometry.ts): o bot âmbar da Solline num quadrado de carvão.
+ * Gera o ícone da app (apps/desktop/build/icon.ico e icon.png) com a marca da Solline: um sol
+ * a nascer no horizonte, com o reflexo em duas linhas, num quadrado de carvão. A mesma
+ * geometria do componente Logo (apps/desktop/src/renderer/src/components/logo.tsx), numa
+ * grelha de 44.
  *
  * Uso: node scripts/brand-icons.mjs [pasta-de-pré-visualização]
  *
- * Amostra as formas pixel a pixel (sem renderizador): os tamanhos grandes com 4x4 amostras
- * por pixel (bordas suaves); os de 24 px para baixo com uma amostra no centro de cada pixel,
- * para sair pixel art nítida em vez de uma mancha. Os tamanhos são os que o Windows 11 usa
- * na barra de tarefas e no explorador.
+ * Amostra as formas pixel a pixel (sem renderizador), com 4x4 amostras por pixel. Os de 24 px
+ * para baixo são pixel art desenhada à mão (ROWS), para saírem nítidos em vez de uma mancha.
+ * Os tamanhos são os que o Windows 11 usa na barra de tarefas e no explorador.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -15,172 +16,71 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { botFrame, HOODS } = await import(
-  pathToUrl(path.join(root, 'packages/ui/src/bot/geometry.ts'))
-);
-
-function pathToUrl(p) {
-  return new URL(`file:///${p.replace(/\\/g, '/')}`).href;
-}
 
 const SIZES = [256, 64, 48, 40, 36, 32, 30, 24, 20, 16];
-const PIXEL_ART = 24;
 
-/* ---------- cores ---------- */
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const GROUND = hex('#1b1916');
+const SUN = hex('#e8ae45');
 
-function oklchToRgb(L, C, h) {
-  const a = C * Math.cos((h * Math.PI) / 180);
-  const b = C * Math.sin((h * Math.PI) / 180);
-  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
-  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
-  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
-  const lin = [
-    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
-  ];
-  return lin.map((v) => {
-    const c = v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055;
-    return Math.round(Math.min(1, Math.max(0, c)) * 255);
+/* ---------- formas (na grelha de 44, como o Logo) ---------- */
+
+const SUN_SHAPE = { cx: 22, cy: 23, r: 12 };
+const LINES = [
+  { x0: 12, x1: 32, y: 28.5, r: 1.5 },
+  { x0: 16.5, x1: 27.5, y: 33.5, r: 1.5 },
+];
+
+function isSun(x, y) {
+  if (y <= SUN_SHAPE.cy && Math.hypot(x - SUN_SHAPE.cx, y - SUN_SHAPE.cy) <= SUN_SHAPE.r)
+    return true;
+  return LINES.some((l) => {
+    const dx = Math.max(l.x0 - x, 0, x - l.x1);
+    return Math.hypot(dx, y - l.y) <= l.r;
   });
 }
 
-function parseOklch(css) {
-  const [L, C, h] = css
-    .match(/oklch\(([^)]+)\)/)[1]
-    .split(/\s+/)
-    .map(Number);
-  return { L, C, h };
-}
-
-const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-const hood = parseOklch(HOODS.solline);
-const COLOURS = {
-  ground: hex('#2b2824'),
-  hood: oklchToRgb(hood.L, hood.C, hood.h),
-  // A bainha é o capuz mais escuro (como o color-mix com preto da app).
-  hem: oklchToRgb(hood.L * 0.78, hood.C * 0.78, hood.h),
-  face: hex('#14120f'),
-  eyes: hex('#ffd071'),
+/**
+ * Pixel art: por tamanho, [linha, largura] de cada fila âmbar, centradas. O sol é um meio
+ * disco; o reflexo são duas filas mais curtas.
+ */
+const ROWS = {
+  24: [
+    [7, 4],
+    [8, 8],
+    [9, 10],
+    [10, 12],
+    [11, 12],
+    [12, 12],
+    [15, 10],
+    [17, 6],
+  ],
+  20: [
+    [5, 4],
+    [6, 8],
+    [7, 10],
+    [8, 10],
+    [9, 10],
+    [12, 8],
+    [14, 4],
+  ],
+  16: [
+    [4, 4],
+    [5, 6],
+    [6, 8],
+    [7, 8],
+    [9, 6],
+    [11, 4],
+  ],
 };
 
-/* ---------- formas (na grelha de 256 dos bots) ---------- */
-
-// O bot "à espera"; as medidas vêm da mesma geometria que a app desenha.
-const frame = botFrame('waiting');
-const nums = (d) => d.match(/-?\d+(\.\d+)?/g).map(Number);
-const [hx0, hy, hrx, hry] = (() => {
-  const [x0, y0, rx, ry] = nums(frame.hood);
-  return [x0, y0, rx, ry];
-})();
-const HOOD = { cx: hx0 + hrx, cy: hy, rx: hrx, ry: hry };
-const [fx0, fy, frx, fry] = nums(frame.face);
-const FACE = { cx: fx0 + frx, cy: fy, rx: frx, ry: fry };
-const [hemX0, hemY, hemX1] = nums(frame.hem);
-const HEM = { x0: hemX0, x1: hemX1, y: hemY, r: 8 };
-const EYES = frame.eyes.map((e) => {
-  const [x0, y0, r] = nums(e.d);
-  return { cx: x0 + r, cy: y0, r };
-});
-
-const inHalfEllipse = (x, y, e) =>
-  y <= e.cy && ((x - e.cx) / e.rx) ** 2 + ((y - e.cy) / e.ry) ** 2 <= 1;
-
-function colourAt(x, y, eyeScale = 1) {
-  // Ordem de pintura: bainha por cima, depois olhos, cara, capuz.
-  const cx = Math.min(Math.max(x, HEM.x0), HEM.x1);
-  if (Math.hypot(x - cx, y - HEM.y) <= HEM.r) return COLOURS.hem;
-  if (EYES.some((e) => y <= e.cy + 2 && Math.hypot(x - e.cx, y - e.cy) <= e.r * eyeScale)) {
-    return COLOURS.eyes;
-  }
-  if (inHalfEllipse(x, y, FACE)) return COLOURS.face;
-  if (inHalfEllipse(x, y, HOOD)) return COLOURS.hood;
-  return null;
+function pixelSun(size, px, py) {
+  return ROWS[size].some(([row, width]) => row === py && Math.abs(px + 0.5 - size / 2) < width / 2);
 }
-
-/* ---------- pixel art (24, 20 e 16 px, desenhados à mão) ---------- */
-
-/**
- * Em tamanhos pequenos, amostrar dá uma mancha: cada linha é o conteúdo centrado dessa
- * linha do ícone (A capuz, F cara, E olhos, H bainha), a começar em `top`.
- */
-const GRIDS = {
-  24: {
-    top: 4,
-    rows: [
-      'AAAAAA',
-      'AAAAAAAAAA',
-      'AAAAAAAAAAAA',
-      'AAAAAAAAAAAAAA',
-      'AAAAAFFFFAAAAA',
-      'AAAAFFFFFFFFAAAA',
-      'AAAFFFFFFFFFFAAA',
-      'AAAFFFFFFFFFFFFAAA',
-      'AAAFFFFFFFFFFFFAAA',
-      'AAAFFEEFFFFEEFFAAA',
-      'AAAFEEEEFFEEEEFAAA',
-      'AAAFFFFFFFFFFFFAAA',
-      'AAAFFFFFFFFFFFFAAA',
-      'AAAFFFFFFFFFFFFAAA',
-      'HHHHHHHHHHHHHHHHHHHH',
-      'HHHHHHHHHHHHHHHHHHHH',
-    ],
-  },
-  20: {
-    top: 4,
-    rows: [
-      'AAAAAA',
-      'AAAAAAAAAA',
-      'AAAAAAAAAAAA',
-      'AAAAFFFFAAAA',
-      'AAAFFFFFFFFAAA',
-      'AAAFFFFFFFFAAA',
-      'AAAFEEFFEEFAAA',
-      'AAAFEEFFEEFAAA',
-      'AAAFFFFFFFFAAA',
-      'AAAFFFFFFFFAAA',
-      'HHHHHHHHHHHHHHHH',
-    ],
-  },
-  16: {
-    top: 3,
-    rows: [
-      'AAAA',
-      'AAAAAAAA',
-      'AAAAAAAAAA',
-      'AAAAFFAAAA',
-      'AAAFFFFFFAAA',
-      'AAFFFFFFFFAA',
-      'AAFEEFFEEFAA',
-      'AAFFFFFFFFAA',
-      'AAFFFFFFFFAA',
-      'HHHHHHHHHHHHHH',
-    ],
-  },
-};
-const GRID_COLOURS = { A: 'hood', F: 'face', E: 'eyes', H: 'hem' };
-
-function gridColour(size, px, py) {
-  const grid = GRIDS[size];
-  const row = grid.rows[py - grid.top];
-  if (!row) return null;
-  const start = (size - row.length) / 2;
-  const key = row[px - start];
-  return key ? COLOURS[GRID_COLOURS[key]] : null;
-}
-
-/* ---------- desenho ---------- */
-
-/**
- * A janela da grelha de 256 que cabe no quadrado: o bot (196 de largura) fica com cerca de
- * 76% da largura do ícone, centrado na vertical.
- */
-const SPAN = 258;
-const BOX = { x: 128 - SPAN / 2, y: (38 + 166) / 2 - SPAN / 2, w: SPAN, h: SPAN };
 
 function render(size) {
-  const radius = size * 0.22;
-  const samples = size <= PIXEL_ART ? 1 : 4;
+  const radius = size * 0.25;
+  const samples = ROWS[size] ? 1 : 4;
   const out = Buffer.alloc(size * size * 4);
   for (let py = 0; py < size; py++) {
     for (let px = 0; px < size; px++) {
@@ -190,16 +90,16 @@ function render(size) {
       let a = 0;
       for (let sy = 0; sy < samples; sy++) {
         for (let sx = 0; sx < samples; sx++) {
-          const ux = (px + (sx + 0.5) / samples) / size;
-          const uy = (py + (sy + 0.5) / samples) / size;
+          const ux = px + (sx + 0.5) / samples;
+          const uy = py + (sy + 0.5) / samples;
           // Quadrado de cantos redondos.
-          const qx = Math.max(Math.abs(ux * size - size / 2) - (size / 2 - radius), 0);
-          const qy = Math.max(Math.abs(uy * size - size / 2) - (size / 2 - radius), 0);
+          const qx = Math.max(Math.abs(ux - size / 2) - (size / 2 - radius), 0);
+          const qy = Math.max(Math.abs(uy - size / 2) - (size / 2 - radius), 0);
           if (Math.hypot(qx, qy) > radius) continue;
-          // Do pixel para a grelha do bot (o bot fica um pouco abaixo do centro, assente).
-          const x = BOX.x + ux * BOX.w;
-          const y = BOX.y + uy * BOX.h;
-          const c = (GRIDS[size] ? gridColour(size, px, py) : colourAt(x, y, 1)) ?? COLOURS.ground;
+          const sun = ROWS[size]
+            ? pixelSun(size, px, py)
+            : isSun((ux / size) * 44, (uy / size) * 44);
+          const c = sun ? SUN : GROUND;
           r += c[0];
           g += c[1];
           b += c[2];

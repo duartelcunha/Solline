@@ -9,9 +9,9 @@ Direção "Meridiano": carvão e âmbar quente, Geist como voz única, cor só p
 - **O bot é o Pin de olhos abertos:** a linha do tempo é a bainha do capuz, o meio sol é o
   capuz, a abertura escura é outro meio sol e os olhos são meios sóis pequenos. Geometria em
   `packages/ui/src/bot/geometry.ts`, numa grelha de 256.
-- **Ícone da app:** o bot âmbar da Solline num quadrado de carvão. Gerado por
-  `node scripts/brand-icons.mjs` a partir da mesma geometria; os 24, 20 e 16 px são pixel art
-  desenhada à mão (grelhas no script). O `.ico` traz 256, 64, 48, 40, 36, 32, 30, 24, 20 e 16 px.
+- **Ícone da app:** a marca (o sol e o reflexo no quadrado de carvão). Gerado por
+  `node scripts/brand-icons.mjs` a partir da mesma geometria do Logo; os 24, 20 e 16 px são pixel
+  art desenhada à mão (`ROWS` no script). O `.ico` traz 256, 64, 48, 40, 36, 32, 30, 24, 20 e 16 px.
 - **Wordmark:** "Solline" em Geist SemiBold, tracking −0,035em.
 - **Âmbar:** `oklch(0.79 0.145 82)`. É da Solline e do estado "precisa de ti", de mais ninguém.
 
