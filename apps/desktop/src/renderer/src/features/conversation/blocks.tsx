@@ -29,6 +29,26 @@ export function ToolStateIcon({ state }: { state: ToolBlock['state'] }) {
   return <X aria-label="Falhou" size={14} strokeWidth={2.25} className="text-danger" />;
 }
 
+/** O ícone transforma-se quando a ferramenta acaba; ao abrir o histórico fica quieto. */
+function MorphingIcon({ state }: { state: ToolBlock['state'] }) {
+  const [shown, setShown] = useState(state);
+  const [changed, setChanged] = useState(false);
+  if (shown !== state) {
+    setShown(state);
+    setChanged(true);
+  }
+  return (
+    <span className="grid size-4 shrink-0 place-items-center text-muted">
+      <span
+        key={state}
+        className={changed ? 'icon-morph grid place-items-center' : 'grid place-items-center'}
+      >
+        <ToolStateIcon state={state} />
+      </span>
+    </span>
+  );
+}
+
 export function ToolRow({ block, onOpen }: { block: ToolBlock; onOpen: () => void }) {
   return (
     <button
@@ -40,9 +60,7 @@ export function ToolRow({ block, onOpen }: { block: ToolBlock; onOpen: () => voi
       aria-label={`${block.summary}: ${block.state === 'running' ? 'a correr' : block.state === 'ok' ? 'concluída' : 'falhou'}. Abrir detalhe`}
       className="group flex w-full items-center gap-2.5 rounded-md border border-line bg-surface px-3 py-2 text-left transition-[background-color,border-color,transform] duration-150 hover:border-line-strong hover:bg-surface-hover active:scale-[0.995]"
     >
-      <span className="grid size-4 shrink-0 place-items-center text-muted">
-        <ToolStateIcon state={block.state} />
-      </span>
+      <MorphingIcon state={block.state} />
       <span className="min-w-0 flex-1 truncate text-[13px]">{block.summary}</span>
       <span className="shrink-0 font-mono text-[11px] text-subtle">{block.name}</span>
       <ChevronRight

@@ -322,6 +322,18 @@ body {
     transform: translateY(2px);
   }
 }
+/* Um ícone que muda de estado (a correr → feito) nasce do anterior: desfocado e quase do mesmo tamanho. */
+@keyframes sl-icon-morph {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+    transform: scale(var(--sl-pop-scale));
+  }
+}
+.icon-morph {
+  animation: sl-icon-morph var(--sl-dur-base) var(--sl-ease-out);
+}
+
 .status-swap {
   animation: sl-swap var(--sl-duration-base) var(--sl-ease-out);
 }
@@ -384,6 +396,7 @@ body {
   }
   /* Menos movimento: o estado novo só aparece em fade; o anel e o giro saem. */
   .status-swap,
+  .icon-morph,
   .chip-in,
   .row-in {
     animation-name: sl-fade !important;

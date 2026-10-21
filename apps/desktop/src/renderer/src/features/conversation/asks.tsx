@@ -8,6 +8,7 @@ import type {
   QuestionBlock,
 } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
+import { morphName } from '../../lib/morph.ts';
 import { useAgentLabel } from '../agents/agent-label.tsx';
 import { ToolInput } from './tool-input.tsx';
 
@@ -48,10 +49,12 @@ const STATUS_TEXT: Record<Exclude<AskStatus, 'pending'>, string> = {
 };
 
 function Resolved({
+  id,
   status,
   label,
   icon,
 }: {
+  id: string;
   status: AskStatus;
   label: string;
   icon: React.ReactNode;
@@ -61,6 +64,7 @@ function Resolved({
     <div
       data-testid="ask-resolved"
       data-status={status}
+      style={morphName(id)}
       className="flex items-center gap-2 px-1 text-[12.5px] text-muted"
     >
       <span className={ok ? 'text-success' : 'text-subtle'}>{icon}</span>
@@ -93,10 +97,12 @@ const secondary = `${button} border border-line-strong bg-surface hover:bg-surfa
 const quiet = `${button} text-muted hover:bg-surface-hover hover:text-fg`;
 
 function Card({
+  id,
   children,
   label,
   testId,
 }: {
+  id: string;
   children: React.ReactNode;
   label: string;
   testId: string;
@@ -105,6 +111,7 @@ function Card({
     <section
       aria-label={label}
       data-testid={testId}
+      style={morphName(id)}
       className="appear rounded-lg border border-accent/40 bg-surface p-4 shadow-raised ring-1 ring-accent/10"
     >
       {children}
@@ -144,7 +151,12 @@ export function PermissionCard({
 
   if (!pending)
     return (
-      <Resolved status={block.status} label={block.title} icon={<ShieldQuestion size={14} />} />
+      <Resolved
+        id={block.id}
+        status={block.status}
+        label={block.title}
+        icon={<ShieldQuestion size={14} />}
+      />
     );
 
   const allowOnce = (
@@ -160,7 +172,7 @@ export function PermissionCard({
     </button>
   );
   return (
-    <Card label={`Pedido de permissão: ${block.title}`} testId="permission-card">
+    <Card id={block.id} label={`Pedido de permissão: ${block.title}`} testId="permission-card">
       <div className="flex items-start gap-3">
         <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-accent-soft text-accent-text">
           <ShieldQuestion size={15} strokeWidth={1.9} />
@@ -223,11 +235,18 @@ export function PlanCard({ block, onAnswer }: { block: PlanBlock; onAnswer: Answ
     onAnswer(a);
   };
   if (block.status !== 'pending') {
-    return <Resolved status={block.status} label="Plano" icon={<ClipboardList size={14} />} />;
+    return (
+      <Resolved
+        id={block.id}
+        status={block.status}
+        label="Plano"
+        icon={<ClipboardList size={14} />}
+      />
+    );
   }
   // shortcut: aprovar ou rejeitar, sem "pedir mudanças" com texto; o cartão completo é do M2.
   return (
-    <Card label="Plano para aprovar" testId="plan-card">
+    <Card id={block.id} label="Plano para aprovar" testId="plan-card">
       <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold">
         <ClipboardList size={15} className="text-accent-text" /> Plano pronto
       </div>
@@ -264,7 +283,14 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
     const summary = block.answers
       ? Object.values(block.answers).join(' · ')
       : (block.questions[0]?.question ?? '');
-    return <Resolved status={block.status} label={summary} icon={<HelpCircle size={14} />} />;
+    return (
+      <Resolved
+        id={block.id}
+        status={block.status}
+        label={summary}
+        icon={<HelpCircle size={14} />}
+      />
+    );
   }
   const ready = block.questions.every((q) => (picked[q.question] ?? []).length > 0);
   const toggle = (question: string, label: string, multi: boolean) =>
@@ -284,7 +310,7 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
   };
   // shortcut: só as opções dadas, sem "outra resposta" escrita; o cartão completo é do M2.
   return (
-    <Card label={`Pergunta do ${agentLabel}`} testId="question-card">
+    <Card id={block.id} label={`Pergunta do ${agentLabel}`} testId="question-card">
       <div className="space-y-4">
         {block.questions.map((q) => (
           <fieldset key={q.question}>

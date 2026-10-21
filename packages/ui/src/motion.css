@@ -112,3 +112,52 @@
 .sl-reward {
   animation: sl-reward var(--sl-dur-slow) var(--sl-ease-out);
 }
+
+/*
+ * Morph (View Transitions): um elemento com view-transition-name transforma-se no novo com o
+ * mesmo nome. A caixa muda de forma em in-out; o conteúdo cruza-se com um pouco de desfoque,
+ * que esconde a costura entre o antes e o depois. O resto da página não pisca.
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-group(.sl-morph) {
+  animation-duration: var(--sl-dur-slow);
+  animation-timing-function: var(--sl-ease-in-out);
+}
+@keyframes sl-morph-out {
+  to {
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+@keyframes sl-morph-in {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+::view-transition-old(.sl-morph) {
+  animation: sl-morph-out var(--sl-dur-exit) var(--sl-ease-out) both;
+}
+::view-transition-new(.sl-morph) {
+  animation: sl-morph-in var(--sl-dur-base) var(--sl-ease-out) both;
+}
+/* Antes e depois com proporções diferentes (um cartão que vira linha): sem esticar o texto. */
+::view-transition-old(.sl-morph),
+::view-transition-new(.sl-morph) {
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
+  overflow: clip;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(.sl-morph) {
+    animation: none;
+  }
+  ::view-transition-old(.sl-morph),
+  ::view-transition-new(.sl-morph) {
+    filter: none;
+  }
+}

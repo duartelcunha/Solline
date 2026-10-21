@@ -21,6 +21,7 @@ import {
   type SessionData,
   type SessionStore,
 } from './session.ts';
+import { createMorphQueue, morphs } from '../lib/morph.ts';
 
 /**
  * Estado da app: projetos, a lista de sessões e qual está aberta. Cada sessão tem o
@@ -136,8 +137,14 @@ export function dispatch(event: EngineEvent): void {
     return;
   }
   const store = sessionStores.get(event.sessionId);
-  if (store) store.setState(reduceSession(store.getState(), event));
+  if (!store) return;
+  const apply = () => store.setState(reduceSession(store.getState(), event));
+  // Na sessão à vista, as mudanças de forma (um pedido respondido, a vez a passar) transformam-se.
+  enqueue(apply, event.sessionId === useApp.getState().activeSessionId && morphs(event));
 }
+
+/** Todos os eventos de sessão passam pela mesma fila, para uma transformação não trocar a ordem. */
+const enqueue = createMorphQueue();
 
 /** O agente das sessões abertas sem escolher: o primeiro pronto, senão o Claude. */
 function defaultAgent(): AgentId {

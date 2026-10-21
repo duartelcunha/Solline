@@ -3,6 +3,7 @@ import { ArrowUp, Square } from 'lucide-react';
 import type { TokenUsage } from '@solline/protocol';
 import { actions, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
+import { morphName } from '../../lib/morph.ts';
 import { SettingsPills } from './pills.tsx';
 
 const money = new Intl.NumberFormat('pt-PT', {
@@ -190,6 +191,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
                   aria-label="Interromper"
                   title="Interromper"
                   data-testid="interrupt"
+                  style={morphName('composer-action')}
                   className="grid size-8 place-items-center rounded-full bg-fg text-bg transition-transform duration-150 active:scale-95"
                 >
                   <Square size={11} fill="currentColor" strokeWidth={0} />
@@ -202,6 +204,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
                   aria-label="Enviar"
                   title="Enviar (Enter)"
                   data-testid="send"
+                  style={morphName('composer-action')}
                   className="grid size-8 place-items-center rounded-full bg-fg text-bg transition-[transform,opacity,background-color] duration-150 active:scale-95 disabled:bg-surface-sunken disabled:text-subtle"
                 >
                   <ArrowUp size={16} strokeWidth={2.25} />
