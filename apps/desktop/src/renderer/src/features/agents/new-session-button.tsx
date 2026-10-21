@@ -7,8 +7,15 @@ import { actions, useApp } from '../../stores/app.ts';
 import { Spinner } from '../conversation/blocks.tsx';
 
 /** Porque é que um agente não se pode abrir neste projeto, ou null se pode. */
+const NOT_READY: Partial<Record<AgentDescriptor['status'], string>> = {
+  'not-found': 'Não instalado',
+  unreviewed: 'Versão por rever',
+  'needs-login': 'Falta entrar',
+  error: 'Com erro',
+};
+
 export function blockedReason(agent: AgentDescriptor, project: Project): string | null {
-  if (agent.status !== 'ready') return agent.detail ?? 'Não está pronto nesta máquina';
+  if (agent.status !== 'ready') return NOT_READY[agent.status] ?? 'Não está pronto';
   if (agent.untrustedProjects === 'refused' && !project.trusted) {
     return 'Só corre em projetos de confiança';
   }
@@ -65,6 +72,7 @@ function AgentMenu({
                 character={characterOf(agent.id, agent.transport)}
                 pose="waiting"
                 size={22}
+                className={blocked ? 'opacity-50 grayscale' : ''}
               />
             }
             disabled={blocked !== null}
@@ -115,7 +123,7 @@ function McpChoices() {
             <span className="block font-medium">{server.label}</span>
             <span className="block text-[11.5px] leading-snug text-muted">
               {server.status !== 'ready'
-                ? server.detail
+                ? 'Não instalado'
                 : server.executesCode
                   ? 'Corre programas: sem Auto e sem "Permitir sempre"'
                   : 'Só nesta sessão'}

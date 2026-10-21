@@ -4,6 +4,7 @@ import { Check, LogIn, Plus, RefreshCw, X } from 'lucide-react';
 import { EnvKeyName, type AgentDescriptor } from '@solline/protocol';
 import { actions, useApp } from '../../stores/app.ts';
 import { Spinner } from '../conversation/blocks.tsx';
+import { CrewAvatar, characterOf } from './crew.tsx';
 
 type Status = AgentDescriptor['status'];
 
@@ -55,25 +56,31 @@ function shake(element: HTMLElement | null): void {
   );
 }
 
-/** O ponto do estado. Ao passar de "falta entrar" a pronto, sai um anel uma vez. */
-function StatusDot({ agent }: { agent: AgentDescriptor }) {
-  // Compara com o estado anterior durante o desenho (sem efeito): o anel sai no mesmo frame.
+/**
+ * O feiticeiro do agente, cinzento enquanto não está pronto. Ao passar de "falta entrar" a
+ * pronto, celebra uma vez.
+ */
+function AgentAvatar({ agent }: { agent: AgentDescriptor }) {
+  // Compara com o estado anterior durante o desenho (sem efeito): a pose muda no mesmo frame.
   const [previous, setPrevious] = useState(agent.status);
-  const [celebrate, setCelebrate] = useState(0);
+  const [celebrate, setCelebrate] = useState(false);
   if (previous !== agent.status) {
     setPrevious(agent.status);
-    if (previous === 'needs-login' && agent.status === 'ready') setCelebrate((n) => n + 1);
+    if (previous === 'needs-login' && agent.status === 'ready') setCelebrate(true);
   }
-  const pending = agent.login?.pending === true;
+  useEffect(() => {
+    if (!celebrate) return;
+    const timer = setTimeout(() => setCelebrate(false), 2_000);
+    return () => clearTimeout(timer);
+  }, [celebrate]);
+  const ready = agent.status === 'ready';
   return (
-    <span aria-hidden className="relative mt-[6px] grid size-2.5 shrink-0 place-items-center">
-      {celebrate > 0 ? (
-        <span key={celebrate} className="status-ping absolute inset-0 rounded-full bg-success" />
-      ) : null}
-      <span
-        className={`meter-dot size-2.5 rounded-full ${STATUS[agent.status].dot} ${pending ? 'dot-pulse' : ''}`}
-      />
-    </span>
+    <CrewAvatar
+      character={characterOf(agent.id, agent.transport)}
+      pose={celebrate ? 'celebrate' : agent.login?.pending ? 'working' : 'waiting'}
+      size={40}
+      className={ready ? '' : 'opacity-60 grayscale'}
+    />
   );
 }
 
@@ -288,7 +295,7 @@ function AgentRow({
       data-testid={`panel-agent-${agent.id}`}
     >
       <div className="flex items-start gap-3">
-        <StatusDot agent={agent} />
+        <AgentAvatar agent={agent} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="text-[13.5px] font-semibold tracking-[-0.005em]">{agent.label}</span>

@@ -115,8 +115,10 @@ export function dispatch(event: EngineEvent): void {
   if (event.type === 'engine.error') {
     useApp.setState({ notice: event.message });
     for (const store of sessionStores.values()) {
-      const { info } = store.getState();
-      if (info.state !== 'error') {
+      // Pela fila, como os outros eventos: nada que esteja à espera o desfaz depois.
+      enqueue(() => {
+        const { info } = store.getState();
+        if (info.state === 'error') return;
         store.setState(
           reduceSession(store.getState(), {
             kind: 'event',
@@ -126,7 +128,7 @@ export function dispatch(event: EngineEvent): void {
             error: event.message,
           }),
         );
-      }
+      }, false);
     }
     return;
   }
@@ -305,8 +307,11 @@ export const actions = {
         sessionIds: [session.id, ...s.sessionIds],
         activeSessionId: session.id,
       }));
+      // Um evento que chegue primeiro é mais recente: o pedido inicial não o pisa.
       void request('quality.get', { sessionId: session.id })
-        .then((quality) => store.setState({ quality }))
+        .then((quality) => {
+          if (store.getState().quality === null) store.setState({ quality });
+        })
         .catch(() => undefined);
     } catch (error) {
       useApp.setState({ notice: `Não foi possível abrir a sessão. ${message(error)}` });
@@ -417,6 +422,7 @@ export const actions = {
 
   /** Liga ou desliga a segunda opinião nesta sessão. */
   async setQualityEnabled(sessionId: string, enabled: boolean): Promise<void> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
     try {
       const quality = await request('quality.setEnabled', { sessionId, enabled });
       sessionStores.get(sessionId)?.setState({ quality });
@@ -427,6 +433,7 @@ export const actions = {
 
   /** Volta a rever o último turno (depois de uma falha, por exemplo). */
   async reviewAgain(sessionId: string): Promise<void> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
     try {
       await request('quality.review', { sessionId });
     } catch (error) {

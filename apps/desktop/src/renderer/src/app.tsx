@@ -65,7 +65,7 @@ function EngineStatus({ ping }: { ping: PingState }) {
         : [
             'bg-success',
             'Motor ligado',
-            `pong em ${ping.ms} ms · v${ping.reply.engineVersion}`,
+            `${ping.ms} ms · v${ping.reply.engineVersion}`,
             'ping-reply',
           ];
   // O detalhe (latência, versão) só interessa quando algo corre mal: ligado, fica no tooltip.
@@ -140,11 +140,6 @@ function Welcome() {
         <h2 className="text-[2rem] leading-tight font-semibold tracking-[-0.025em]">
           {project ? project.name : 'Bem-vindo'}
         </h2>
-        <p className="mt-1.5 text-muted">
-          {project
-            ? 'Abre uma sessão para trabalhar com um agente neste projeto.'
-            : 'Poder do terminal, facilidade da app.'}
-        </p>
       </div>
       {project ? (
         <NewSessionButton project={project} variant="primary" />

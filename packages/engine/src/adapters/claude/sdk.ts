@@ -50,25 +50,25 @@ export const CLAUDE_MODES: readonly ModeOption[] = [
   {
     id: 'default',
     label: 'Ask',
-    description: 'Pede autorização antes de editar ficheiros ou correr comandos.',
+    description: 'Pergunta antes de editar ou correr comandos',
     risk: 'ask',
   },
   {
     id: 'acceptEdits',
     label: 'Edits',
-    description: 'Aceita edições de ficheiros sem perguntar.',
+    description: 'Edita sem perguntar',
     risk: 'edits',
   },
   {
     id: 'plan',
     label: 'Plan',
-    description: 'Só lê e planeia; não muda nada até aprovares.',
+    description: 'Só lê e planeia até aprovares',
     risk: 'plan',
   },
   {
     id: 'auto',
     label: 'Auto',
-    description: 'Um classificador aprova ou recusa cada ação e só pergunta quando não sabe.',
+    description: 'Decide sozinho e pergunta na dúvida',
     risk: 'auto',
   },
 ];

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, ChevronRight, MessageSquarePlus, Undo2, X } from 'lucide-react';
+import { Check, ChevronRight, MessageSquarePlus, X } from 'lucide-react';
 import type {
   DiffLine,
   FileDiff,
@@ -29,7 +29,8 @@ interface Props {
   comments: ReadonlyMap<CommentKey, ReviewComment>;
   /** Texto vazio tira o comentário dessa linha. */
   onComment: (at: { path: string; side: 'old' | 'new'; line: number }, text: string) => void;
-  onAction: (action: ReviewAction, hunk?: Hunk) => Promise<void>;
+  /** Devolve se correu bem. */
+  onAction: (action: ReviewAction, hunk?: Hunk) => Promise<boolean>;
   /** O que o revisor achou neste ficheiro. */
   findings?: readonly Finding[];
   picked?: ReadonlySet<string>;
@@ -76,11 +77,9 @@ export function FileDiffView({
     // A saída só anima quando veio do rato; no teclado o hunk sai logo.
     const key = hunk?.id ?? '*';
     if (shouldAnimate(event.nativeEvent)) setLeaving(key);
-    try {
-      await onAction(action, hunk);
-    } finally {
-      setLeaving(null);
-    }
+    // Se correu bem, o diff novo já não traz o hunk; tirar o "a sair" antes fazia-o piscar.
+    const ok = await onAction(action, hunk).catch(() => false);
+    if (!ok) setLeaving(null);
   }
 
   return (
@@ -122,11 +121,11 @@ export function FileDiffView({
               <Check size={14} strokeWidth={2.25} />
             </IconAction>
             <IconAction
-              label={`Rejeitar ${file.path} (volta ao que estava)`}
+              label={`Rejeitar ${name}`}
               onClick={(e) => void act('reject', undefined, e)}
               testId="reject-file"
             >
-              <Undo2 size={14} />
+              <X size={14} />
             </IconAction>
           </span>
         ) : null}
@@ -135,12 +134,10 @@ export function FileDiffView({
       {open ? (
         file.binary || file.truncated ? (
           <p className="px-3 py-2.5 text-[12px] text-muted">
-            {file.binary
-              ? 'Ficheiro binário: aceita ou rejeita o ficheiro inteiro.'
-              : 'Grande demais para mostrar linha a linha.'}
+            {file.binary ? 'Ficheiro binário' : 'Grande demais para mostrar'}
           </p>
         ) : file.hunks.length === 0 ? (
-          <p className="px-3 py-2.5 text-[12px] text-muted">Só mudou o modo do ficheiro.</p>
+          <p className="px-3 py-2.5 text-[12px] text-muted">Só mudou o modo</p>
         ) : (
           <div className="divide-y divide-line">
             {file.hunks.map((hunk) => (

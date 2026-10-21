@@ -63,7 +63,7 @@ test('a janela abre com o nome certo e o motor responde ao ping', async () => {
   const page = await app.firstWindow();
   await expect(page).toHaveTitle('Solline');
   await expect(page.getByTestId('ping-reply')).toContainText('Motor ligado', { timeout: 15_000 });
-  await expect(page.getByTestId('ping-reply')).toContainText(/pong em \d+ ms/);
+  await expect(page.getByTestId('ping-reply')).toContainText(/\d+ ms · v/);
   // Sem projetos, o familiar recebe-te ao portátil.
   await expect(page.getByTestId('familiar-laptop')).toBeVisible();
 });

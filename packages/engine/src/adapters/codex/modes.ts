@@ -11,19 +11,19 @@ export const CODEX_MODES: readonly ModeOption[] = [
   {
     id: 'read-only',
     label: 'Ler',
-    description: 'Só lê; para mudar alguma coisa pede autorização.',
+    description: 'Só lê; pergunta antes de mudar',
     risk: 'read-only',
   },
   {
     id: 'ask',
     label: 'Ask',
-    description: 'Pede autorização para comandos que não são só de leitura e para edições.',
+    description: 'Pergunta antes de editar ou correr comandos',
     risk: 'ask',
   },
   {
     id: 'auto',
     label: 'Auto',
-    description: 'Edita e corre comandos dentro da pasta sem perguntar; pede para sair dela.',
+    description: 'Trabalha na pasta sem perguntar',
     risk: 'auto',
   },
 ];

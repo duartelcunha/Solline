@@ -1,3 +1,4 @@
+import { createContext, useContext, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { EngineEvent } from '@solline/protocol';
 import { shouldAnimate } from '@solline/ui/motion';
@@ -35,6 +36,17 @@ export function createMorphQueue(): (update: () => void, transform: boolean) => 
   };
 }
 
+/**
+ * Se o valor já mudou desde o primeiro desenho: o que se transforma ao mudar fica quieto ao
+ * abrir (abrir uma sessão ou o histórico não anima tudo de uma vez).
+ */
+export function useChangedSinceMount<T>(value: T): boolean {
+  const [first] = useState(value);
+  const [changed, setChanged] = useState(false);
+  if (!changed && value !== first) setChanged(true);
+  return changed;
+}
+
 const ASK_KINDS = new Set(['permission', 'plan', 'question']);
 
 /**
@@ -46,6 +58,17 @@ export function morphs(event: EngineEvent): boolean {
   if (event.type !== 'session.event' || event.delta.type !== 'block.upsert') return false;
   const { block } = event.delta;
   return ASK_KINDS.has(block.kind) && 'status' in block && block.status !== 'pending';
+}
+
+/**
+ * Só os pedidos do último turno se transformam: cada nome é uma fotografia que o browser tira
+ * em cada mudança de estado, e os do histórico já não mudam.
+ */
+export const MorphScope = createContext(false);
+
+/** O nome de transformação, só dentro do último turno. */
+export function useMorphName(id: string): React.CSSProperties | undefined {
+  return useContext(MorphScope) ? morphName(id) : undefined;
 }
 
 /** O nome que liga o antes e o depois de um elemento que se transforma. */

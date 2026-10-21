@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { NoticeBlock, ThinkingBlock, TodoBlock, ToolBlock } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
+import { useChangedSinceMount } from '../../lib/morph.ts';
 
 export function Spinner({ label }: { label: string }) {
   return (
@@ -31,12 +32,7 @@ export function ToolStateIcon({ state }: { state: ToolBlock['state'] }) {
 
 /** O ícone transforma-se quando a ferramenta acaba; ao abrir o histórico fica quieto. */
 function MorphingIcon({ state }: { state: ToolBlock['state'] }) {
-  const [shown, setShown] = useState(state);
-  const [changed, setChanged] = useState(false);
-  if (shown !== state) {
-    setShown(state);
-    setChanged(true);
-  }
+  const changed = useChangedSinceMount(state);
   return (
     <span className="grid size-4 shrink-0 place-items-center text-muted">
       <span
@@ -62,7 +58,6 @@ export function ToolRow({ block, onOpen }: { block: ToolBlock; onOpen: () => voi
     >
       <MorphingIcon state={block.state} />
       <span className="min-w-0 flex-1 truncate text-[13px]">{block.summary}</span>
-      <span className="shrink-0 font-mono text-[11px] text-subtle">{block.name}</span>
       <ChevronRight
         size={14}
         strokeWidth={1.75}

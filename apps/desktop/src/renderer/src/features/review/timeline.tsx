@@ -192,8 +192,8 @@ function TimelineTrack({
                 {weight > 0 && to > from ? (
                   <span
                     aria-hidden
-                    className="absolute top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-accent"
-                    style={{ left: from, width: to - from, opacity: 0.3 + weight * 0.6 }}
+                    className="absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-accent"
+                    style={{ left: from, width: to - from, opacity: 0.2 + weight * 0.45 }}
                   />
                 ) : null}
                 <button

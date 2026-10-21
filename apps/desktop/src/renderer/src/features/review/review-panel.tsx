@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronDown, CircleCheck, MessageSquare, Undo2, Wand2, X } from 'lucide-react';
+import { Check, ChevronDown, MessageSquare, Undo2, Wand2, X } from 'lucide-react';
 import type {
   DiffScope,
   FileDiff,
@@ -12,6 +12,7 @@ import type {
 import { usePresence } from '@solline/ui/react';
 import { MenuShell, triggerClass } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
+import { CrewAvatar } from '../agents/crew.tsx';
 import { FindingRow } from '../quality/quality.tsx';
 import { commentKey, FileDiffView, type CommentKey } from './diff-view.tsx';
 
@@ -95,14 +96,9 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
     };
   }, [load, scopeKey, timeline]);
 
-  if (!timeline) return <Empty title="A preparar os checkpoints…" />;
+  if (!timeline) return <Empty title="A preparar…" />;
   if (!timeline.available) {
-    return (
-      <Empty
-        title="Sem checkpoints nesta sessão"
-        detail={timeline.reason ? `Porque ${timeline.reason}.` : undefined}
-      />
-    );
+    return <Empty title="Sem histórico nesta sessão" detail={timeline.reason ?? undefined} />;
   }
 
   const actionable = validScope.kind === 'review';
@@ -116,6 +112,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
     });
     // O diff novo chega pela linha do tempo que a ação manda (um pedido, não dois).
     if (!ok) rewardIfEmpty.current = false;
+    return ok;
   }
 
   function setComment(at: { path: string; side: 'old' | 'new'; line: number }, text: string) {
@@ -184,16 +181,8 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               setScope(JSON.parse(value) as DiffScope);
             }}
           >
-            <ScopeItem
-              scope={{ kind: 'review' }}
-              title="Por rever"
-              detail="O que ainda não aceitaste"
-            />
-            <ScopeItem
-              scope={{ kind: 'session' }}
-              title="Toda a sessão"
-              detail="Tudo desde o início"
-            />
+            <ScopeItem scope={{ kind: 'review' }} title="Por rever" />
+            <ScopeItem scope={{ kind: 'session' }} title="Toda a sessão" />
             {checkpoints.map((c) => (
               <ScopeItem
                 key={c.turnId}
@@ -204,7 +193,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
             ))}
           </Menu.RadioGroup>
         </MenuShell>
-        {total ? (
+        {total && files && files.length > 0 ? (
           <span className="truncate font-mono text-[11px] text-muted tabular-nums">
             {files?.length ?? 0} {files?.length === 1 ? 'ficheiro' : 'ficheiros'} ·{' '}
             <span className="text-success">+{total.add}</span>{' '}
@@ -228,7 +217,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               <button
                 type="button"
                 onClick={() => void act('reject')}
-                title="Rejeitar tudo: volta o que está por rever ao que estava"
+                title="Rejeitar tudo"
                 data-testid="reject-all"
                 className="sl-press inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium whitespace-nowrap text-danger hover:bg-danger/10"
               >
@@ -237,7 +226,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               <button
                 type="button"
                 onClick={() => void act('accept')}
-                title="Aceitar tudo o que está por rever"
+                title="Aceitar tudo"
                 data-testid="accept-all"
                 className="sl-press inline-flex h-7 items-center gap-1 rounded-md bg-fg px-2.5 text-[12px] font-medium whitespace-nowrap text-bg"
               >
@@ -271,20 +260,15 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
         ) : null}
         {files === null ? null : files.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <CircleCheck
-              size={28}
-              strokeWidth={1.5}
-              className={`text-success ${celebrate ? 'sl-reward' : ''}`}
+            <span
+              className={celebrate ? 'sl-reward' : undefined}
               onAnimationEnd={() => setCelebrate(false)}
-            />
+            >
+              <CrewAvatar character="vertice" pose="done" size={64} />
+            </span>
             <p className="text-[13px] font-medium" data-testid="review-empty">
               {validScope.kind === 'review' ? 'Nada por rever' : 'Sem alterações'}
             </p>
-            {validScope.kind === 'review' && checkpoints.length > 0 ? (
-              <p className="max-w-[18rem] text-[12px] text-muted">
-                O que os agentes mudarem aparece aqui, turno a turno.
-              </p>
-            ) : null}
           </div>
         ) : (
           files.map((file) => (
@@ -318,7 +302,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
             type="button"
             disabled={busy || fixing}
             onClick={() => void fix()}
-            title={busy ? 'Espera que o agente acabe o turno' : undefined}
+            title={busy ? 'O agente ainda está a trabalhar' : undefined}
             data-testid="fix-findings"
             className="sl-press inline-flex h-8 items-center gap-1.5 rounded-md bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-50"
           >
@@ -337,7 +321,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={1}
-            placeholder="Uma nota para juntar (opcional)"
+            placeholder="Nota (opcional)"
             aria-label="Nota para o agente"
             className="block max-h-32 w-full resize-none rounded-md border border-line bg-surface px-2.5 py-1.5 text-[13px] outline-none [field-sizing:content] focus:border-line-strong"
           />
@@ -353,7 +337,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               type="button"
               disabled={busy || sending}
               onClick={() => void sendComments()}
-              title={busy ? 'Espera que o agente acabe o turno' : undefined}
+              title={busy ? 'O agente ainda está a trabalhar' : undefined}
               data-testid="send-comments"
               className="sl-press inline-flex h-8 items-center gap-1.5 rounded-md bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-50"
             >
@@ -366,7 +350,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   );
 }
 
-function ScopeItem({ scope, title, detail }: { scope: DiffScope; title: string; detail: string }) {
+function ScopeItem({ scope, title, detail }: { scope: DiffScope; title: string; detail?: string }) {
   return (
     <Menu.RadioItem
       value={JSON.stringify(scope)}
@@ -374,7 +358,7 @@ function ScopeItem({ scope, title, detail }: { scope: DiffScope; title: string; 
     >
       <span className="min-w-0 flex-1">
         <span className="block font-medium">{title}</span>
-        <span className="block truncate text-[11.5px] text-muted">{detail}</span>
+        {detail ? <span className="block truncate text-[11.5px] text-muted">{detail}</span> : null}
       </span>
       <Menu.ItemIndicator className="mt-0.5 text-accent-text">
         <Check size={14} strokeWidth={2.25} />

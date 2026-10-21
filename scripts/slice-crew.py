@@ -21,7 +21,7 @@ from PIL import Image
 OUT = Path(__file__).resolve().parent.parent / 'apps/desktop/src/renderer/src/assets/crew'
 CHARACTERS = ['aureo', 'ciano', 'vertice', 'enlace', 'indigo']
 STATES = ['waiting', 'working', 'done', 'needs-you', 'permission', 'celebrate']
-FAMILIAR = ['familiar-laptop', 'familiar-door', 'familiar-merge']
+FAMILIAR = ['familiar-laptop', 'familiar-door', 'familiar-merge']  # o merge só entra no M7
 
 # Medidas da folha (colunas e fronteiras entre linhas, onde o alfa é mínimo).
 COLS = [(82, 279), (319, 513), (554, 750), (791, 991), (1027, 1228)]

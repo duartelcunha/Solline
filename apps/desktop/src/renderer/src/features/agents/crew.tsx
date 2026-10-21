@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AgentId, SessionState } from '@solline/protocol';
 import { useApp, useSession } from '../../stores/app.ts';
+import { useChangedSinceMount } from '../../lib/morph.ts';
 
 /**
  * A tripulação: cada agente é um feiticeiro com a sua cor e o seu amuleto, e a pose diz o
@@ -15,7 +16,7 @@ const SPRITES = import.meta.glob<string>('../../assets/crew/*.png', {
 
 export type Character = 'aureo' | 'ciano' | 'vertice' | 'enlace' | 'indigo';
 export type Pose = 'waiting' | 'working' | 'done' | 'needs-you' | 'permission' | 'celebrate';
-export type FamiliarScene = 'laptop' | 'door' | 'merge';
+export type FamiliarScene = 'laptop' | 'door';
 
 const NAMES: Record<Character, string> = {
   aureo: 'Áureo',
@@ -37,7 +38,7 @@ export function characterOf(agent: AgentId, transport?: string): Character {
 }
 
 /** O feiticeiro de uma sessão (pelo agente e pelo transporte dele). */
-export function useSessionCharacter(sessionId: string): Character {
+function useSessionCharacter(sessionId: string): Character {
   const agent = useSession(sessionId, (s) => s.info.agent);
   const transport = useApp((s) => s.agents.find((a) => a.id === agent)?.transport);
   return characterOf(agent, transport);
@@ -47,7 +48,7 @@ export function useSessionCharacter(sessionId: string): Character {
 export function SessionAvatar({ sessionId, size }: { sessionId: string; size?: number }) {
   const character = useSessionCharacter(sessionId);
   const pose = useSessionPose(useSession(sessionId, (s) => s.info.state));
-  return <CrewAvatar character={character} pose={pose} size={size} />;
+  return <CrewAvatar character={character} pose={pose} size={size} named />;
 }
 
 /**
@@ -77,29 +78,26 @@ export function CrewAvatar({
   pose,
   size = 24,
   className = '',
+  named = false,
 }: {
   character: Character;
   pose: Pose;
   size?: number;
   className?: string;
+  /** Mostra o nome do feiticeiro ao passar o rato. */
+  named?: boolean;
 }) {
-  // Muda de pose a transformar-se, mas o primeiro desenho fica quieto.
-  const [shown, setShown] = useState(pose);
-  const [changed, setChanged] = useState(false);
-  if (shown !== pose) {
-    setShown(pose);
-    setChanged(true);
-  }
+  const changed = useChangedSinceMount(pose);
   const src = sprite(`${character}-${pose}`);
   if (!src) return null;
   return (
     <span
-      className={`crew-avatar relative inline-grid shrink-0 place-items-center ${className}`}
+      className={`relative inline-grid shrink-0 place-items-center ${className}`}
       style={{ width: size, height: size }}
       data-testid="crew-avatar"
       data-character={character}
       data-pose={pose}
-      title={NAMES[character]}
+      title={named ? NAMES[character] : undefined}
     >
       <img
         key={pose}

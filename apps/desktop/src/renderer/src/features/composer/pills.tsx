@@ -74,18 +74,18 @@ export function SettingsPills({
 
       {showEffort ? (
         <MenuShell
-          title="Effort"
+          title="Esforço"
           trigger={
             <Menu.Trigger
               disabled={disabled}
               data-testid="pill-effort"
-              aria-label={`Effort: ${settings.effort ?? 'padrão'}. Mudar`}
-              title={`Effort: ${settings.effort ?? 'padrão'}`}
+              aria-label={`Esforço: ${settings.effort ?? 'padrão'}. Mudar`}
+              title={`Esforço: ${settings.effort ?? 'padrão'}`}
               className={triggerClass}
             >
               <Gauge aria-hidden size={13} strokeWidth={1.9} />
               {/* Estreito (painel de rever aberto): só o ícone; o nome fica no tooltip. */}
-              <span className="@max-[30rem]:hidden">{settings.effort ?? 'effort padrão'}</span>
+              <span className="@max-[30rem]:hidden">{settings.effort ?? 'esforço padrão'}</span>
               <ChevronDown
                 aria-hidden
                 size={12}
@@ -115,7 +115,8 @@ export function SettingsPills({
               className={triggerClass}
             >
               <ModeIcon risk={mode?.risk ?? 'ask'} size={14} />
-              <span className="@max-[30rem]:hidden">{mode?.label ?? settings.mode ?? 'Modo'}</span>
+              {/* O modo é o que diz o risco: o nome fica sempre. */}
+              {mode?.label ?? settings.mode ?? 'Modo'}
               <ChevronDown
                 aria-hidden
                 size={12}

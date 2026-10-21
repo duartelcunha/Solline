@@ -349,21 +349,6 @@ body {
   animation: sl-swap var(--sl-duration-base) var(--sl-ease-out);
 }
 
-/* Entrou: um anel sai do ponto uma vez. Raro (um login), por isso pode ser mais longo. */
-@keyframes sl-ping {
-  from {
-    opacity: 0.55;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(2.8);
-  }
-}
-.status-ping {
-  animation: sl-ping 520ms var(--sl-ease-out) both;
-}
-
 /* Um chip novo cresce do sítio onde aparece, nunca do nada. */
 .chip-in {
   animation: sl-pop 160ms var(--sl-ease-out);
@@ -412,7 +397,6 @@ body {
   .row-in {
     animation-name: sl-fade !important;
   }
-  .status-ping,
   .crew-idle,
   .icon-spin {
     animation: none !important;

@@ -26,7 +26,7 @@ Poses: à espera (mãos juntas, respira devagar), a trabalhar (aponta), feito (p
 precisa de ti (mãos levantadas), caiu (braços cruzados), celebração (rara).
 
 O **familiar** (cinzento) é o companheiro do utilizador: ao portátil no primeiro arranque, à porta
-de um projeto vazio, com a fita do merge quando um PR entra (M7).
+de um projeto vazio. A cena do merge (M7) volta quando houver PRs na app.
 
 A tripulação vive dentro da app; nunca é o ícone nem o wordmark.
 

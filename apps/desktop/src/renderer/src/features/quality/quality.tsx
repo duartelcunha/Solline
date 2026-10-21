@@ -3,18 +3,19 @@ import * as Menu from '@radix-ui/react-dropdown-menu';
 import { CircleAlert, Eye, EyeOff, RotateCw } from 'lucide-react';
 import type { Finding, FindingSeverity, Quality } from '@solline/protocol';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
+import { useChangedSinceMount } from '../../lib/morph.ts';
 import { actions, useSession } from '../../stores/app.ts';
 import { CrewAvatar } from '../agents/crew.tsx';
 
 /** Cada gravidade tem cor e forma: lê-se mesmo sem distinguir as cores. */
-export const SEVERITY: Record<FindingSeverity, { label: string; text: string }> = {
+const SEVERITY: Record<FindingSeverity, { label: string; text: string }> = {
   bug: { label: 'Erro', text: 'text-danger' },
   risk: { label: 'Risco', text: 'text-accent-text' },
   slop: { label: 'Ruído', text: 'text-muted' },
 };
 
 /** Octógono para erro, triângulo para risco, círculo para ruído. */
-export function SeverityMark({ severity, size = 9 }: { severity: FindingSeverity; size?: number }) {
+function SeverityMark({ severity, size = 9 }: { severity: FindingSeverity; size?: number }) {
   return (
     <svg
       aria-hidden
@@ -67,15 +68,12 @@ function Counts({ findings }: { findings: readonly Finding[] }) {
  */
 export function QualityChip({ sessionId }: { sessionId: string }) {
   const quality = useSession(sessionId, (s) => s.quality);
-  const busy = useSession(sessionId, (s) => s.info.state !== 'idle');
-  // Muda de cara só depois do primeiro desenho: abrir uma sessão não anima.
-  const [shown, setShown] = useState<string | null>(null);
-  const [changed, setChanged] = useState(false);
+  const busy = useSession(
+    sessionId,
+    (s) => s.info.state === 'running' || s.info.state === 'starting',
+  );
   const current = quality ? face(quality) : null;
-  if (current !== shown) {
-    if (shown !== null) setChanged(true);
-    setShown(current);
-  }
+  const changed = useChangedSinceMount(current);
   if (!quality?.available || !current) return null;
   const { review } = quality;
 
@@ -83,18 +81,18 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
     current === 'off'
       ? 'Revisor desligado'
       : current === 'running'
-        ? 'O revisor está a ler o último turno'
+        ? 'A rever…'
         : current === 'clean'
-          ? 'O revisor não achou nada'
+          ? 'Sem achados'
           : current === 'found'
-            ? `O revisor achou ${review.findings.length}`
+            ? `${review.findings.length} ${review.findings.length === 1 ? 'achado' : 'achados'}`
             : current === 'error'
-              ? `O revisor falhou: ${review.error ?? ''}`
-              : 'Revisor ligado: lê cada turno que mude ficheiros';
+              ? `Falhou: ${review.error ?? ''}`
+              : 'Revisor ligado';
 
   return (
     <MenuShell
-      title="Segunda opinião"
+      title="Revisor"
       side="bottom"
       align="end"
       trigger={
@@ -128,7 +126,7 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
     >
       {current === 'found' ? (
         <ActionItem
-          title="Ver os achados"
+          title="Ver achados"
           icon={<Eye size={14} />}
           onSelect={() => actions.toggleReview(true)}
           testId="quality-open"
@@ -136,7 +134,7 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
       ) : null}
       {quality.enabled ? (
         <ActionItem
-          title="Rever de novo"
+          title="Repetir"
           icon={<RotateCw size={14} />}
           disabled={busy || current === 'running'}
           onSelect={() => void actions.reviewAgain(sessionId)}
@@ -145,12 +143,28 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
       ) : null}
       <ActionItem
         title={quality.enabled ? 'Desligar o revisor' : 'Ligar o revisor'}
-        description={quality.enabled ? undefined : 'Lê cada turno que mude ficheiros'}
         icon={quality.enabled ? <EyeOff size={14} /> : <Eye size={14} />}
         onSelect={() => void actions.setQualityEnabled(sessionId, !quality.enabled)}
         testId="quality-toggle"
       />
     </MenuShell>
+  );
+}
+
+function FindingTitle({
+  finding,
+  label,
+  open,
+}: {
+  finding: Finding;
+  label: string;
+  open: boolean;
+}) {
+  return (
+    <span className={`block leading-snug font-medium ${open ? '' : 'truncate'}`}>
+      <span className="sr-only">{label}: </span>
+      {finding.title}
+    </span>
   );
 }
 
@@ -177,25 +191,31 @@ export function FindingRow({
         checked={picked}
         onChange={(e) => onPick(e.target.checked)}
         aria-label={`Escolher: ${finding.title}`}
-        className="mt-[3px] size-3.5 shrink-0 accent-[var(--sl-accent)]"
+        className="mt-[3px] size-3.5 shrink-0 accent-[var(--sl-text)]"
         data-testid="finding-pick"
       />
       <span className="mt-[5px]">
         <SeverityMark severity={finding.severity} />
       </span>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="min-w-0 flex-1 text-left"
-      >
-        <span className="block leading-snug">
-          <span className={`font-medium ${tone.text}`}>{tone.label}</span> {finding.title}
+      {finding.detail ? (
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="min-w-0 flex-1 text-left"
+        >
+          <FindingTitle finding={finding} label={tone.label} open={open} />
+          {open ? (
+            <span className="mt-0.5 block leading-snug text-muted select-text">
+              {finding.detail}
+            </span>
+          ) : null}
+        </button>
+      ) : (
+        <span className="min-w-0 flex-1">
+          <FindingTitle finding={finding} label={tone.label} open />
         </span>
-        {open && finding.detail ? (
-          <span className="mt-0.5 block leading-snug text-muted select-text">{finding.detail}</span>
-        ) : null}
-      </button>
+      )}
     </div>
   );
 }

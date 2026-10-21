@@ -8,7 +8,7 @@ import type {
   QuestionBlock,
 } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
-import { morphName } from '../../lib/morph.ts';
+import { useMorphName } from '../../lib/morph.ts';
 import { useAgentLabel } from '../agents/agent-label.tsx';
 import { ToolInput } from './tool-input.tsx';
 
@@ -60,11 +60,12 @@ function Resolved({
   icon: React.ReactNode;
 }) {
   const ok = status === 'allowed' || status === 'allowed-always';
+  const morph = useMorphName(id);
   return (
     <div
       data-testid="ask-resolved"
       data-status={status}
-      style={morphName(id)}
+      style={morph}
       className="flex items-center gap-2 px-1 text-[12.5px] text-muted"
     >
       <span className={ok ? 'text-success' : 'text-subtle'}>{icon}</span>
@@ -107,11 +108,12 @@ function Card({
   label: string;
   testId: string;
 }) {
+  const morph = useMorphName(id);
   return (
     <section
       aria-label={label}
       data-testid={testId}
-      style={morphName(id)}
+      style={morph}
       className="appear rounded-lg border border-accent/40 bg-surface p-4 shadow-raised ring-1 ring-accent/10"
     >
       {children}

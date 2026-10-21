@@ -4,6 +4,7 @@ import type { PermissionAnswer, ToolBlock, Turn } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
 import { actions, useSession } from '../../stores/app.ts';
 import { AgentLabelContext, useSessionAgentLabel } from '../agents/agent-label.tsx';
+import { MorphScope } from '../../lib/morph.ts';
 import { PermissionCard, PlanCard, QuestionCard } from './asks.tsx';
 import { NoticeView, Spinner, ThinkingView, TodoView, ToolRow } from './blocks.tsx';
 import { ToolDetail } from './tool-detail.tsx';
@@ -22,11 +23,14 @@ function UserTurn({ turn }: { turn: Turn }) {
 function AssistantTurn({
   turn,
   firstPendingId,
+  latest,
   onOpen,
   onAnswer,
 }: {
   turn: Turn;
   firstPendingId: string | null;
+  /** O último turno: só os pedidos dele se transformam (lib/morph.ts). */
+  latest: boolean;
   onOpen: (tool: ToolBlock) => void;
   onAnswer: (requestId: string, answer: PermissionAnswer) => void;
 }) {
@@ -35,43 +39,53 @@ function AssistantTurn({
   // Ferramentas que já aparecem como cartão ou lista de tarefas não se repetem.
   const blocks = turn.blocks.filter((b) => !(b.kind === 'tool' && b.hidden));
   return (
-    <div className="space-y-3" data-testid="assistant-turn">
-      {blocks.map((block) => {
-        switch (block.kind) {
-          case 'text':
-            return block.text ? (
-              <div key={block.id} data-testid="assistant-text" className="text-[14px] select-text">
-                <Markdown text={block.text} />
-              </div>
-            ) : null;
-          case 'thinking':
-            return <ThinkingView key={block.id} block={block} />;
-          case 'tool':
-            return <ToolRow key={block.id} block={block} onOpen={() => onOpen(block)} />;
-          case 'permission':
-            return (
-              <PermissionCard
-                key={block.id}
-                block={block}
-                active={block.id === firstPendingId}
-                onAnswer={(a) => onAnswer(block.id, a)}
-              />
-            );
-          case 'plan':
-            return (
-              <PlanCard key={block.id} block={block} onAnswer={(a) => onAnswer(block.id, a)} />
-            );
-          case 'question':
-            return (
-              <QuestionCard key={block.id} block={block} onAnswer={(a) => onAnswer(block.id, a)} />
-            );
-          case 'todo':
-            return <TodoView key={block.id} block={block} />;
-          case 'notice':
-            return <NoticeView key={block.id} block={block} />;
-        }
-      })}
-    </div>
+    <MorphScope.Provider value={latest}>
+      <div className="space-y-3" data-testid="assistant-turn">
+        {blocks.map((block) => {
+          switch (block.kind) {
+            case 'text':
+              return block.text ? (
+                <div
+                  key={block.id}
+                  data-testid="assistant-text"
+                  className="text-[14px] select-text"
+                >
+                  <Markdown text={block.text} />
+                </div>
+              ) : null;
+            case 'thinking':
+              return <ThinkingView key={block.id} block={block} />;
+            case 'tool':
+              return <ToolRow key={block.id} block={block} onOpen={() => onOpen(block)} />;
+            case 'permission':
+              return (
+                <PermissionCard
+                  key={block.id}
+                  block={block}
+                  active={block.id === firstPendingId}
+                  onAnswer={(a) => onAnswer(block.id, a)}
+                />
+              );
+            case 'plan':
+              return (
+                <PlanCard key={block.id} block={block} onAnswer={(a) => onAnswer(block.id, a)} />
+              );
+            case 'question':
+              return (
+                <QuestionCard
+                  key={block.id}
+                  block={block}
+                  onAnswer={(a) => onAnswer(block.id, a)}
+                />
+              );
+            case 'todo':
+              return <TodoView key={block.id} block={block} />;
+            case 'notice':
+              return <NoticeView key={block.id} block={block} />;
+          }
+        })}
+      </div>
+    </MorphScope.Provider>
   );
 }
 
@@ -81,8 +95,8 @@ function EmptySession({ cwd }: { cwd: string }) {
       <h2 className="text-[1.6rem] leading-tight font-semibold tracking-[-0.025em]">
         Em que trabalhamos?
       </h2>
-      <p className="mt-1.5 max-w-md truncate font-mono text-[12px] text-subtle" title={cwd}>
-        {cwd}
+      <p className="mt-1.5 max-w-md truncate text-[13px] text-muted" title={cwd}>
+        {cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd}
       </p>
     </div>
   );
@@ -137,7 +151,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
             <EmptySession cwd={cwd} />
           ) : (
             <div className="mx-auto w-full max-w-3xl space-y-6 px-8 pt-4 pb-10">
-              {turns.map((turn) =>
+              {turns.map((turn, index) =>
                 turn.role === 'user' ? (
                   <UserTurn key={turn.id} turn={turn} />
                 ) : (
@@ -145,6 +159,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
                     key={turn.id}
                     turn={turn}
                     firstPendingId={firstPendingId}
+                    latest={index === turns.length - 1}
                     onOpen={(tool) => setOpenToolId(tool.id)}
                     onAnswer={(requestId, answer) =>
                       void actions.answer(sessionId, requestId, answer)
