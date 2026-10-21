@@ -12,6 +12,7 @@ import type {
 } from '@solline/protocol';
 import type { ChecksOptions } from '../src/session-manager.ts';
 import { WorktreeManager } from '../src/worktrees/worktrees.ts';
+import { RaceManager } from '../src/races/race-manager.ts';
 import { execFileSync } from 'node:child_process';
 import {
   ClaudeSdkAdapter,
@@ -748,6 +749,55 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
     expect(runs).toEqual([]);
     // O que escreves não fica preso à espera de uma aprovação.
     expect(await manager.send(session.id, 'olá')).toMatchObject({ how: 'sent' });
+  });
+
+  it('uma corrida abre uma pista por agente, cada uma na sua worktree, e acaba quando param todas', async () => {
+    makeManager(true, undefined, undefined, gitProject());
+    const raceEvents: { race: { phase: string; lanes: { sessionId: string }[] } }[] = [];
+    const races = new RaceManager({
+      sessions: manager,
+      emit: (e) => {
+        if (e.type === 'race.state') raceEvents.push(e as never);
+      },
+    });
+    // O motor junta os dois: cada evento das sessões chega também às corridas.
+    const forward = events.push.bind(events);
+    events.push = (...items) => {
+      for (const item of items) races.observe(item);
+      return forward(...items);
+    };
+    const { race, sessions } = await races.begin({
+      projectId: 'p',
+      cwd: project,
+      trusted: true,
+      text: 'escreve corrida.txt=x',
+      lanes: [{ agent: 'claude' }, { agent: 'claude' }],
+    });
+    expect(sessions).toHaveLength(2);
+    const cwds = sessions.map((s) => s.session.cwd);
+    expect(new Set(cwds).size).toBe(2);
+    expect(cwds.every((c) => c !== project)).toBe(true);
+    expect(sessions.every((s) => s.session.raceId === race.id)).toBe(true);
+    await waitFor(() => raceEvents.at(-1)?.race.phase === 'done', 10_000);
+    expect(ScriptedAdapter.received.filter((r) => r.text === 'escreve corrida.txt=x')).toHaveLength(
+      2,
+    );
+    // O projeto não mudou: o trabalho está nas worktrees das pistas.
+    await expect(read('corrida.txt')).rejects.toThrow();
+  });
+
+  it('sem git não há corrida', async () => {
+    makeManager(true, undefined, undefined, new WorktreeManager({ root: path.join(root, 'wt') }));
+    const races = new RaceManager({ sessions: manager, emit: () => undefined });
+    await expect(
+      races.begin({
+        projectId: 'p',
+        cwd: project,
+        trusted: true,
+        text: 'olá',
+        lanes: [{ agent: 'claude' }, { agent: 'claude' }],
+      }),
+    ).rejects.toThrow(/projeto git/);
   });
 
   it('sem git, a segunda sessão partilha a pasta', async () => {

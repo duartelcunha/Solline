@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AgentId, AskBlock, ConversationDelta, SessionState, Workspace } from './conversation.ts';
 import { Checks, SetupState } from './checks.ts';
+import { Race } from './race.ts';
 import { Quality } from './quality.ts';
 import { Timeline } from './review.ts';
 
@@ -95,6 +96,13 @@ export const SessionSetupEvent = z.object({
   setup: SetupState,
 });
 
+/** Uma corrida mudou: uma pista mudou de estado, acabaram todas, ou foi ordenada. */
+export const RaceStateEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('race.state'),
+  race: Race,
+});
+
 export const EngineErrorEvent = z.object({
   kind: z.literal('event'),
   type: z.literal('engine.error'),
@@ -123,6 +131,7 @@ export const EngineEvent = z.discriminatedUnion('type', [
   SessionWorkspaceEvent,
   SessionQueueEvent,
   SessionSetupEvent,
+  RaceStateEvent,
   EngineErrorEvent,
 ]);
 export type EngineEvent = z.infer<typeof EngineEvent>;

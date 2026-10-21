@@ -4,6 +4,7 @@ export * from './capabilities.ts';
 export * from './review.ts';
 export * from './quality.ts';
 export * from './checks.ts';
+export * from './race.ts';
 export * from './commands.ts';
 export * from './events.ts';
 export * from './bridge.ts';

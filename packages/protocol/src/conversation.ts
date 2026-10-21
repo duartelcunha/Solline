@@ -387,6 +387,8 @@ export const SessionInfo = z.object({
   /** Servidores MCP ligados a esta sessão. */
   mcpServers: z.array(z.string()).optional(),
   workspace: Workspace.optional(),
+  /** A corrida a que esta sessão pertence (uma pista). */
+  raceId: z.string().optional(),
   /** A primeira das 10 portas da sessão (SOLLINE_PORT). */
   port: z.number().int().optional(),
   /** A preparação da worktree (só nas sessões em worktree de projetos de confiança). */

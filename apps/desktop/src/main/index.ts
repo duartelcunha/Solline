@@ -15,6 +15,7 @@ import { APP_NAME } from '@solline/protocol/app';
 import { IPC, type Theme } from '@solline/protocol/bridge';
 import {
   CommandNameSchema,
+  RaceStartPayload,
   SessionCreatePayload,
   commandSchemas,
   isMainCommand,
@@ -271,6 +272,21 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       if (!(await confirmDiscard())) return {};
       await engine.request('worktrees.discardNow', { id });
       return {};
+    }
+    case 'race.start': {
+      // Como numa sessão: a pasta, a confiança e as definições vêm do projeto guardado.
+      const request = RaceStartPayload.parse(payload);
+      const project = await projects.get(request.projectId);
+      if (!project) throw new Error('Projeto desconhecido');
+      const started = await engine.request('race.begin', {
+        ...request,
+        cwd: project.path,
+        trusted: project.trusted,
+        checks: project.checks ?? null,
+        setup: project.setup ?? null,
+      });
+      for (const created of started.sessions) attention.track(created.session, project.name);
+      return started;
     }
     case 'session.create': {
       // A interface pede pelo projeto; a pasta vem sempre do que está guardado aqui.

@@ -11,6 +11,7 @@ import {
   WorktreeStats,
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
+import { Race, RaceStartPayload } from './race.ts';
 import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
 
@@ -82,6 +83,9 @@ export const SessionStartPayload = SessionCreatePayload.extend({
   trusted: z.boolean(),
   checks: CheckList.nullable().optional(),
   setup: SetupSpec.nullable().optional(),
+  /** always: worktree mesmo com a pasta livre (as pistas de uma corrida). */
+  worktree: z.enum(['auto', 'always']).optional(),
+  raceId: z.string().optional(),
 }).strict();
 export type SessionStartPayload = z.infer<typeof SessionStartPayload>;
 
@@ -231,6 +235,18 @@ export const commandSchemas = {
       .strict(),
     result: z.object({ project: Project }),
   },
+  /**
+   * Abre uma corrida (main): uma sessão por pista, cada uma na sua worktree, com o mesmo
+   * pedido. Devolve a corrida e as sessões, para a interface as mostrar já.
+   */
+  'race.start': {
+    payload: RaceStartPayload,
+    result: z.object({ race: Race, sessions: z.array(SessionCreateResult) }),
+  },
+  'race.get': {
+    payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
+    result: Race,
+  },
   /** Volta a preparar a worktree da sessão (depois de uma falha). */
   'setup.retry': { payload: SessionRef, result: Empty },
   ...reviewCommandSchemas,
@@ -250,6 +266,7 @@ export const MAIN_COMMANDS = [
   'projects.setTrusted',
   'projects.setChecks',
   'projects.setSetup',
+  'race.start',
   'session.create',
   'session.close',
   'worktrees.discard',
@@ -294,6 +311,16 @@ export const internalCommandSchemas = {
   'projects.detectChecks': {
     payload: z.object({ cwd: z.string().min(1) }).strict(),
     result: z.object({ checks: z.array(CheckSpec) }),
+  },
+  /** Abre a corrida com a pasta e a confiança do projeto (o main resolveu-as). */
+  'race.begin': {
+    payload: RaceStartPayload.extend({
+      cwd: z.string().min(1),
+      trusted: z.boolean(),
+      checks: CheckList.nullable().optional(),
+      setup: SetupSpec.nullable().optional(),
+    }).strict(),
+    result: z.object({ race: Race, sessions: z.array(SessionCreateResult) }),
   },
   /** Fecha a sessão (o main já confirmou se é para deitar fora). */
   'session.closeNow': {

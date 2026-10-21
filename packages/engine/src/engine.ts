@@ -18,6 +18,7 @@ import { SECRET_NAME } from './env.ts';
 import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
 import { SessionManager, type ChecksOptions } from './session-manager.ts';
+import { RaceManager } from './races/race-manager.ts';
 import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
@@ -60,6 +61,7 @@ type Handlers = {
 /** O motor recebe envelopes de pedido e devolve envelopes de resposta. Não sabe do Electron. */
 export class Engine {
   readonly sessions: SessionManager;
+  readonly races: RaceManager;
   readonly logins: LoginManager;
   readonly #handlers: Handlers;
   readonly #checkpoints: CheckpointStore | undefined;
@@ -87,8 +89,14 @@ export class Engine {
       options.settings ??
       (options.dataDir ? fileAgentSettings(options.dataDir) : memoryAgentSettings());
     const env = options.env ?? process.env;
+    // As corridas seguem as sessões pelos eventos delas (o estado de cada pista).
+    const box: { races?: RaceManager } = {};
+    const emitAll = (event: EngineEvent) => {
+      emit(event);
+      box.races?.observe(event);
+    };
     this.sessions = new SessionManager({
-      emit,
+      emit: emitAll,
       registry,
       mcp,
       checkpoints: this.#checkpoints,
@@ -114,6 +122,8 @@ export class Engine {
           ? undefined
           : (options.checks ?? (options.isolated ? undefined : {})),
     });
+    this.races = new RaceManager({ sessions: this.sessions, emit: emitAll });
+    box.races = this.races;
     this.logins = new LoginManager({
       onChange: (agent, error) =>
         emit({ kind: 'event', type: 'agents.changed', agent, ...(error ? { error } : {}) }),
@@ -194,6 +204,8 @@ export class Engine {
       'session.reorder': async (p) => (s.reorder(p.sessionId, p.ids), ok),
       'session.resumeQueue': async (p) => (s.resumeQueue(p.sessionId), ok),
       'session.bring': (p) => s.bring(p.sessionId),
+      'race.begin': (p) => this.races.begin(p),
+      'race.get': async (p) => this.races.get(p.raceId),
       'worktrees.list': async () => ({ orphans: await s.orphans() }),
       'worktrees.bring': (p) => s.bringOrphan(p.id),
       'worktrees.discardNow': async (p) => (await s.discardOrphan(p.id), ok),

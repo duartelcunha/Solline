@@ -197,13 +197,18 @@ export class SessionManager {
         'Com um servidor MCP que corre programas, escolhe um modo que pergunte antes',
       );
     }
-    const place = await this.#placeFor(payload.projectId, payload.cwd);
+    const place = await this.#placeFor(
+      payload.projectId,
+      payload.cwd,
+      payload.worktree === 'always',
+    );
     if (payload.setup !== undefined) this.#setups.set(payload.projectId, payload.setup);
     const sessionId = crypto.randomUUID();
     const port = await this.#ports.reserve(sessionId).catch(() => undefined);
     const prepares = Boolean(place.worktree && payload.trusted && this.#checksOptions);
     const info: SessionInfo = {
       id: sessionId,
+      ...(payload.raceId ? { raceId: payload.raceId } : {}),
       ...(port !== undefined ? { port } : {}),
       ...(prepares ? { setup: { state: 'running' as const, tail: null, durationMs: null } } : {}),
       projectId: payload.projectId,
@@ -716,7 +721,20 @@ export class SessionManager {
   async #placeFor(
     projectId: string,
     projectPath: string,
+    always = false,
   ): Promise<{ cwd: string; workspace: Workspace; worktree?: Worktree; key: string }> {
+    if (always) {
+      // As pistas de uma corrida: cada uma na sua worktree, sempre (sem git não há corrida).
+      const worktree = await this.#worktrees?.create(projectPath, projectId);
+      if (!worktree)
+        throw new Error('As corridas precisam de um projeto git com pelo menos um commit');
+      return {
+        cwd: worktree.cwd,
+        workspace: { kind: 'worktree', branch: worktree.branch, stats: NO_STATS },
+        worktree,
+        key: '',
+      };
+    }
     const norm = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p);
     const slot = `${projectId}\0${norm(projectPath)}`;
     const taken =
