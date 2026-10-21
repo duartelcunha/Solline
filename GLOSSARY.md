@@ -17,3 +17,10 @@ Os nomes do domínio da Solline, como o código os usa.
 - **Queda**: o agente morreu ou o canal fechou sem aviso. Cancela os pedidos e deixa a sessão em
   erro; fechar a sessão de propósito não conta como queda.
 - **Revisor**: o segundo agente que lê o diff de um turno e aponta problemas (bug, risco, ruído).
+- **Fila**: o que escreves enquanto o agente trabalha. Cada mensagem segue sozinha quando o turno
+  acaba, como um turno seu (com checkpoint). Interromper pausa a fila.
+- **Guiar**: mandar uma mensagem a meio do turno ("Agora", Ctrl+Enter), que o agente lê na próxima
+  pausa sem abrir outro turno. Só nos agentes que aceitam; se já for tarde, vai para a fila.
+- **Lida (absorvida)**: a mensagem guiada já chegou ao agente.
+- **SessionTurns**: o dono do turno de uma sessão: um de cada vez, a fila, guiar e as ações que
+  não podem coincidir com um turno (rebobinar, desfazer, trazer).

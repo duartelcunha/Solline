@@ -518,6 +518,14 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
     );
   await page.getByTestId('send').click();
 
+  // A trabalhar, a caixa continua ativa: Enter põe a mensagem seguinte na fila.
+  await expect(page.getByTestId('interrupt')).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('composer-input').fill('Reply with exactly one word: ok');
+  await expect(page.getByTestId('queue-send')).toBeVisible();
+  await page.getByTestId('composer-input').press('Enter');
+  await expect(page.getByTestId('queued')).toHaveCount(1);
+  await shot(page, 'queue');
+
   // Na mesa, a sessão que pede permissão sobe para o topo e responde-se no cartão.
   await page.getByTestId('open-desk').click();
   await expect(page.getByTestId('desk-card')).toHaveCount(2);
@@ -533,6 +541,9 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
   });
   await shot(page, 'desk');
   await page.getByTestId('session-row').first().click();
+  // A mensagem da fila seguiu sozinha no fim do turno, como um turno seu.
+  await expect(page.getByTestId('user-turn')).toHaveCount(2, { timeout: 120_000 });
+  await expect(page.getByTestId('queued')).toHaveCount(0);
 
   // O branch ganhou o nome da mensagem; o ficheiro está só na worktree até se trazer.
   await expect(chip).toHaveAttribute('data-branch', /^solline\/create-a-file-named-/);

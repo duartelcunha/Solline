@@ -130,6 +130,8 @@ export class CodexAppServerAdapter implements AgentAdapter {
   #peer: JsonRpcPeer | undefined;
   #threadId: string | null;
   #codexTurnId: string | null = null;
+  /** Mensagens guiadas aceites pelo Codex e ainda por ler. */
+  readonly #steers = new Map<string, { turnId: string; text: string }>();
   /** O último turno acabado no Codex: um fork volta até ele (lastTurnId). */
   #lastCodexTurn: string | null = null;
   /** Já há conversa nesta thread (retomada ou com turnos): só então há onde voltar. */
@@ -219,7 +221,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
         modes,
         effort: models.some((m) => m.efforts.length > 0),
         effortOrder: effortOrder(models),
-        features: { cost: false, context: true, resume: true, rewind: true },
+        features: { cost: false, context: true, resume: true, rewind: true, steer: true },
       };
       if (!modes.some((m) => m.id === this.#settings.mode))
         this.#settings.mode = DEFAULT_CODEX_MODE;
@@ -312,6 +314,36 @@ export class CodexAppServerAdapter implements AgentAdapter {
     return turnId;
   }
 
+  /** Guia o turno ativo com turn/steer; se o turno já acabou (ou ainda não tem id), fila. */
+  async steer(text: string, id: string): Promise<'joined' | 'too-late'> {
+    const peer = this.#peer;
+    const turn = this.#codexTurnId;
+    if (!peer || peer.isClosed || !this.#threadId || !turn || !this.#shell.running) {
+      return 'too-late';
+    }
+    try {
+      await peer.request(
+        'turn/steer',
+        {
+          threadId: this.#threadId,
+          input: [{ type: 'text', text, text_elements: [] }],
+          expectedTurnId: turn,
+          clientUserMessageId: id,
+        },
+        CONTROL_TIMEOUT_MS,
+      );
+    } catch {
+      return 'too-late';
+    }
+    const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
+    this.#emit([
+      ...deltas,
+      { type: 'block.upsert', turnId, block: { kind: 'steer', id, text, status: 'waiting' } },
+    ]);
+    this.#steers.set(id, { turnId, text });
+    return 'joined';
+  }
+
   async interrupt(): Promise<void> {
     const peer = this.#peer;
     if (!peer || !this.#shell.running || !this.#threadId) return;
@@ -402,6 +434,19 @@ export class CodexAppServerAdapter implements AgentAdapter {
   }
 
   #onNotification(method: string, params: unknown): void {
+    // O próximo passo do agente depois de aceitar a mensagem guiada já a leu.
+    if (method === 'item/started' && this.#steers.size > 0) {
+      for (const [id, steer] of this.#steers) {
+        this.#emit([
+          {
+            type: 'block.upsert',
+            turnId: steer.turnId,
+            block: { kind: 'steer', id, text: steer.text, status: 'absorbed' },
+          },
+        ]);
+      }
+      this.#steers.clear();
+    }
     if (method === 'serverRequest/resolved') {
       const requestId = (params as { requestId?: RequestId }).requestId;
       this.#shell.cancelWhere((rpcId) => rpcId === requestId, 'resolved');

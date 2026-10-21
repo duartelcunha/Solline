@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Square } from 'lucide-react';
+import { ArrowUp, CornerDownRight, ListPlus, Square } from 'lucide-react';
 import type { Checks, TokenUsage } from '@solline/protocol';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { actions, useSession } from '../../stores/app.ts';
@@ -110,18 +110,25 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   const checks = useSession(sessionId, (s) => s.checks);
   const busy = state === 'running' || state === 'needs-you';
   const offline = state === 'starting' || state === 'error';
-  const canSend = !busy && !offline && text.trim().length > 0;
+  const hasText = text.trim().length > 0;
+  const canSend = !offline && hasText;
+  const canSteer = busy && features?.steer === true;
   const failing = firstFailing(checks);
 
-  // shortcut: não há fila de mensagens enquanto o agente trabalha; o envio fica bloqueado
-  // até ao fim do turno. Rever quando fizer falta mandar mensagens a meio (M2).
-  async function send() {
+  /**
+   * Com o agente parado, segue logo. A trabalhar: 'queue' vai para a fila (segue quando o
+   * turno acabar) e 'now' guia o turno que corre, onde o agente aceita.
+   */
+  async function send(how: 'queue' | 'now' = 'queue') {
     if (!canSend) return;
     const message = text.trim();
     setText('');
-    const ok = await actions.send(sessionId, message);
+    const ok = await actions.send(sessionId, message, busy ? how : undefined);
     if (!ok) setText(message);
   }
+
+  // O botão muda de papel: enviar, parar (a trabalhar sem texto) ou pôr na fila.
+  const role: 'send' | 'stop' | 'queue' = !busy ? 'send' : hasText ? 'queue' : 'stop';
 
   return (
     <div className="shrink-0 pb-5">
@@ -163,14 +170,16 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                void send();
+                void send(e.ctrlKey || e.metaKey ? 'now' : 'queue');
               }
             }}
             placeholder={
               offline
                 ? 'A sessão não está ligada'
                 : busy
-                  ? `O ${agentLabel} está a trabalhar…`
+                  ? canSteer
+                    ? `O ${agentLabel} está a trabalhar · Enter põe na fila, Ctrl+Enter guia agora`
+                    : `O ${agentLabel} está a trabalhar · Enter põe na fila`
                   : 'Escreve uma mensagem'
             }
             aria-label="Mensagem"
@@ -208,20 +217,43 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
               ) : usage.tokens ? (
                 <TokenCount usage={usage.tokens} />
               ) : null}
+              {canSteer && hasText ? (
+                <button
+                  type="button"
+                  onClick={() => void send('now')}
+                  title="Guiar o turno agora (Ctrl+Enter)"
+                  data-testid="steer-now"
+                  className="chip-in sl-press inline-flex h-7 items-center gap-1 rounded-control px-2 text-[12px] text-fg hover:bg-surface-hover"
+                >
+                  <CornerDownRight size={13} /> Agora
+                </button>
+              ) : null}
               {/* Um só botão que muda de papel: o ícone troca no mesmo sítio. */}
               <button
                 type="button"
-                onClick={() => (busy ? void actions.interrupt(sessionId) : void send())}
-                disabled={!busy && !canSend}
-                aria-label={busy ? 'Interromper' : 'Enviar'}
-                title={busy ? 'Interromper' : 'Enviar (Enter)'}
-                data-testid={busy ? 'interrupt' : 'send'}
+                onClick={() => (role === 'stop' ? void actions.interrupt(sessionId) : void send())}
+                disabled={role === 'send' && !canSend}
+                aria-label={
+                  role === 'stop' ? 'Interromper' : role === 'queue' ? 'Pôr na fila' : 'Enviar'
+                }
+                title={
+                  role === 'stop'
+                    ? 'Interromper'
+                    : role === 'queue'
+                      ? 'Pôr na fila (Enter): segue quando o turno acabar'
+                      : 'Enviar (Enter)'
+                }
+                data-testid={
+                  role === 'stop' ? 'interrupt' : role === 'queue' ? 'queue-send' : 'send'
+                }
                 style={morphName('composer-action')}
                 className="grid size-8 place-items-center rounded-full bg-fg text-bg sl-press disabled:bg-surface-sunken disabled:text-subtle"
               >
-                <IconSwap swapKey={busy ? 'stop' : 'send'}>
-                  {busy ? (
+                <IconSwap swapKey={role}>
+                  {role === 'stop' ? (
                     <Square size={11} fill="currentColor" strokeWidth={0} />
+                  ) : role === 'queue' ? (
+                    <ListPlus size={16} strokeWidth={2} />
                   ) : (
                     <ArrowUp size={16} strokeWidth={2.25} />
                   )}

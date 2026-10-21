@@ -165,9 +165,21 @@ export const NoticeBlock = z.object({
   text: z.string(),
 });
 
+/**
+ * Uma mensagem tua que guiou o agente a meio do turno: fica no sítio onde a mandaste, "à espera"
+ * até o agente a ler na próxima pausa (o fim de uma ferramenta), e depois "lida".
+ */
+export const SteerBlock = z.object({
+  kind: z.literal('steer'),
+  id: z.string(),
+  text: z.string(),
+  status: z.enum(['waiting', 'absorbed']),
+});
+
 export const Block = z.discriminatedUnion('kind', [
   TextBlock,
   ThinkingBlock,
+  SteerBlock,
   ToolBlock,
   PermissionBlock,
   PlanBlock,
@@ -272,6 +284,8 @@ export const AgentFeatures = z.object({
   resume: z.boolean(),
   /** Rebobina a conversa no próprio agente; sem isto, rebobinar abre uma sessão nova com resumo. */
   rewind: z.boolean(),
+  /** Aceita uma mensagem a meio do turno ("Agora"); sem isto, só há fila. */
+  steer: z.boolean().optional(),
 });
 export type AgentFeatures = z.infer<typeof AgentFeatures>;
 

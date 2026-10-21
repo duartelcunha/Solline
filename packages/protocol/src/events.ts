@@ -74,6 +74,19 @@ export const SessionWorkspaceEvent = z.object({
   workspace: Workspace,
 });
 
+/** A fila de uma sessão mudou: entrou, saiu, mudou de ordem ou ficou em pausa. */
+export const SessionQueueEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.queue'),
+  sessionId: z.string(),
+  queue: z.object({
+    items: z.array(z.object({ id: z.string(), text: z.string() })),
+    /** Interrompeste: a fila espera por "Continuar". */
+    paused: z.boolean(),
+  }),
+});
+export type SessionQueue = z.infer<typeof SessionQueueEvent>['queue'];
+
 export const EngineErrorEvent = z.object({
   kind: z.literal('event'),
   type: z.literal('engine.error'),
@@ -100,6 +113,7 @@ export const EngineEvent = z.discriminatedUnion('type', [
   SessionQualityEvent,
   SessionChecksEvent,
   SessionWorkspaceEvent,
+  SessionQueueEvent,
   EngineErrorEvent,
 ]);
 export type EngineEvent = z.infer<typeof EngineEvent>;

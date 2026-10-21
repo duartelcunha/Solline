@@ -18,6 +18,7 @@ import {
   type Checks,
   type Quality,
   type Orphan,
+  type SessionQueue,
   type Workspace,
   type WorktreeStats,
   type Timeline,
@@ -32,6 +33,7 @@ import { NO_REVIEW, SessionQuality, fixMessage } from './quality/session-quality
 import { ProjectChecks, checkFixMessage } from './checks/project-checks.ts';
 import type { RunCommand } from './checks/run.ts';
 import type { Worktree, WorktreeManager } from './worktrees/worktrees.ts';
+import { SessionTurns, type How, type Submitted } from './session-turns.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
@@ -85,8 +87,8 @@ interface Memory {
   points: Map<string, string | null>;
   /** O turno com checkpoint aberto, à espera de o agente parar. */
   openTurn: string | null;
-  /** A enviar ou a rebobinar: um segundo pedido igual espera que este acabe. */
-  busy: boolean;
+  /** O dono do turno: um de cada vez, a fila e o que não pode coincidir com um turno. */
+  cycle: SessionTurns;
   /** Resumo que segue com a próxima mensagem, depois de rebobinar numa sessão nova. */
   context: string | undefined;
   /** A segunda opinião: um revisor lê o diff de cada turno (sem revisor, não existe). */
@@ -206,7 +208,7 @@ export class SessionManager {
       checkpoints: undefined,
       points: new Map(),
       openTurn: null,
-      busy: false,
+      cycle: this.#turnsFor(() => info),
       context: undefined,
       quality: this.#reviewer
         ? new SessionQuality({
@@ -284,7 +286,7 @@ export class SessionManager {
   async fixCheck(sessionId: string, id: string): Promise<string> {
     const failure = this.#projectChecks(sessionId).failure(id);
     if (!failure) throw new Error('Essa verificação já não está a falhar');
-    return this.send(sessionId, checkFixMessage(failure.spec, failure.result));
+    return (await this.send(sessionId, checkFixMessage(failure.spec, failure.result))).turnId;
   }
 
   #projectChecks(sessionId: string): ProjectChecks {
@@ -332,14 +334,18 @@ export class SessionManager {
    * Antes de a mensagem seguir, o disco fica guardado (o checkpoint deste turno) e o ponto
    * de rebobinar do agente também. Se o checkpoint falhar, a mensagem segue na mesma.
    */
-  async send(sessionId: string, text: string): Promise<string> {
+  async send(sessionId: string, text: string, how: How = 'queue'): Promise<Submitted> {
+    this.#get(sessionId);
+    return this.#memoryOf(sessionId).cycle.submit(text, how);
+  }
+
+  /** Abre um turno: checkpoint do disco, ponto de rebobinar e a mensagem para o agente. */
+  async #startTurn(sessionId: string, text: string): Promise<string> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
-    this.#requireIdle(entry, memory, 'mandar outra mensagem');
-    memory.busy = true;
     // Um turno novo muda os ficheiros: a ronda de verificações a meio deixa de valer.
     this.#checks.get(entry.info.cwd)?.cancel();
-    try {
+    {
       const turnId = crypto.randomUUID();
       const point = entry.adapter.rewindPoint?.();
       const checkpoints = memory.checkpoints;
@@ -368,9 +374,51 @@ export class SessionManager {
         void this.#nameBranch(sessionId, text);
       }
       return sent;
-    } finally {
-      memory.busy = false;
     }
+  }
+
+  /** O dono do turno de uma sessão, ligado ao adaptador e ao evento da fila. */
+  #turnsFor(info: () => SessionInfo): SessionTurns {
+    return new SessionTurns({
+      start: (text) => this.#startTurn(info().id, text),
+      steer: (text, id) => {
+        const adapter = this.#sessions.get(info().id)?.adapter;
+        return adapter?.steer ? adapter.steer(text, id) : Promise.resolve('too-late' as const);
+      },
+      running: () => {
+        const state = this.#sessions.get(info().id)?.info.state;
+        return state === 'running' || state === 'needs-you' || state === 'starting';
+      },
+      emit: (queue) =>
+        this.#emit({ kind: 'event', type: 'session.queue', sessionId: info().id, queue }),
+      failed: (error) =>
+        this.#emit({
+          kind: 'event',
+          type: 'engine.error',
+          sessionId: info().id,
+          message: `A mensagem da fila não seguiu: ${error instanceof Error ? error.message : String(error)}`,
+        }),
+    });
+  }
+
+  queue(sessionId: string): SessionQueue {
+    this.#get(sessionId);
+    return this.#memoryOf(sessionId).cycle.queue;
+  }
+
+  unqueue(sessionId: string, id: string): void {
+    this.#get(sessionId);
+    this.#memoryOf(sessionId).cycle.unqueue(id);
+  }
+
+  reorder(sessionId: string, ids: readonly string[]): void {
+    this.#get(sessionId);
+    this.#memoryOf(sessionId).cycle.reorder(ids);
+  }
+
+  resumeQueue(sessionId: string): void {
+    this.#get(sessionId);
+    this.#memoryOf(sessionId).cycle.resume();
   }
 
   /** A linha do tempo, com o "por rever" contado de novo (o disco pode ter mudado por fora). */
@@ -413,7 +461,7 @@ export class SessionManager {
   async comment(sessionId: string, comments: ReviewComment[], note?: string): Promise<string> {
     const checkpoints = this.#memoryOf(sessionId).checkpoints;
     const files = checkpoints?.available ? await checkpoints.diff({ kind: 'review' }) : [];
-    return this.send(sessionId, commentsMessage(comments, files, note));
+    return (await this.send(sessionId, commentsMessage(comments, files, note))).turnId;
   }
 
   /**
@@ -428,13 +476,7 @@ export class SessionManager {
   ): Promise<{ timeline: Timeline; text: string | null; conversation: ConversationRewind | null }> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
-    this.#requireIdle(entry, memory, 'rebobinar');
-    memory.busy = true;
-    try {
-      return await this.#rewind(entry, memory, turnId, options);
-    } finally {
-      memory.busy = false;
-    }
+    return memory.cycle.exclusive('rebobinar', () => this.#rewind(entry, memory, turnId, options));
   }
 
   async #rewind(
@@ -497,7 +539,9 @@ export class SessionManager {
   }
 
   interrupt(sessionId: string): Promise<void> {
-    return this.#get(sessionId).adapter.interrupt();
+    const entry = this.#get(sessionId);
+    this.#memory.get(sessionId)?.cycle.interrupted();
+    return entry.adapter.interrupt();
   }
 
   /** Modo, modelo e effort só passam se o agente os anunciou nas capacidades. */
@@ -623,7 +667,13 @@ export class SessionManager {
     if (!entry || !checkpoint || checkpoint.stats.files === 0) return;
     // Um turno novo pode ter começado enquanto o checkpoint fechava: não verificar a meio dele.
     const memory = this.#memory.get(sessionId);
-    if (memory?.openTurn || memory?.busy || entry.info.state !== 'idle') return;
+    if (
+      memory?.openTurn ||
+      memory?.cycle.busy ||
+      memory?.cycle.queue.items.length ||
+      entry.info.state !== 'idle'
+    )
+      return;
     await this.#checks.get(entry.info.cwd)?.run(turnId);
   }
 
@@ -689,11 +739,11 @@ export class SessionManager {
     if (!memory.worktree || !this.#worktrees)
       throw new Error('Esta sessão trabalha na pasta do projeto');
     this.#requireProjectIdle(memory.worktree.top);
-    memory.busy = true;
-    const done = this.#bring(sessionId, memory).finally(() => {
-      memory.busy = false;
-      memory.bringing = undefined;
-    });
+    const done = memory.cycle
+      .exclusive('trazer o trabalho', () => this.#bring(sessionId, memory))
+      .finally(() => {
+        memory.bringing = undefined;
+      });
     memory.bringing = done;
     return done;
   }
@@ -719,9 +769,19 @@ export class SessionManager {
   async close(
     sessionId: string,
     choice?: 'bring' | 'keep' | 'discard',
-  ): Promise<{ closed: boolean; stats?: WorktreeStats; conflicts?: string[]; into?: string }> {
+    dropQueue = false,
+  ): Promise<{
+    closed: boolean;
+    queued?: number;
+    stats?: WorktreeStats;
+    conflicts?: string[];
+    into?: string;
+  }> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
+    const queued = memory.cycle.queue.items.length;
+    if (queued > 0 && !dropQueue) return { closed: false, queued };
+    memory.cycle.clear();
     await memory.bringing?.catch(() => undefined);
     const worktree = memory.worktree;
     if (worktree && this.#worktrees) {
@@ -811,7 +871,7 @@ export class SessionManager {
       const m = this.#memory.get(e.info.id);
       if (!m || m.worktree) continue;
       const rel = relative(norm(top), norm(e.info.cwd));
-      if (rel.startsWith("..") || isAbsolute(rel)) continue;
+      if (rel.startsWith('..') || isAbsolute(rel)) continue;
       this.#requireIdle(e, m, 'trazer o trabalho para o projeto (há uma sessão a trabalhar lá)');
       this.#checks.get(e.info.cwd)?.reset();
     }
@@ -856,13 +916,17 @@ export class SessionManager {
   async fix(sessionId: string, ids: readonly string[]): Promise<string> {
     const findings = this.#memoryOf(sessionId).quality?.pick(ids) ?? [];
     if (findings.length === 0) throw new Error('Esses achados já não existem');
-    return this.send(sessionId, fixMessage(findings));
+    return (await this.send(sessionId, fixMessage(findings))).turnId;
   }
 
   /** Mexer no disco ou na conversa só com o agente parado e nada a meio. */
   #requireIdle(entry: Entry, memory: Memory, what: string): void {
     const state = entry.info.state;
-    if (memory.busy || (state !== 'idle' && state !== 'error')) {
+    if (
+      memory.cycle.busy ||
+      memory.cycle.queue.items.length > 0 ||
+      (state !== 'idle' && state !== 'error')
+    ) {
       throw new Error(`Espera que o agente acabe (ou interrompe-o) antes de ${what}`);
     }
   }
@@ -985,6 +1049,7 @@ export class SessionManager {
       state: (state, error) => {
         info.state = state;
         if (state === 'idle' || state === 'error') this.#turnSettled(info.id);
+        if (state === 'idle' && this.#memory.get(info.id)?.cycle.settled()) return;
         emit({
           kind: 'event',
           type: 'session.state',

@@ -86,4 +86,43 @@ describe.skipIf(skip)('ClaudeSdkAdapter (SDK real)', () => {
       await adapter.close();
     }
   });
+
+  it('guiar a meio: a mensagem entra no mesmo turno e é lida', { timeout: 240_000 }, async () => {
+    const sink = recordingSink();
+    const adapter = new ClaudeSdkAdapter(
+      { cwd, mode: 'bypassPermissions', loadSettings: false },
+      sink,
+    );
+    try {
+      await adapter.start();
+      await adapter.setModel('haiku');
+      await adapter.setEffort('low');
+      await adapter.send(
+        'Use the Bash tool to run exactly: sleep 6 && echo first-done. Then reply with one short sentence.',
+      );
+      // Guiar só com uma ferramenta a correr: espera pelo Bash.
+      await waitFor(
+        () =>
+          reduce(sink.deltas)
+            .flatMap((t) => t.blocks)
+            .some((b) => b.kind === 'tool' && b.state === 'running'),
+        120_000,
+      );
+      expect(
+        await adapter.steer('Also include the word PINEAPPLE in your final reply.', 's1'),
+      ).toBe('joined');
+      await waitFor(() => sink.states.at(-1)?.state === 'idle', 180_000);
+      const blocks = reduce(sink.deltas).flatMap((t) => t.blocks);
+      expect(blocks.find((b) => b.kind === 'steer')).toMatchObject({ status: 'absorbed' });
+      const text = blocks
+        .filter((b) => b.kind === 'text')
+        .map((b) => (b.kind === 'text' ? b.text : ''))
+        .join(' ');
+      expect(text).toMatch(/PINEAPPLE/i);
+      // Um só turno do utilizador: guiar não abriu outro.
+      expect(reduce(sink.deltas).filter((t) => t.role === 'user')).toHaveLength(1);
+    } finally {
+      await adapter.close();
+    }
+  });
 });

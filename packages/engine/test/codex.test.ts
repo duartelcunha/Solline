@@ -146,6 +146,7 @@ describe('CodexAppServerAdapter', () => {
       context: true,
       resume: true,
       rewind: true,
+      steer: true,
     });
     expect(started.settings).toMatchObject({ model: 'gpt-6-luna', mode: 'ask', effort: 'medium' });
     expect(a.agentSessionId()).toBe('thread-1');
@@ -273,6 +274,33 @@ describe('CodexAppServerAdapter', () => {
           d.block.status === 'cancelled',
       ),
     );
+    await a.close();
+  });
+
+  it('guiar manda turn/steer ao turno ativo e a mensagem passa a lida no passo seguinte', async () => {
+    const server = fakeCodexServer();
+    const { adapter: a, sink } = adapter(server);
+    await a.start();
+    expect(a.capabilities().features.steer).toBe(true);
+    // Sem turno ativo, é tarde: vai para a fila.
+    expect(await a.steer('cedo de mais', 's0')).toBe('too-late');
+    await a.send('trabalho longo');
+    await waitFor(() => server.turnId() === 'turn-1');
+    expect(await a.steer('usa o pnpm', 's1')).toBe('joined');
+    expect(server.received.find((m) => m.method === 'turn/steer')).toMatchObject({
+      params: { threadId: 'thread-1', expectedTurnId: 'turn-1', clientUserMessageId: 's1' },
+    });
+    const steer = () =>
+      reduce(sink.deltas)
+        .flatMap((t) => t.blocks)
+        .find((b) => b.kind === 'steer');
+    expect(steer()).toMatchObject({ status: 'waiting', text: 'usa o pnpm' });
+    server.notify('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: { type: 'reasoning', id: 'r1', summary: [], content: [] },
+    });
+    await waitFor(() => steer()?.status === 'absorbed');
     await a.close();
   });
 

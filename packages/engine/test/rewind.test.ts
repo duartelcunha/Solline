@@ -156,7 +156,7 @@ function lastTimeline(sessionId: string): SessionTimelineEvent['timeline'] | und
 }
 
 async function turn(sessionId: string, text: string): Promise<string> {
-  const turnId = await manager.send(sessionId, text);
+  const { turnId } = await manager.send(sessionId, text);
   await waitFor(
     () => lastTimeline(sessionId)?.checkpoints.find((c) => c.turnId === turnId)?.state === 'done',
     10_000,
@@ -279,14 +279,40 @@ describe('rever e rebobinar no SessionManager', { timeout: 60_000 }, () => {
   it('recusa rebobinar com o agente a trabalhar', async () => {
     makeManager(true);
     const id = await startSession();
-    const t1 = await manager.send(id, 'olá');
+    const { turnId: t1 } = await manager.send(id, 'olá');
     await expect(manager.rewind(id, t1, { files: true, conversation: true })).rejects.toThrow(
       /Espera que o agente acabe/,
     );
-    // Nada que escreva no disco ou mande outra mensagem corre a meio de um turno.
+    // Nada que escreva no disco corre a meio de um turno; outra mensagem vai para a fila.
     await expect(manager.review(id, 'reject')).rejects.toThrow(/antes de rejeitar/);
     await expect(manager.undo(id)).rejects.toThrow(/antes de desfazer/);
-    await expect(manager.send(id, 'outra')).rejects.toThrow(/antes de mandar outra mensagem/);
+    expect(await manager.send(id, 'outra')).toMatchObject({ how: 'queued' });
+    expect(manager.queue(id).items.map((i) => i.text)).toEqual(['outra']);
+  });
+
+  it('a fila segue no fim do turno, cada mensagem com o seu checkpoint, sem parar no meio', async () => {
+    makeManager(true);
+    const id = await startSession();
+    expect(await manager.send(id, 'escreve f.txt=v1')).toMatchObject({ how: 'sent' });
+    expect(await manager.send(id, 'escreve f.txt=v2')).toMatchObject({ how: 'queued' });
+    await waitFor(
+      () =>
+        lastTimeline(id)?.checkpoints.length === 2 &&
+        lastTimeline(id)!.checkpoints.every((c) => c.state === 'done'),
+      10_000,
+    );
+    expect(await read('f.txt')).toBe('v2\n');
+    expect(ScriptedAdapter.received.map((r) => r.text)).toEqual([
+      'escreve f.txt=v1',
+      'escreve f.txt=v2',
+    ]);
+    // Entre os dois turnos a sessão não passou por "parada".
+    const states = events
+      .filter((e) => e.type === 'session.state' && e.sessionId === id)
+      .map((e) => (e as { state: string }).state);
+    const afterFirst = states.slice(states.indexOf('running'));
+    expect(afterFirst.filter((s) => s === 'idle')).toHaveLength(1);
+    expect(afterFirst.at(-1)).toBe('idle');
   });
 
   it('os comentários seguem como mensagem, com a linha citada', async () => {

@@ -170,6 +170,12 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
         turn: { id: `turn-${++turn}`, items: [], status: 'inProgress', error: null },
       }),
       'turn/interrupt': () => ({}),
+      // Como o app-server: o turno guiado tem de ser o ativo.
+      'turn/steer': () => {
+        const expected = (msg.params as { expectedTurnId?: string }).expectedTurnId;
+        if (expected !== `turn-${turn}`) throw new Error('turno errado');
+        return { turnId: expected };
+      },
       'account/login/start': () =>
         options.login ?? {
           type: 'chatgpt',
@@ -190,8 +196,15 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
       return;
     }
     const result = results[msg.method];
-    if (result) reply(id, result());
-    else send({ id, error: { code: -32601, message: 'fake' } });
+    if (!result) {
+      send({ id, error: { code: -32601, message: 'fake' } });
+      return;
+    }
+    try {
+      reply(id, result());
+    } catch (error) {
+      send({ id, error: { code: -32000, message: String(error) } });
+    }
   });
 
   const transport: CodexTransport = {

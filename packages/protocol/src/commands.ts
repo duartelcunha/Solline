@@ -117,10 +117,30 @@ export const commandSchemas = {
   /** Os servidores MCP do catálogo e o estado de cada um. */
   'mcp.list': { payload: Empty, result: z.object({ servers: z.array(McpServerDescriptor) }) },
   'session.create': { payload: SessionCreatePayload, result: SessionCreateResult },
+  /**
+   * Manda uma mensagem. Com o agente parado segue logo; ocupado, vai para a fila (how: queue,
+   * por omissão) ou guia o turno que corre (how: now, só onde features.steer). turnId é o turno
+   * novo, o item da fila ou o turno guiado, conforme `how` devolvido.
+   */
   'session.send': {
-    payload: SessionRef.extend({ text: MessageText }).strict(),
-    result: z.object({ turnId: z.string() }),
+    payload: SessionRef.extend({
+      text: MessageText,
+      how: z.enum(['queue', 'now']).optional(),
+    }).strict(),
+    result: z.object({ turnId: z.string(), how: z.enum(['sent', 'queued', 'steered']) }),
   },
+  /** Tira uma mensagem da fila. */
+  'session.unqueue': {
+    payload: SessionRef.extend({ id: z.string().min(1).max(64) }).strict(),
+    result: Empty,
+  },
+  /** Muda a ordem da fila (todos os ids, pela ordem nova). */
+  'session.reorder': {
+    payload: SessionRef.extend({ ids: z.array(z.string().min(1).max(64)).max(50) }).strict(),
+    result: Empty,
+  },
+  /** Retoma a fila depois de interromper. */
+  'session.resumeQueue': { payload: SessionRef, result: Empty },
   'session.interrupt': { payload: SessionRef, result: Empty },
   /** Volta a abrir uma sessão que caiu, com o mesmo histórico (resume do agente). */
   'session.resume': { payload: SessionRef, result: SessionCreateResult },
@@ -151,9 +171,13 @@ export const commandSchemas = {
   'session.close': {
     payload: SessionRef.extend({
       worktree: z.enum(['bring', 'keep', 'discard']).optional(),
+      /** Fecha mesmo com mensagens na fila (deitam-se fora). */
+      dropQueue: z.boolean().optional(),
     }).strict(),
     result: z.object({
       closed: z.boolean(),
+      /** Não fechou: há estas mensagens na fila. */
+      queued: z.number().int().optional(),
       stats: WorktreeStats.optional(),
       conflicts: z.array(z.string()).optional(),
       into: z.string().optional(),

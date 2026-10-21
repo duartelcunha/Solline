@@ -145,7 +145,7 @@ export function capabilitiesFrom(models: ModelInfo[]): AgentCapabilities {
     modes: CLAUDE_MODES.filter((mode) => mode.id !== 'auto' || auto),
     effort: listed.some((model) => model.efforts.length > 0),
     effortOrder: [...EFFORT_LEVELS],
-    features: { cost: true, context: true, resume: true, rewind: true },
+    features: { cost: true, context: true, resume: true, rewind: true, steer: true },
   };
 }
 
@@ -282,6 +282,10 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   readonly #normalizer: ClaudeNormalizer;
   /** Os pedidos, as quedas e o estado da sessão. */
   readonly #shell: SessionShell;
+  /** Ferramentas pedidas e ainda sem resultado: só com uma a correr se pode guiar. */
+  readonly #inFlight = new Set<string>();
+  /** Mensagens guiadas por ler; armed: uma ferramenta acabou desde que foram mandadas. */
+  readonly #steers = new Map<string, { turnId: string; text: string; armed: boolean }>();
   #queue: AsyncQueue<SDKUserMessage> | undefined;
   #query: Query | undefined;
   #pump: Promise<void> | undefined;
@@ -364,6 +368,70 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       uuid: turnId as SDKUserMessage['uuid'],
     });
     return turnId;
+  }
+
+  /**
+   * Guia a meio: só com uma ferramenta a correr, porque o SDK lê uma mensagem 'next' quando a
+   * ferramenta acaba, no mesmo turno (um só result). Sem ferramenta a correr, a mensagem
+   * podia ficar para depois do result e abrir outro turno: vai para a fila.
+   */
+  async steer(text: string, id: string): Promise<'joined' | 'too-late'> {
+    const queue = this.#queue;
+    if (!queue || queue.closed || !this.#shell.running || this.#inFlight.size === 0) {
+      return 'too-late';
+    }
+    const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
+    this.#emit([
+      ...deltas,
+      { type: 'block.upsert', turnId, block: { kind: 'steer', id, text, status: 'waiting' } },
+    ]);
+    this.#steers.set(id, { turnId, text, armed: false });
+    queue.push({
+      type: 'user',
+      message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+      uuid: id as SDKUserMessage['uuid'],
+      priority: 'next',
+    });
+    return 'joined';
+  }
+
+  /** As ferramentas a correr e as mensagens guiadas que o agente ainda não leu. */
+  #track(message: SDKMessage): void {
+    // Com mensagens parciais, a ferramenta começa no stream antes da mensagem inteira chegar.
+    if (message.type === 'stream_event') {
+      const event = message.event;
+      if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
+        this.#inFlight.add(event.content_block.id);
+      }
+      return;
+    }
+    if (message.type === 'assistant') {
+      for (const part of message.message.content) {
+        if (part.type === 'tool_use') this.#inFlight.add(part.id);
+      }
+      // A primeira resposta depois de uma ferramenta acabar já leu as mensagens guiadas.
+      for (const [id, steer] of this.#steers) {
+        if (!steer.armed) continue;
+        this.#steers.delete(id);
+        this.#emit([
+          {
+            type: 'block.upsert',
+            turnId: steer.turnId,
+            block: { kind: 'steer', id, text: steer.text, status: 'absorbed' },
+          },
+        ]);
+      }
+    } else if (message.type === 'user' && Array.isArray(message.message.content)) {
+      for (const part of message.message.content) {
+        if (typeof part === 'object' && part.type === 'tool_result') {
+          this.#inFlight.delete(part.tool_use_id);
+          for (const steer of this.#steers.values()) steer.armed = true;
+        }
+      }
+    } else if (message.type === 'result') {
+      this.#inFlight.clear();
+    }
   }
 
   async interrupt(): Promise<void> {
@@ -484,6 +552,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   }
 
   #handle(message: SDKMessage): void {
+    this.#track(message);
     if (message.type === 'system' && message.subtype === 'init') {
       this.#agentSessionId = message.session_id;
     }

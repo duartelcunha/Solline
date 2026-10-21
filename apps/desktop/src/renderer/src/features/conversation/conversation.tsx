@@ -14,6 +14,7 @@ import { MorphScope } from '../../lib/morph.ts';
 import { PermissionCard, PlanCard, QuestionCard } from './asks.tsx';
 import { NoticeView, Spinner, ThinkingView, TodoView, ToolGroup } from './blocks.tsx';
 import { ToolDetail } from './tool-detail.tsx';
+import { QueueList, SteerView } from './queue.tsx';
 
 function UserTurn({ turn }: { turn: Turn }) {
   const text = turn.blocks.find((b) => b.kind === 'text');
@@ -106,6 +107,8 @@ function AssistantTurn({
               return <TodoView key={block.id} block={block} />;
             case 'notice':
               return <NoticeView key={block.id} block={block} />;
+            case 'steer':
+              return <SteerView key={block.id} block={block} />;
           }
         })}
       </div>
@@ -235,6 +238,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
                   <Spinner label={`O ${agentLabel} está a trabalhar`} /> A pensar…
                 </div>
               ) : null}
+              <QueueList sessionId={sessionId} />
             </div>
           )}
         </div>

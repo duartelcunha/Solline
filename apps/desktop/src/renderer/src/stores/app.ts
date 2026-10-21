@@ -52,7 +52,14 @@ interface AppState {
   /** Agentes com um pedido de login ainda sem resposta (o botão fica desligado). */
   loginRequests: string[];
   /** Uma sessão que não fechou porque tem trabalho por trazer: o diálogo pergunta o que fazer. */
-  closing: { sessionId: string; files: number; additions: number; deletions: number } | null;
+  closing: {
+    sessionId: string;
+    files: number;
+    additions: number;
+    deletions: number;
+    /** Mensagens na fila que se perdem ao fechar. */
+    queued?: number;
+  } | null;
   /** A vista principal: a mesa com todas as sessões, ou a conversa da sessão ativa. */
   view: 'desk' | 'session';
   /** Worktrees que ficaram no disco sem sessão (por trazer). */
@@ -377,10 +384,10 @@ export const actions = {
     }
   },
 
-  async send(sessionId: string, text: string): Promise<boolean> {
+  async send(sessionId: string, text: string, how?: 'queue' | 'now'): Promise<boolean> {
     sessionStores.get(sessionId)?.setState({ actionError: null });
     try {
-      await request('session.send', { sessionId, text });
+      await request('session.send', { sessionId, text, ...(how ? { how } : {}) });
       return true;
     } catch (error) {
       setActionError(sessionId, error);
@@ -418,13 +425,24 @@ export const actions = {
   /**
    * Fecha uma sessão. Com trabalho por trazer e sem escolha, abre o diálogo em vez de fechar.
    */
-  async closeSession(sessionId: string, worktree?: 'bring' | 'keep' | 'discard'): Promise<void> {
+  async closeSession(
+    sessionId: string,
+    worktree?: 'bring' | 'keep' | 'discard',
+    dropQueue = false,
+  ): Promise<void> {
     try {
       const result = await request('session.close', {
         sessionId,
         ...(worktree ? { worktree } : {}),
+        ...(dropQueue ? { dropQueue } : {}),
       });
       if (!result.closed) {
+        if (result.queued) {
+          useApp.setState({
+            closing: { sessionId, files: 0, additions: 0, deletions: 0, queued: result.queued },
+          });
+          return;
+        }
         if (result.conflicts) {
           const into = result.into ?? 'o branch do projeto';
           sessionStores.get(sessionId)?.setState({ conflicts: { files: result.conflicts, into } });
@@ -451,6 +469,33 @@ export const actions = {
     } catch (error) {
       useApp.setState({ closing: null, notice: message(error) });
     }
+  },
+
+  async unqueue(sessionId: string, id: string): Promise<void> {
+    await request('session.unqueue', { sessionId, id }).catch((error: unknown) =>
+      setActionError(sessionId, error),
+    );
+  },
+
+  async reorderQueue(sessionId: string, ids: string[]): Promise<void> {
+    await request('session.reorder', { sessionId, ids }).catch((error: unknown) =>
+      setActionError(sessionId, error),
+    );
+  },
+
+  async resumeQueue(sessionId: string): Promise<void> {
+    await request('session.resumeQueue', { sessionId }).catch((error: unknown) =>
+      setActionError(sessionId, error),
+    );
+  },
+
+  /** Tira uma mensagem da fila e devolve-a à caixa de texto, para editar. */
+  async editQueued(sessionId: string, id: string): Promise<void> {
+    const store = sessionStores.get(sessionId);
+    const item = store?.getState().queue?.items.find((i) => i.id === id);
+    if (!store || !item) return;
+    await actions.unqueue(sessionId, id);
+    store.setState({ draft: item.text });
   },
 
   async interrupt(sessionId: string): Promise<void> {

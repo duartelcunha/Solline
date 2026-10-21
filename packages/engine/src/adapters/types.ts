@@ -81,6 +81,12 @@ export interface AgentAdapter {
    * ainda não há nada para guardar. Sem o método, o agente não rebobina a conversa.
    */
   rewindPoint?(): string | null;
+  /**
+   * Guia o turno que corre com mais uma mensagem tua (features.steer). 'joined': o agente vai
+   * lê-la neste turno (o bloco "steer" passa a "absorbed" quando a lê); 'too-late': já não dá
+   * (o turno acabou ou está num ponto sem pausa) e a mensagem fica para a fila.
+   */
+  steer?(text: string, id: string): Promise<'joined' | 'too-late'>;
   close(): Promise<void>;
 }
 

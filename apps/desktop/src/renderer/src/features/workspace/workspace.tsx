@@ -98,6 +98,51 @@ export function CloseDialog() {
   if (!closing) return null;
   const close = (choice: 'bring' | 'keep' | 'discard') =>
     void actions.closeSession(closing.sessionId, choice);
+  if (closing.queued) {
+    // Mensagens na fila: fechar deita-as fora, por isso pergunta antes.
+    return (
+      <Dialog.Root
+        open
+        onOpenChange={(open) => (open ? undefined : useApp.setState({ closing: null }))}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]" />
+          <Dialog.Content
+            data-testid="close-queue-dialog"
+            className="dialog-content fixed top-1/2 left-1/2 z-50 flex w-[min(24rem,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-raised outline-none"
+          >
+            <div>
+              <Dialog.Title className="truncate text-[14px] font-semibold tracking-[-0.01em]">
+                {title}
+              </Dialog.Title>
+              <Dialog.Description className="text-[12px] text-muted">
+                {closing.queued === 1
+                  ? 'Tens uma mensagem na fila.'
+                  : `Tens ${closing.queued} mensagens na fila.`}
+              </Dialog.Description>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => useApp.setState({ closing: null })}
+                className={`${buttonClass} border border-line hover:bg-surface-hover`}
+              >
+                Manter aberta
+              </button>
+              <button
+                type="button"
+                onClick={() => void actions.closeSession(closing.sessionId, undefined, true)}
+                className={`${buttonClass} ml-auto text-danger hover:bg-surface-hover`}
+                data-testid="close-drop-queue"
+              >
+                Fechar e deitar fora
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    );
+  }
   return (
     <Dialog.Root
       open

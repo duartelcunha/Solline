@@ -3,6 +3,7 @@ import {
   applyDelta,
   type AgentCapabilities,
   type Checks,
+  type SessionQueue,
   type EngineEvent,
   type Quality,
   type SessionInfo,
@@ -32,6 +33,8 @@ export interface SessionData {
   checks: Checks | null;
   /** O último "Trazer" deu conflitos nestes ficheiros (para pedir ao agente que os resolva). */
   conflicts: { files: string[]; into: string } | null;
+  /** O que escreveste enquanto o agente trabalhava, à espera de seguir. */
+  queue: SessionQueue | null;
   /** Desde quando a sessão está no estado atual (ms). */
   stateSince: number;
   /** Quando acabou o último turno (ms), ou null se ainda não acabou nenhum. */
@@ -60,6 +63,7 @@ export function createSessionStore(
     quality: null,
     checks: null,
     conflicts: null,
+    queue: null,
     stateSince: Date.now(),
     turnEndedAt: null,
   }));
@@ -108,6 +112,8 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       return { ...data, quality: event.quality };
     case 'session.checks':
       return { ...data, checks: event.checks };
+    case 'session.queue':
+      return { ...data, queue: event.queue };
     case 'session.workspace':
       return { ...data, info: { ...data.info, workspace: event.workspace } };
     case 'session.state': {

@@ -95,6 +95,7 @@ function SessionCard({ sessionId }: { sessionId: string }) {
   const action = useSession(sessionId, (s) => lastAction(s.turns));
   const checks = useSession(sessionId, (s) => s.checks);
   const error = useSession(sessionId, (s) => s.error);
+  const queued = useSession(sessionId, (s) => s.queue?.items.length ?? 0);
   const project = useApp((s) => s.projects.find((p) => p.id === projectId)?.name);
   const needsYou = state === 'needs-you';
   const idle = state === 'idle';
@@ -165,6 +166,11 @@ function SessionCard({ sessionId }: { sessionId: string }) {
             max={usage.context.maxTokens}
             percent={usage.context.percent}
           />
+        ) : null}
+        {queued > 0 ? (
+          <span className="tabular-nums" data-testid="card-queued">
+            {queued} na fila
+          </span>
         ) : null}
         {usage.costUsd !== null ? (
           <span className="tabular-nums">{money.format(usage.costUsd)}</span>

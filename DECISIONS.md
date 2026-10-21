@@ -428,3 +428,17 @@
   pedido que precisa de ti vem sempre à vista. No rever, depois de aceitar ou rejeitar, desliza
   para o hunk que ficou no lugar; na mesa, depois de responder, para o próximo que precisa de ti.
 - A navegação automática nunca troca de sessão nem de ecrã sozinha.
+
+## M3, fatia 3: fila e guiar (21/10/2026)
+
+- `SessionTurns` é o dono do turno de cada sessão: envio, fila, guiar, pausa e `exclusive`
+  (rebobinar, trazer). Entre itens da fila a sessão não passa por "parada" (sem aviso de turno
+  acabado a cada item); as verificações só correm com a fila vazia.
+- Claude: a sonda com o SDK real mostrou que `priority: 'now'` aborta a ferramenta e abre outro
+  turno (é interromper), e que `'next'` entra na próxima pausa no mesmo turno, com um só result.
+  Guiar usa `'next'` e só com uma ferramenta a correr; sem ferramenta, a mensagem vai para a
+  fila (podia cair depois do result e abrir um turno sem checkpoint).
+- Codex: `turn/steer` com `expectedTurnId`; se o turno já acabou, vai para a fila.
+- ACP: só fila.
+- Uma mensagem guiada fica na conversa "à espera" e passa a "lida" quando o agente a lê.
+

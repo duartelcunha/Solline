@@ -29,7 +29,8 @@ beforeEach(async () => {
   git(project, 'add', '-A');
   git(project, 'commit', '--quiet', '-m', 'início');
   manager = new WorktreeManager({ root: path.join(root, 'data', 'worktrees') });
-});
+  // Com a máquina carregada, cada git demora quase um segundo no Windows.
+}, 30_000);
 
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
