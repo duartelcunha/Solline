@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -63,6 +64,41 @@ const CONFIG = `[core]
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+const MISSING = 'Não encontrei o git: instala o Git para ter checkpoints';
+
+let resolved: string | null | undefined;
+
+/**
+ * O git do PATH como caminho absoluto, procurado só em pastas absolutas: nunca na pasta do
+ * projeto, onde um repositório podia plantar um git.exe (o Windows procura primeiro na pasta
+ * atual quando se passa só o nome). No Git for Windows, o git.exe da pasta cmd é um lançador que
+ * arranca outro processo: vai-se direto ao binário verdadeiro, que custa metade a arrancar.
+ */
+export function resolveGit(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (file: string) => boolean = existsSync,
+): string | null {
+  const win = process.platform === 'win32';
+  for (const dir of (env.PATH ?? env.Path ?? '').split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir)) continue;
+    const candidate = path.join(dir, win ? 'git.exe' : 'git');
+    if (!exists(candidate)) continue;
+    if (win && path.basename(dir).toLowerCase() === 'cmd') {
+      for (const flavour of ['ucrt64', 'mingw64', 'clangarm64']) {
+        const real = path.join(dir, '..', flavour, 'bin', 'git.exe');
+        if (exists(real)) return path.normalize(real);
+      }
+    }
+    return candidate;
+  }
+  return null;
+}
+
+function defaultGit(): string | null {
+  if (resolved === undefined) resolved = resolveGit();
+  return resolved;
+}
+
 export interface ShadowGitOptions {
   /** Pasta do repositório sombra (bare), na pasta de dados. */
   gitDir: string;
@@ -83,7 +119,7 @@ export class ShadowGit {
   constructor(options: ShadowGitOptions) {
     this.gitDir = options.gitDir;
     this.workTree = options.workTree;
-    this.#executable = options.executable ?? 'git';
+    this.#executable = options.executable ?? defaultGit() ?? '';
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.#env = shadowEnv(this.gitDir, this.workTree);
   }
@@ -116,6 +152,7 @@ export class ShadowGit {
     if (options.bare) delete env.GIT_WORK_TREE;
     if (options.index) env.GIT_INDEX_FILE = path.join(this.gitDir, options.index);
     const okCodes = options.okCodes ?? [0];
+    if (!this.#executable) return Promise.reject(new GitError(MISSING, null, ''));
     return new Promise((resolve, reject) => {
       const child = spawn(this.#executable, args, {
         cwd: options.bare ? this.gitDir : this.workTree,
@@ -163,6 +200,7 @@ export class ShadowGit {
       ...this.#env,
       GIT_INDEX_FILE: path.join(this.gitDir, index),
     };
+    if (!this.#executable) return Promise.reject(new GitError(MISSING, null, ''));
     return new Promise((resolve, reject) => {
       const child = spawn(
         this.#executable,

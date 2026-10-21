@@ -43,12 +43,16 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   const checkpoints = useMemo(() => timeline?.checkpoints ?? [], [timeline]);
   // Vários pedidos de diff podem cruzar-se (fim de turno, aceitar, rejeitar): só vale o último.
   const latest = useRef(0);
+  const rewardIfEmpty = useRef(false);
   const load = useCallback(
     async (target: DiffScope): Promise<FileDiff[] | null> => {
       const ticket = ++latest.current;
       const next = await actions.diff(sessionId, target);
       if (ticket !== latest.current || !next) return null;
       setFiles(next);
+      // Uma pequena recompensa quando o último hunk sai da revisão.
+      if (rewardIfEmpty.current && next.length === 0) setCelebrate(true);
+      rewardIfEmpty.current = false;
       return next;
     },
     [sessionId],
@@ -86,13 +90,13 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
 
   async function act(action: ReviewAction, target: { path?: string; hunk?: Hunk } = {}) {
     const before = timeline?.pending.files ?? 0;
+    rewardIfEmpty.current = before > 0;
     const ok = await actions.review(sessionId, action, {
       ...(target.path ? { path: target.path } : {}),
       ...(target.hunk ? { hunkId: target.hunk.id } : {}),
     });
-    const next = await load(validScope);
-    // Uma pequena recompensa quando o último hunk sai da revisão.
-    if (ok && before > 0 && next?.length === 0) setCelebrate(true);
+    // O diff novo chega pela linha do tempo que a ação manda (um pedido, não dois).
+    if (!ok) rewardIfEmpty.current = false;
   }
 
   function setComment(at: { path: string; side: 'old' | 'new'; line: number }, text: string) {

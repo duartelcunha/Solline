@@ -243,6 +243,8 @@ export class SessionCheckpoints {
 
       const paths = targets.map((f) => f.diff.path);
       const label = labelFor(action, filePath, hunkId);
+      // Aceitar não mexe no disco: o disco continua a ser o de agora.
+      let after = now;
       if (action === 'accept') {
         const undo = this.#undoEntry(label);
         try {
@@ -253,17 +255,17 @@ export class SessionCheckpoints {
         this.#pushUndo(undo);
       } else if (file && hunk) {
         // O git apply é tudo ou nada: se o ficheiro mudou, recusa sem escrever.
-        await this.#writeAction(label, now, paths, () =>
+        ({ after } = await this.#writeAction(label, now, paths, () =>
           this.#git
             .run(['apply', '-R', '--whitespace=nowarn', '-'], { input: hunkPatch(file, hunk) })
             .then(() => undefined),
-        );
+        ));
       } else {
         const plan = await this.#plan(this.#baseline, paths);
-        await this.#writeAction(label, now, paths, () => this.#execute(plan));
+        ({ after } = await this.#writeAction(label, now, paths, () => this.#execute(plan)));
       }
       this.#rewoundTo = null;
-      this.#pending = await this.#stats(this.#baseline, await this.#snapshot());
+      this.#pending = await this.#stats(this.#baseline, after);
       return this.timeline();
     });
   }
@@ -339,7 +341,9 @@ export class SessionCheckpoints {
       // O que aceitaste depois de este turno começar desapareceu do disco: na base volta ao que
       // estava quando o turno começou (aceites de antes ficam).
       const accepted = changed.filter((p) => (this.#acceptedAt.get(p) ?? -1) >= index);
-      const undo = await this.#writeAction(label, now, changed, () => this.#execute(plan));
+      const { wrote: undo, after } = await this.#writeAction(label, now, changed, () =>
+        this.#execute(plan),
+      );
       if (accepted.length > 0) {
         this.#baseline = await this.#withReviewIndex(this.#baseline, (i) =>
           this.#copyEntries(target.baseline, accepted, i),
@@ -348,7 +352,7 @@ export class SessionCheckpoints {
       }
       if (!undo && changed.length === 0) this.#pushUndo(this.#undoEntry(label));
       this.#rewoundTo = turnId;
-      this.#pending = await this.#stats(this.#baseline, await this.#snapshot());
+      this.#pending = await this.#stats(this.#baseline, after);
     });
   }
 
@@ -415,14 +419,15 @@ export class SessionCheckpoints {
   /**
    * Corre uma ação que escreve no disco e guarda o passo de desfazer com o disco antes e
    * depois. Se falhar a meio (um ficheiro aberto noutro programa), o passo fica na mesma
-   * para desfazer o que já foi escrito. Devolve se houve passo.
+   * para desfazer o que já foi escrito. Devolve se houve passo e o disco depois (cada
+   * fotografia ao disco custa duas chamadas ao git, por isso quem chama reaproveita-a).
    */
   async #writeAction(
     label: string,
     before: string,
     paths: string[],
     write: () => Promise<void>,
-  ): Promise<boolean> {
+  ): Promise<{ wrote: boolean; after: string }> {
     const undo = this.#undoEntry(label);
     let failure: unknown;
     try {
@@ -434,7 +439,7 @@ export class SessionCheckpoints {
     const wrote = after !== before;
     if (wrote) this.#pushUndo({ ...undo, write: { before, after, paths } });
     if (failure !== undefined) throw friendly(failure);
-    return wrote;
+    return { wrote, after };
   }
 
   /** A árvore do disco agora. O índice da sessão faz isto ser rápido a partir da segunda vez. */
@@ -534,12 +539,12 @@ export class SessionCheckpoints {
 
   /** O diff entre duas árvores, só com os ficheiros que se mostram (só paths, se vierem). */
   async #diff(from: string, to: string, paths?: readonly string[]): Promise<RawFile[]> {
+    if (from === to) return [];
     const wanted = paths ? new Set(paths) : null;
-    const entries = (await this.#diffEntries(from, to)).filter(
-      (e) => !e.skipped && (!wanted || wanted.has(e.path)),
-    );
-    if (entries.length === 0) return [];
-    const patch = await this.#git.run(
+    // As contas e o patch ao mesmo tempo: cada chamada ao git custa um arranque de processo.
+    const [all, patch] = await Promise.all([
+      this.#diffEntries(from, to),
+      this.#git.run(
       [
         'diff',
         '--no-color',
@@ -551,10 +556,13 @@ export class SessionCheckpoints {
         '--dst-prefix=b/',
         from,
         to,
-        ...(paths ? ['--', ...paths] : []),
-      ],
-      { bare: true },
-    );
+          ...(paths ? ['--', ...paths] : []),
+        ],
+        { bare: true },
+      ),
+    ]);
+    const entries = all.filter((e) => !e.skipped && (!wanted || wanted.has(e.path)));
+    if (entries.length === 0) return [];
     return parsePatch(patch.stdout, entries);
   }
 

@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ShadowGit, resolveGit } from '../src/checkpoints/git.ts';
 import { CheckpointStore } from '../src/checkpoints/store.ts';
 import type { SessionCheckpoints } from '../src/checkpoints/session-checkpoints.ts';
 import { headerPath } from '../src/checkpoints/unified-diff.ts';
@@ -362,5 +363,50 @@ mais
     const two = await open('s2');
     expect((await one.diff({ kind: 'review' })).map((f) => f.path)).toEqual(['a.txt']);
     expect(await two.diff({ kind: 'review' })).toEqual([]);
+  });
+});
+
+// Cada chamada ao git é um processo novo; com o antivírus a pesar, chega a 1 s cada.
+describe('custo de cada ação em chamadas ao git', { timeout: 30_000 }, () => {
+  it('rejeitar um ficheiro inteiro não repete fotografias ao disco', async () => {
+    await write('notes.txt', 'The quick alpha fox.\n');
+    const cp = await open();
+    await begin(cp, 't1', 'muda');
+    await write('notes.txt', 'The quick beta fox.\n');
+    await cp.endTurn(last);
+    const calls: string[] = [];
+    const original = ShadowGit.prototype.run;
+    ShadowGit.prototype.run = function (this: ShadowGit, args, options) {
+      calls.push(args.find((a) => !a.startsWith('-') && !a.startsWith('core.')) ?? '');
+      return original.call(this, args, options);
+    };
+    try {
+      await cp.apply('reject', 'notes.txt');
+    } finally {
+      ShadowGit.prototype.run = original;
+    }
+    expect(await read('notes.txt')).toContain('alpha');
+    // Antes eram 11: duas fotografias seguidas no fim e o diff depois das contas.
+    expect(calls.filter((c) => c === 'add')).toHaveLength(2);
+    expect(calls.length).toBeLessThanOrEqual(9);
+  });
+});
+
+describe('qual git corre', () => {
+  const win = process.platform === 'win32';
+  it.runIf(win)('salta o lançador de cmd e nunca procura numa pasta relativa', () => {
+    const git = path.win32.join('C:', 'Program Files', 'Git');
+    const real = path.win32.join(git, 'ucrt64', 'bin', 'git.exe');
+    const files = new Set([
+      path.win32.join('relativa', 'git.exe'),
+      path.win32.join(git, 'cmd', 'git.exe'),
+      real,
+    ]);
+    const PATH = ['.', 'relativa', path.win32.join(git, 'cmd')].join(';');
+    expect(resolveGit({ PATH }, (f) => files.has(f))).toBe(real);
+  });
+
+  it('sem git no PATH não inventa um', () => {
+    expect(resolveGit({ PATH: '' }, () => false)).toBeNull();
   });
 });
