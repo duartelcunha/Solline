@@ -614,8 +614,10 @@ test('uma corrida: o mesmo pedido em duas pistas, lado a lado (SDK real)', async
       },
       { timeout: 240_000, intervals: [1_000] },
     )
-    .toBe('done');
-  await shot(page, 'race-done');
+    .toBe('ranked');
+  // Ordenada: cada pista com a sua posição.
+  await expect(page.getByTestId('race-rank')).toHaveCount(2);
+  await shot(page, 'race-ranked');
 
   // Na mesa, a corrida é um cartão; as pistas não aparecem soltas.
   await page.getByTestId('open-desk').click();

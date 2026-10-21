@@ -39,6 +39,8 @@ import { SessionTurns, type How, type Submitted } from './session-turns.ts';
 import { PortAllocator } from './workspace/ports.ts';
 import { SETUP_TIMEOUT_MS, copyEnvFiles, detectSetup, envFilesIn } from './workspace/setup.ts';
 import { runCommand } from './checks/run.ts';
+import type { RawFile } from './checkpoints/unified-diff.ts';
+import { verify, type CheckVerdict } from './verify/verify.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
@@ -701,7 +703,8 @@ export class SessionManager {
       .get(sessionId)
       ?.checkpoints?.timeline()
       .checkpoints.find((c) => c.turnId === turnId);
-    if (!entry || !checkpoint || checkpoint.stats.files === 0) return;
+    // As pistas de uma corrida verificam-se quando a corrida as ordena (com a base ao lado).
+    if (!entry || entry.info.raceId || !checkpoint || checkpoint.stats.files === 0) return;
     // Um turno novo pode ter começado enquanto o checkpoint fechava: não verificar a meio dele.
     const memory = this.#memory.get(sessionId);
     if (
@@ -779,6 +782,34 @@ export class SessionManager {
     const workspace: Workspace = { kind: 'worktree', branch: worktree.branch, stats };
     entry.info.workspace = workspace;
     this.#emit({ kind: 'event', type: 'session.workspace', sessionId, workspace });
+  }
+
+  /**
+   * O resultado de uma pista, para a corrida o ordenar: o que mudou face à base e as verificações
+   * do projeto (as que falham voltam a correr na base, para não culpar a pista do que já falhava).
+   */
+  async outcome(
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<{ cwd: string; files: RawFile[]; checks: CheckVerdict[] }> {
+    const { info } = this.#get(sessionId);
+    const worktree = this.#memoryOf(sessionId).worktree;
+    const worktrees = this.#worktrees;
+    if (!worktree || !worktrees) throw new Error('Esta sessão não tem worktree');
+    const files = await worktrees.diff(worktree);
+    const state = this.#checks.get(info.cwd)?.state;
+    const specs = state?.trusted ? state.specs.filter((s) => s.enabled) : [];
+    const checks =
+      files.length === 0 || specs.length === 0
+        ? []
+        : await verify(info.cwd, {
+            specs,
+            baseline: () => worktrees.baseline(worktree),
+            ...(info.port !== undefined ? { env: PortAllocator.env(info.port) } : {}),
+            ...(this.#checksOptions?.run ? { run: this.#checksOptions.run } : {}),
+            ...(signal ? { signal } : {}),
+          });
+    return { cwd: info.cwd, files, checks };
   }
 
   /** Traz o trabalho da worktree para o branch atual do projeto. */

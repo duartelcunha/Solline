@@ -19,6 +19,7 @@ import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
 import { SessionManager, type ChecksOptions } from './session-manager.ts';
 import { RaceManager } from './races/race-manager.ts';
+import { claudeJudge } from './verify/judge.ts';
 import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
@@ -122,7 +123,14 @@ export class Engine {
           ? undefined
           : (options.checks ?? (options.isolated ? undefined : {})),
     });
-    this.races = new RaceManager({ sessions: this.sessions, emit: emitAll });
+    this.races = new RaceManager({
+      sessions: this.sessions,
+      emit: emitAll,
+      // O juiz só desempata; nos testes isolados não se gasta a subscrição com ele.
+      ...(options.isolated || options.reviewer === false
+        ? {}
+        : { judge: claudeJudge({ claudeExecutable: options.claudeExecutable }) }),
+    });
     box.races = this.races;
     this.logins = new LoginManager({
       onChange: (agent, error) =>

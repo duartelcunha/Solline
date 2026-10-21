@@ -644,7 +644,9 @@ export class SessionCheckpoints {
 }
 
 /** git diff --raw -z: ":modo modo sha sha S\0path\0". */
-function parseRaw(out: Buffer): { path: string; status: FileEntry['status']; skipped: boolean }[] {
+export function parseRaw(
+  out: Buffer,
+): { path: string; status: FileEntry['status']; skipped: boolean }[] {
   const parts = out.toString('utf8').split('\0');
   const entries: { path: string; status: FileEntry['status']; skipped: boolean }[] = [];
   for (let i = 0; i + 1 < parts.length; i += 2) {

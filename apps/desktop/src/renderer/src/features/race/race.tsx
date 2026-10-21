@@ -1,6 +1,6 @@
-import { useCallback, useSyncExternalStore } from 'react';
-import { ArrowUpRight, GitBranch } from 'lucide-react';
-import type { AskBlock, Race, RaceLane } from '@solline/protocol';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { ArrowUpRight, GitBranch, Minus, Plus } from 'lucide-react';
+import type { AskBlock, Race, RaceLane, RaceLaneVerdict } from '@solline/protocol';
 import { actions, sessionStore, useApp, useSession } from '../../stores/app.ts';
 import { SessionMark } from '../agents/bots.tsx';
 import { ContextMeter, money } from '../composer/composer.tsx';
@@ -22,9 +22,38 @@ const PHASE: Record<Race['phase'], string> = {
   closed: 'Fechada',
 };
 
-/** Uma pista: quem é, o que está a fazer, quanto gastou e como estão as verificações. */
-function Lane({ lane }: { lane: RaceLane }) {
+/** "1.º", "2.º": a posição como se escreve em português. */
+const ordinal = (rank: number) => `${rank}.º`;
+
+/** As verificações de uma pista ordenada: as que já falhavam na base ficam apagadas. */
+function VerdictChecks({ checks }: { checks: RaceLaneVerdict['checks'] }) {
+  return checks.map((c) => (
+    <span
+      key={c.label}
+      title={c.preexisting ? `${c.label}: já falhava antes desta mudança` : c.label}
+      className={`inline-flex items-center gap-1 ${c.preexisting ? 'opacity-50' : ''}`}
+    >
+      <Mark face={c.state} />
+      {c.label}
+    </span>
+  ));
+}
+
+/**
+ * Uma pista: quem é, o que está a fazer, quanto gastou e como estão as verificações. Depois de
+ * ordenada, a posição, o melhor e o pior (do juiz, quando foi chamado).
+ */
+function Lane({
+  lane,
+  verdict,
+  celebrate,
+}: {
+  lane: RaceLane;
+  verdict: RaceLaneVerdict | undefined;
+  celebrate: boolean;
+}) {
   const id = lane.sessionId;
+  const winner = verdict?.rank === 1;
   const action = useSession(id, (s) => lastAction(s.turns));
   const usage = useSession(id, (s) => s.usage);
   const workspace = useSession(id, (s) => s.info.workspace);
@@ -32,13 +61,22 @@ function Lane({ lane }: { lane: RaceLane }) {
   const enabled = checks?.trusted ? checks.specs.filter((c) => c.enabled) : [];
   return (
     <section
-      className="sl-enter flex min-w-0 flex-1 flex-col gap-3 rounded-xl border border-line bg-surface p-4"
+      className={`sl-enter flex min-w-0 flex-1 flex-col gap-3 rounded-xl border bg-surface p-4 transition-[border-color] duration-200 ${winner ? 'border-accent' : 'border-line'}`}
       data-testid="race-lane"
       data-state={lane.state}
+      data-rank={verdict?.rank}
     >
       <header className="flex items-center gap-2.5">
         <SessionMark sessionId={id} size={18} />
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{laneName(lane)}</span>
+        {verdict ? (
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold tabular-nums ${winner ? `bg-accent text-bg ${celebrate ? 'sl-reward' : ''}` : 'bg-surface-hover text-muted'}`}
+            data-testid="race-rank"
+          >
+            {ordinal(verdict.rank)}
+          </span>
+        ) : null}
         <button
           type="button"
           onClick={() => actions.selectSession(id)}
@@ -49,8 +87,26 @@ function Lane({ lane }: { lane: RaceLane }) {
         </button>
       </header>
       <p className="min-h-[2.5rem] text-[12.5px] leading-snug text-muted line-clamp-2">
-        {action ?? (lane.state === 'starting' ? 'A arrancar…' : 'A pensar…')}
+        {verdict?.empty
+          ? 'Não mudou nada'
+          : (action ?? (lane.state === 'starting' ? 'A arrancar…' : 'A pensar…'))}
       </p>
+      {verdict?.best || verdict?.worst ? (
+        <ul className="flex flex-col gap-1 text-[12px] leading-snug">
+          {verdict.best ? (
+            <li className="flex gap-1.5">
+              <Plus size={13} className="mt-px shrink-0 text-success" aria-label="Melhor" />
+              {verdict.best}
+            </li>
+          ) : null}
+          {verdict.worst ? (
+            <li className="flex gap-1.5 text-muted">
+              <Minus size={13} className="mt-px shrink-0 text-danger" aria-label="Pior" />
+              {verdict.worst}
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
       <footer className="mt-auto flex flex-wrap items-center gap-2.5 text-[11.5px] text-muted">
         {usage.context ? (
           <ContextMeter
@@ -69,15 +125,19 @@ function Lane({ lane }: { lane: RaceLane }) {
             <span className="text-danger">−{workspace.stats.deletions}</span>
           </span>
         ) : null}
-        {enabled.map((c) => {
-          const face = checks?.results.find((r) => r.id === c.id)?.state ?? 'waiting';
-          return face === 'waiting' ? null : (
-            <span key={c.id} title={c.label} className="inline-flex items-center gap-1">
-              <Mark face={face} />
-              {c.label}
-            </span>
-          );
-        })}
+        {verdict ? (
+          <VerdictChecks checks={verdict.checks} />
+        ) : (
+          enabled.map((c) => {
+            const face = checks?.results.find((r) => r.id === c.id)?.state ?? 'waiting';
+            return face === 'waiting' ? null : (
+              <span key={c.id} title={c.label} className="inline-flex items-center gap-1">
+                <Mark face={face} />
+                {c.label}
+              </span>
+            );
+          })
+        )}
       </footer>
     </section>
   );
@@ -182,9 +242,48 @@ function AskBar({ race }: { race: Race }) {
   );
 }
 
+/**
+ * Celebra uma vez: só quando esta vista viu a corrida passar de "a ordenar" a "ordenada" (abrir
+ * uma corrida já ordenada não celebra outra vez).
+ */
+function useCelebrate(phase: Race['phase'] | undefined): boolean {
+  const last = useRef(phase);
+  const [celebrate, setCelebrate] = useState(false);
+  useEffect(() => {
+    if (last.current === 'ranking' && phase === 'ranked') setCelebrate(true);
+    last.current = phase;
+  }, [phase]);
+  return celebrate;
+}
+
+/** Empate que a execução e o juiz não desfizeram, ou o juiz que falhou: decides tu. */
+function TieNote({ race }: { race: Race }) {
+  const verdict = race.verdict;
+  if (!verdict?.tie && !verdict?.judgeError) return null;
+  const names = (verdict.tie ?? [])
+    .map((id) => race.lanes.find((l) => l.sessionId === id))
+    .filter((l): l is RaceLane => Boolean(l))
+    .map(laneName);
+  return (
+    <div
+      className="sl-enter mb-3 flex flex-wrap items-baseline gap-2 rounded-xl border border-line bg-surface px-4 py-2.5 text-[13px]"
+      data-testid="race-tie"
+    >
+      {verdict.tie ? <span className="font-semibold">Empate: escolhe tu</span> : null}
+      {names.length ? <span className="text-muted">{names.join(' · ')}</span> : null}
+      {verdict.judgeError ? (
+        <span className="text-[12px] text-subtle">
+          O juiz não respondeu; a ordem é só pela execução.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /** A corrida: o pedido, os pedidos das pistas no topo e as pistas lado a lado. */
 export function RaceView({ raceId }: { raceId: string }) {
   const race = useApp((s) => s.races[raceId]);
+  const celebrate = useCelebrate(race?.phase);
   if (!race) return null;
   return (
     <section
@@ -195,9 +294,15 @@ export function RaceView({ raceId }: { raceId: string }) {
         {race.text}
       </p>
       <AskBar race={race} />
+      <TieNote race={race} />
       <div className="flex min-h-0 gap-3">
         {race.lanes.map((lane) => (
-          <Lane key={lane.sessionId} lane={lane} />
+          <Lane
+            key={lane.sessionId}
+            lane={lane}
+            verdict={race.verdict?.lanes.find((v) => v.sessionId === lane.sessionId)}
+            celebrate={celebrate}
+          />
         ))}
       </div>
     </section>

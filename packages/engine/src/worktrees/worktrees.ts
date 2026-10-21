@@ -4,6 +4,8 @@ import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/
 import path from 'node:path';
 import type { WorktreeStats } from '@solline/protocol';
 import { resolveGit } from '../checkpoints/git.ts';
+import { parseRaw } from '../checkpoints/session-checkpoints.ts';
+import { parseNumstat, parsePatch, type RawFile } from '../checkpoints/unified-diff.ts';
 
 /**
  * As worktrees das sessões: quando um projeto já tem uma sessão a trabalhar na pasta, a
@@ -163,6 +165,60 @@ export class WorktreeManager {
     const next = { ...wt, branch };
     await this.#save(next);
     return next;
+  }
+
+  /**
+   * O que a worktree mudou face à base, ficheiro a ficheiro e hunk a hunk (contando o que está
+   * por gravar e os ficheiros novos), num índice só seu: nem o do agente nem o das contas, que
+   * podem estar a correr ao mesmo tempo.
+   */
+  async diff(wt: Worktree): Promise<RawFile[]> {
+    const file = `${wt.path}.${randomBytes(4).toString('hex')}.index`;
+    const index = { GIT_INDEX_FILE: file };
+    const common = ['--cached', '--no-renames', '--no-ext-diff', '--no-textconv', wt.base];
+    let raw: Buffer, numstat: Buffer, patch: Buffer;
+    try {
+      await this.#run(wt.path, ['read-tree', 'HEAD'], false, index);
+      await this.#run(wt.path, ['add', '-A'], false, index);
+      [raw, numstat, patch] = await Promise.all([
+        this.#runBuffer(wt.path, ['diff', '--raw', '-z', ...common], index),
+        this.#runBuffer(wt.path, ['diff', '--numstat', '-z', ...common], index),
+        this.#runBuffer(
+          wt.path,
+          ['diff', '--no-color', '-U3', '--src-prefix=a/', '--dst-prefix=b/', ...common],
+          index,
+        ),
+      ]);
+    } finally {
+      await rm(file, { force: true }).catch(() => undefined);
+    }
+    const counts = parseNumstat(numstat);
+    const entries = parseRaw(raw)
+      .filter((r) => !r.skipped)
+      .map((r) => ({
+        ...r,
+        ...(counts.get(r.path) ?? { additions: 0, deletions: 0, binary: false }),
+      }));
+    return entries.length ? parsePatch(patch, entries) : [];
+  }
+
+  /** Como #run, mas devolve os bytes (o patch volta ao git tal como saiu). */
+  async #runBuffer(cwd: string, args: string[], extraEnv: Record<string, string>): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      execFile(
+        this.#git,
+        ['-c', 'core.quotepath=false', ...args],
+        {
+          cwd,
+          env: { ...gitEnv(), ...extraEnv },
+          windowsHide: true,
+          timeout: TIMEOUT_MS,
+          maxBuffer: 64 * 1024 * 1024,
+          encoding: 'buffer',
+        },
+        (error, stdout) => (error ? reject(error) : resolve(stdout)),
+      );
+    });
   }
 
   /** O que a sessão mudou desde a base, contando os ficheiros por gravar e os novos. */

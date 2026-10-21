@@ -23,12 +23,46 @@ export type RaceLane = z.infer<typeof RaceLane>;
 export const RacePhase = z.enum(['running', 'done', 'ranking', 'ranked', 'closed']);
 export type RacePhase = z.infer<typeof RacePhase>;
 
+/** Como ficou cada pista: posição, verificações, grupo (soluções iguais) e as notas do juiz. */
+export const RaceLaneVerdict = z.object({
+  sessionId: z.string(),
+  rank: z.number().int(),
+  /** Verificações que falharam por culpa da mudança (as que já falhavam na base não contam). */
+  failures: z.number().int(),
+  checks: z.array(
+    z.object({
+      label: z.string(),
+      state: z.enum(['passed', 'failed', 'timeout']),
+      preexisting: z.boolean(),
+    }),
+  ),
+  /** Pistas com o mesmo patch partilham o grupo (consenso). */
+  group: z.number().int(),
+  /** Não mudou nada. */
+  empty: z.boolean(),
+  best: z.string().nullable(),
+  worst: z.string().nullable(),
+});
+export type RaceLaneVerdict = z.infer<typeof RaceLaneVerdict>;
+
+export const RaceVerdict = z.object({
+  lanes: z.array(RaceLaneVerdict),
+  /** Empate que o juiz não desfez (as duas ordens discordaram): decides tu entre estas. */
+  tie: z.array(z.string()).nullable(),
+  /** O juiz chegou a ser chamado (só nos empates da execução). */
+  judged: z.boolean(),
+  /** O juiz falhou: a ordem é só a da execução. */
+  judgeError: z.string().nullable(),
+});
+export type RaceVerdict = z.infer<typeof RaceVerdict>;
+
 export const Race = z.object({
   id: z.string(),
   projectId: z.string(),
   text: z.string(),
   lanes: z.array(RaceLane),
   phase: RacePhase,
+  verdict: RaceVerdict.nullable().optional(),
 });
 export type Race = z.infer<typeof Race>;
 

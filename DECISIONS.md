@@ -464,3 +464,18 @@
 - O bot pisca uma vez ao mudar para à espera ou precisa de ti, e ao passar o rato; em repouso fica
   parado.
 
+## M4, fatias 1 a 4: corridas, Verificador e ordenação (21/10/2026)
+
+- Uma corrida abre N sessões normais (2 a 4), cada uma numa worktree obrigatória; sem git não há
+  corrida. Os pedidos das pistas chegam num só sítio, com "Permitir para todas" quando coincidem.
+- Ordena-se pela execução, não por opinião: pistas sem mudanças vão para o fim, depois menos
+  verificações partidas pela mudança (as que já falhavam na base não contam), depois o consenso
+  (pistas com o mesmo patch normalizado formam um grupo e o maior ganha).
+- O juiz cego só entra num empate no topo entre soluções diferentes; vê letras, diffs e
+  verificações, nunca o agente. Corre nas duas ordens; se discordarem, ou se falhar, fica
+  "Empate: escolhe tu". Nunca se descartam pistas, só se ordenam.
+- As pistas não correm as verificações no fim de cada turno: a corrida corre-as uma vez, com a base.
+- O diff de uma worktree usa um índice temporário só seu (o das contas podia estar a correr ao
+  mesmo tempo e devolvia um diff vazio).
+- Adiado com nome: os testes gerados para distinguir as pistas e o juiz de outro fabricante (Codex
+  em sandbox só de leitura); por agora o juiz é o Claude.
