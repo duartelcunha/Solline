@@ -10,6 +10,7 @@ import { QualityChip } from './features/quality/quality.tsx';
 import { ChecksRow } from './features/quality/checks.tsx';
 import { CloseDialog, WorkspaceChip } from './features/workspace/workspace.tsx';
 import { Desk, useNeedsYouCount } from './features/desk/desk.tsx';
+import { RaceTitle, RaceView } from './features/race/race.tsx';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { shouldAnimate } from '@solline/ui/motion';
 import { ReviewPanel } from './features/review/review-panel.tsx';
@@ -108,7 +109,7 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
     <div className="flex min-w-48 items-center gap-2">
       {/* O mesmo nome de transição do capuz dos cartões da mesa: abrir uma sessão transforma um no outro. */}
       <span className="session-bot-target">
-        <SessionBot sessionId={sessionId} size={30} alive />
+        <SessionBot key={sessionId} sessionId={sessionId} size={30} alive />
       </span>
       <h1
         className="truncate text-[13px] font-semibold tracking-[-0.01em]"
@@ -260,6 +261,7 @@ export function App() {
   const activeSessionId = useApp((s) => (s.view === 'session' ? s.activeSessionId : null));
   const hasDesk = useApp((s) => s.sessionIds.length > 0 || s.orphans.length > 0);
   const notice = useApp((s) => s.notice);
+  const raceId = useApp((s) => (s.view === 'race' ? s.activeRaceId : null));
 
   useEffect(() => {
     const off = window.solline.onEvent(dispatch);
@@ -327,7 +329,9 @@ export function App() {
       <main className="flex min-w-0 flex-col">
         <header className="drag flex h-11 shrink-0 items-center gap-3 pr-[9.5rem] pl-5">
           {activeSessionId ? (
-            <SessionHeaderTitle key={activeSessionId} sessionId={activeSessionId} />
+            <SessionHeaderTitle sessionId={activeSessionId} />
+          ) : raceId ? (
+            <RaceTitle raceId={raceId} />
           ) : (
             <DeskTitle />
           )}
@@ -350,6 +354,8 @@ export function App() {
             </div>
             <ReviewPanel key={`r-${activeSessionId}`} sessionId={activeSessionId} />
           </div>
+        ) : raceId ? (
+          <RaceView raceId={raceId} />
         ) : hasDesk ? (
           <Desk />
         ) : (

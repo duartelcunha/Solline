@@ -5,6 +5,8 @@ import { IconSwap } from '@solline/ui/icon-swap';
 import { actions, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { SettingsPills } from './pills.tsx';
+import { RacePill } from '../race/race-pill.tsx';
+import type { RaceLaneSpec } from '@solline/protocol';
 
 export const money = new Intl.NumberFormat('pt-PT', {
   style: 'currency',
@@ -87,6 +89,10 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   const agentLabel = useSessionAgentLabel(sessionId);
   const features = capabilities?.features;
   const [text, setText] = useState('');
+  // As pistas de uma corrida (vazio: uma mensagem normal).
+  const [lanes, setLanes] = useState<RaceLaneSpec[]>([]);
+  const agent = useSession(sessionId, (s) => s.info.agent);
+  const projectId = useSession(sessionId, (s) => s.projectId);
   const input = useRef<HTMLTextAreaElement>(null);
   // A mensagem de um turno rebobinado volta para aqui, para editar e mandar de novo.
   const draft = useSession(sessionId, (s) => s.draft);
@@ -122,6 +128,13 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
     if (!canSend) return;
     const message = text.trim();
     setText('');
+    if (lanes.length > 1 && !busy) {
+      // N×: o mesmo pedido em várias pistas, cada uma na sua worktree.
+      const started = await actions.startRace(projectId, message, lanes);
+      if (started) setLanes([]);
+      else setText(message);
+      return;
+    }
     const ok = await actions.send(sessionId, message, busy ? how : undefined);
     if (!ok) setText(message);
   }
@@ -187,6 +200,16 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
           />
           <div className="flex items-center gap-3 px-2.5 pt-1 pb-2.5">
             {/* Estreito (painel de rever aberto): as pílulas ficam numa linha e saem os números. */}
+            {capabilities ? (
+              <RacePill
+                agent={agent}
+                settings={settings}
+                capabilities={capabilities}
+                lanes={lanes}
+                onLanes={setLanes}
+                disabled={offline || busy}
+              />
+            ) : null}
             {capabilities ? (
               <SettingsPills
                 settings={settings}

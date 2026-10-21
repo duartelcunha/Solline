@@ -14,6 +14,7 @@ import { scrollIntoViewSmooth, useDragScroll } from '@solline/ui/scroll';
 import { flushSync } from 'react-dom';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 import { SessionMark } from '../agents/bots.tsx';
+import { RaceCard } from '../race/race.tsx';
 import { ContextMeter, money } from '../composer/composer.tsx';
 import { Mark } from '../quality/checks.tsx';
 import { deskOrder, lastAction, pendingAsk } from './desk-order.ts';
@@ -323,8 +324,12 @@ export function useNeedsYouCount(): number {
 
 /** A mesa: um cartão vivo por sessão, ordenados pelo que precisa de ti. */
 export function Desk() {
-  const ids = useApp((s) => s.sessionIds);
+  const allIds = useApp((s) => s.sessionIds);
+  const races = useApp((s) => s.races);
   const orphans = useApp((s) => s.orphans);
+  // As pistas de uma corrida não têm cartão próprio: aparecem no cartão da corrida.
+  const inRace = new Set(Object.values(races).flatMap((r) => r.lanes.map((l) => l.sessionId)));
+  const ids = allIds.filter((id) => !inRace.has(id));
   const key = useSessionStates(ids);
   const sessions = deskOrder(
     key
@@ -335,7 +340,12 @@ export function Desk() {
         return { id, state };
       }),
   );
-  const order = [...sessions.map((s) => s.id), ...orphans.map((o) => o.id)].join(',');
+  const raceList = Object.values(races).filter((r) => r.phase !== 'closed');
+  const order = [
+    ...raceList.map((r) => r.id),
+    ...sessions.map((s) => s.id),
+    ...orphans.map((o) => o.id),
+  ].join(',');
   const grid = useFlip(order);
   const area = useRef<HTMLElement>(null);
   useDragScroll(area);
@@ -349,6 +359,9 @@ export function Desk() {
         ref={grid}
         className="mx-auto grid max-w-[64rem] grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3"
       >
+        {raceList.map((r) => (
+          <RaceCard key={r.id} race={r} />
+        ))}
         {sessions.map((s) => (
           <SessionCard key={s.id} sessionId={s.id} />
         ))}

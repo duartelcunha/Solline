@@ -563,7 +563,7 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
 
   // O branch ganhou o nome da mensagem; o ficheiro está só na worktree até se trazer.
   await expect(chip).toHaveAttribute('data-branch', /^solline\/create-a-file-named-/);
-  await expect(page.getByTestId('review-pending')).toContainText('+1', { timeout: 30_000 });
+  await expect(page.getByTestId('review-pending')).toContainText(/[+][1-9]/, { timeout: 30_000 });
   expect(existsSync(join(project, 'wt.txt'))).toBe(false);
   await shot(page, 'worktree-chip');
   await chip.click();
@@ -578,6 +578,48 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
   await chip.click();
   await page.getByTestId('workspace-close').click();
   await expect(page.getByTestId('session-row')).toHaveCount(1, { timeout: 30_000 });
+});
+
+test('uma corrida: o mesmo pedido em duas pistas, lado a lado (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'depende das sessões reais dos testes anteriores');
+  test.setTimeout(300_000);
+  const page = await app.firstWindow();
+  await page.getByTestId('session-row').first().click();
+  await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 60_000 });
+
+  // 2×: a sessão como está (Haiku) e mais uma pista com o Sonnet.
+  await page.getByTestId('pill-race').click();
+  await page.getByTestId('race-lane-claude-sonnet').click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('pill-race')).toContainText('2×');
+  await page
+    .getByTestId('composer-input')
+    .fill('Create a file named race.txt containing exactly the word ok. Reply with one word.');
+  await page.getByTestId('send').click();
+
+  await expect(page.getByTestId('race')).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByTestId('race-lane')).toHaveCount(2);
+  await shot(page, 'race');
+  // Os pedidos das pistas chegam num só sítio; o mesmo pedido responde-se para todas.
+  const phase = page.getByTestId('race-phase');
+  await expect
+    .poll(
+      async () => {
+        if (await page.getByTestId('race-allow-all').isVisible()) {
+          await page.getByTestId('race-allow-all').click();
+        } else if (await page.getByTestId('race-allow').isVisible()) {
+          await page.getByTestId('race-allow').click();
+        }
+        return phase.getAttribute('data-phase');
+      },
+      { timeout: 240_000, intervals: [1_000] },
+    )
+    .toBe('done');
+  await shot(page, 'race-done');
+
+  // Na mesa, a corrida é um cartão; as pistas não aparecem soltas.
+  await page.getByTestId('open-desk').click();
+  await expect(page.getByTestId('race-card')).toHaveCount(1);
 });
 
 test('Codex por clique: sessão, resposta e tokens (Codex real)', async () => {

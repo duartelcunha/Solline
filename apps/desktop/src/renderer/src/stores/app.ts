@@ -9,6 +9,8 @@ import type {
   CheckSpec,
   CommandResult,
   Orphan,
+  Race,
+  RaceLaneSpec,
   DiffScope,
   EngineEvent,
   FileDiff,
@@ -61,9 +63,13 @@ interface AppState {
     queued?: number;
   } | null;
   /** A vista principal: a mesa com todas as sessões, ou a conversa da sessão ativa. */
-  view: 'desk' | 'session';
+  view: 'desk' | 'session' | 'race';
   /** Worktrees que ficaram no disco sem sessão (por trazer). */
   orphans: Orphan[];
+  /** As corridas abertas, por id. */
+  races: Record<string, Race>;
+  /** A corrida aberta na vista principal (null: mesa ou sessão). */
+  activeRaceId: string | null;
 }
 
 export const useApp = create<AppState>(() => ({
@@ -83,6 +89,8 @@ export const useApp = create<AppState>(() => ({
   closing: null,
   view: 'desk',
   orphans: [],
+  races: {},
+  activeRaceId: null,
 }));
 
 const sessionStores = new Map<string, SessionStore>();
@@ -128,8 +136,31 @@ function setActionError(sessionId: string, error: unknown): void {
   sessionStores.get(sessionId)?.setState({ actionError: message(error) });
 }
 
+/** Eventos de sessões que a interface ainda não conhece (chegaram antes da resposta). */
+const earlyEvents = new Map<string, EngineEvent[]>();
+
+/** Regista a loja de uma sessão nova e aplica-lhe o que já tinha chegado. */
+function adoptStore(id: string, store: SessionStore): void {
+  sessionStores.set(id, store);
+  const early = earlyEvents.get(id);
+  earlyEvents.delete(id);
+  for (const event of early ?? []) store.setState(reduceSession(store.getState(), event));
+}
+
 /** Todos os eventos do motor entram por aqui. */
 export function dispatch(event: EngineEvent): void {
+  if (event.type === 'race.state') {
+    useApp.setState((s) => ({ races: { ...s.races, [event.race.id]: event.race } }));
+    return;
+  }
+  // Um erro de uma sessão (uma mensagem da fila que não seguiu) fica nessa sessão; sem sessão,
+  // é o motor que caiu e todas ficam em erro.
+  if (event.type === 'engine.error' && event.sessionId) {
+    const store = sessionStores.get(event.sessionId);
+    if (store) store.setState({ actionError: event.message });
+    else useApp.setState({ notice: event.message });
+    return;
+  }
   if (event.type === 'engine.error') {
     useApp.setState({ notice: event.message });
     for (const store of sessionStores.values()) {
@@ -157,7 +188,14 @@ export function dispatch(event: EngineEvent): void {
     return;
   }
   const store = sessionStores.get(event.sessionId);
-  if (!store) return;
+  if (!store) {
+    // A sessão ainda não chegou à interface (as pistas de uma corrida começam antes de a
+    // resposta do race.start chegar): guarda-se o evento e repete-se quando ela aparecer.
+    const early = earlyEvents.get(event.sessionId) ?? [];
+    if (early.length < 500) early.push(event);
+    earlyEvents.set(event.sessionId, early);
+    return;
+  }
   const apply = () => store.setState(reduceSession(store.getState(), event));
   // Na sessão à vista, as mudanças de forma (um pedido respondido, a vez a passar) transformam-se.
   const { activeSessionId, view } = useApp.getState();
@@ -309,6 +347,33 @@ export const actions = {
     });
   },
 
+  /** Abre uma corrida: o mesmo pedido em várias pistas, cada uma na sua worktree. */
+  async startRace(projectId: string, text: string, lanes: RaceLaneSpec[]): Promise<boolean> {
+    try {
+      const { race, sessions } = await request('race.start', { projectId, text, lanes });
+      for (const created of sessions) {
+        adoptStore(
+          created.session.id,
+          createSessionStore(created.session, projectId, created.capabilities),
+        );
+      }
+      useApp.setState((s) => ({
+        sessionIds: [...sessions.map((c) => c.session.id), ...s.sessionIds],
+        races: { ...s.races, [race.id]: race },
+        activeRaceId: race.id,
+        view: 'race',
+      }));
+      return true;
+    } catch (error) {
+      useApp.setState({ notice: `A corrida não arrancou. ${message(error)}` });
+      return false;
+    }
+  },
+
+  openRace(raceId: string): void {
+    useApp.setState({ activeRaceId: raceId, view: 'race', reviewOpen: false });
+  },
+
   /** Abre a mesa e volta a procurar as worktrees por trazer. */
   openDesk(): void {
     useApp.setState({ view: 'desk', reviewOpen: false });
@@ -361,7 +426,7 @@ export const actions = {
         ...(mcpServerIds.length ? { mcpServerIds } : {}),
       });
       const store = createSessionStore(session, projectId, capabilities);
-      sessionStores.set(session.id, store);
+      adoptStore(session.id, store);
       useApp.setState((s) => ({
         sessionIds: [session.id, ...s.sessionIds],
         activeSessionId: session.id,
