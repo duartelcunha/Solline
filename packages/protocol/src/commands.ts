@@ -251,6 +251,8 @@ export const MAIN_COMMANDS = [
   'projects.setChecks',
   'projects.setSetup',
   'session.create',
+  'session.close',
+  'worktrees.discard',
 ] as const satisfies CommandName[];
 export type MainCommandName = (typeof MAIN_COMMANDS)[number];
 export function isMainCommand(command: CommandName): command is MainCommandName {
@@ -292,6 +294,25 @@ export const internalCommandSchemas = {
   'projects.detectChecks': {
     payload: z.object({ cwd: z.string().min(1) }).strict(),
     result: z.object({ checks: z.array(CheckSpec) }),
+  },
+  /** Fecha a sessão (o main já confirmou se é para deitar fora). */
+  'session.closeNow': {
+    payload: SessionRef.extend({
+      worktree: z.enum(['bring', 'keep', 'discard']).optional(),
+      dropQueue: z.boolean().optional(),
+    }).strict(),
+    result: z.object({
+      closed: z.boolean(),
+      queued: z.number().int().optional(),
+      stats: WorktreeStats.optional(),
+      conflicts: z.array(z.string()).optional(),
+      into: z.string().optional(),
+    }),
+  },
+  /** Deita fora uma worktree órfã (o main já confirmou). */
+  'worktrees.discardNow': {
+    payload: z.object({ id: z.string().min(1).max(128) }).strict(),
+    result: Empty,
   },
   /** A sugestão de preparação para uma pasta (para comparar e para mostrar). */
   'projects.detectSetup': {

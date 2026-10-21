@@ -472,6 +472,15 @@ export const actions = {
     }
   },
 
+  /** Aprova a sugestão de preparação (confirmação nativa no main) e prepara a worktree. */
+  async approveSetup(sessionId: string, command: string): Promise<void> {
+    const projectId = sessionStores.get(sessionId)?.getState().projectId;
+    if (!projectId) return;
+    if (await actions.setProjectSetup(projectId, { command, copyEnv: true })) {
+      await actions.retrySetup(sessionId);
+    }
+  },
+
   async retrySetup(sessionId: string): Promise<void> {
     await request('setup.retry', { sessionId }).catch((error: unknown) =>
       setActionError(sessionId, error),

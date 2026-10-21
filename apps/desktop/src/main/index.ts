@@ -157,6 +157,24 @@ async function confirmSetup(name: string, command: string, copyEnv: boolean): Pr
   return response === 0;
 }
 
+/** Diálogo nativo: deitar fora o trabalho de uma worktree só depois de um clique teu fora da interface. */
+async function confirmDiscard(): Promise<boolean> {
+  const options = {
+    type: 'warning' as const,
+    title: 'Deitar fora',
+    message: 'Deitar fora o trabalho desta worktree?',
+    detail: 'Apaga a pasta da worktree e o branch, com tudo o que não foi trazido. Não se desfaz.',
+    buttons: ['Deitar fora', 'Cancelar'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options);
+  return response === 0;
+}
+
 async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
   switch (command) {
     case 'agents.login': {
@@ -241,6 +259,18 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       const updated = await projects.setSetup(projectId, setup);
       await engine.request('projects.setupChanged', { projectId, setup });
       return { project: updated };
+    }
+    case 'session.close': {
+      const request = payload as CommandPayload<'session.close'>;
+      // Deitar fora não se desfaz: confirma-se fora da interface.
+      if (request.worktree === 'discard' && !(await confirmDiscard())) return { closed: false };
+      return engine.request('session.closeNow', request);
+    }
+    case 'worktrees.discard': {
+      const { id } = payload as CommandPayload<'worktrees.discard'>;
+      if (!(await confirmDiscard())) return {};
+      await engine.request('worktrees.discardNow', { id });
+      return {};
     }
     case 'session.create': {
       // A interface pede pelo projeto; a pasta vem sempre do que está guardado aqui.

@@ -34,7 +34,10 @@ export type SetupSpec = z.infer<typeof SetupSpec>;
 
 /** A preparação de uma sessão: a correr, feita ou falhada (com o fim da saída). */
 export const SetupState = z.object({
-  state: z.enum(['running', 'done', 'failed']),
+  /** approval: há uma sugestão por aprovar (a primeira vez, ou depois de mudar no repo). */
+  state: z.enum(['approval', 'running', 'done', 'failed']),
+  /** O comando sugerido, quando está à espera de aprovação. */
+  command: z.string().optional(),
   tail: z.string().nullable(),
   durationMs: z.number().nullable(),
 });

@@ -392,7 +392,8 @@ export const SessionInfo = z.object({
   /** A preparação da worktree (só nas sessões em worktree de projetos de confiança). */
   setup: z
     .object({
-      state: z.enum(['running', 'done', 'failed']),
+      state: z.enum(['approval', 'running', 'done', 'failed']),
+      command: z.string().optional(),
       tail: z.string().nullable(),
       durationMs: z.number().nullable(),
     })

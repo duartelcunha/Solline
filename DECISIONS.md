@@ -453,3 +453,14 @@
   nativa, como as verificações. Limite de 10 minutos.
 - Enquanto prepara, a sessão abre e o que escreves espera na fila (`SessionTurns.hold`); falhar não
   bloqueia: vê-se o fim do erro com Repetir e Mandar ao agente.
+
+## Fecho do M3 (21/10/2026)
+
+- Revisão de código e de movimento ao M3; corrigido o que encontraram (ver o commit).
+- A sugestão de preparação (conductor.json ou gestor de pacotes) só corre depois de aprovada uma vez
+  com confirmação nativa; fica guardada e um git pull já não muda o que corre.
+- Deitar fora uma worktree (fechar ou órfã) pede confirmação nativa no main.
+- Trazer recusa com o projeto fora de um branch.
+- O bot pisca uma vez ao mudar para à espera ou precisa de ti, e ao passar o rato; em repouso fica
+  parado.
+

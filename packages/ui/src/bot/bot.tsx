@@ -16,39 +16,33 @@ const EYE_ORIGIN = '128px 118px';
 const BLINKS: readonly Mood[] = ['waiting', 'needs-you'];
 
 /**
- * Pisca de vez em quando, com um intervalo diferente por bot (nunca em uníssono) e às vezes
- * duas vezes seguidas. Pára com a janela escondida ou sem foco.
+ * Pisca uma vez quando passa a estar à espera ou a precisar de ti, e quando lhe passas o rato.
+ * Em repouso fica parado: nada pisca sem razão (Norte: calma).
  */
-function useBlink(enabled: boolean): React.RefObject<SVGGElement | null> {
+function useBlink(
+  enabled: boolean,
+  mood: Mood,
+): { eyes: React.RefObject<SVGGElement | null>; blink: () => void } {
   const eyes = useRef<SVGGElement>(null);
+  const blink = () => {
+    eyes.current?.animate(
+      [
+        { transform: 'scaleY(1)' },
+        { transform: 'scaleY(0.1)', offset: 0.4 },
+        { transform: 'scaleY(1)' },
+      ],
+      { duration: 160, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' },
+    );
+  };
   useEffect(() => {
     if (!enabled) return;
-    let timer: ReturnType<typeof setTimeout>;
-    const blinkOnce = () =>
-      eyes.current?.animate(
-        [
-          { transform: 'scaleY(1)' },
-          { transform: 'scaleY(0.1)', offset: 0.4 },
-          { transform: 'scaleY(1)' },
-        ],
-        { duration: 160, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' },
-      );
-    const schedule = () => {
-      timer = setTimeout(
-        () => {
-          if (!document.hidden && document.hasFocus()) {
-            blinkOnce();
-            if (Math.random() < 0.15) setTimeout(blinkOnce, 260);
-          }
-          schedule();
-        },
-        2_500 + Math.random() * 3_500,
-      );
-    };
-    schedule();
+    // Um pestanejar depois de o humor assentar (o morph dos olhos acaba antes).
+    const timer = setTimeout(() => {
+      if (!document.hidden) blink();
+    }, 320);
     return () => clearTimeout(timer);
-  }, [enabled]);
-  return eyes;
+  }, [enabled, mood]);
+  return { eyes, blink };
 }
 
 /**
@@ -79,7 +73,8 @@ export function Bot({
   const [first] = useState(mood);
   const [changed, setChanged] = useState(false);
   if (!changed && mood !== first) setChanged(true);
-  const eyes = useBlink(alive && BLINKS.includes(mood) && !prefersReducedMotion());
+  const blinks = alive && BLINKS.includes(mood) && !prefersReducedMotion();
+  const { eyes, blink } = useBlink(blinks, mood);
   const hoodStyle: CSSProperties = {
     transform: frame.hoodCss,
     transformOrigin: HOOD_ORIGIN,
@@ -92,6 +87,7 @@ export function Bot({
       width={size}
       height={size}
       className={className}
+      onPointerEnter={blinks ? blink : undefined}
       role={title ? 'img' : undefined}
       aria-hidden={title ? undefined : true}
       aria-label={title}

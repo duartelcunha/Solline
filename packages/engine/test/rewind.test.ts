@@ -713,6 +713,43 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
     expect(manager.queue(second)).toBeDefined();
   });
 
+  it('sem preparação guardada, a sugestão espera pela tua aprovação e não corre', async () => {
+    const runs: string[] = [];
+    makeManager(
+      true,
+      undefined,
+      {
+        detect: async () => [],
+        run: async (command) => (
+          runs.push(command),
+          { state: 'passed', tail: null, durationMs: 1 }
+        ),
+      },
+      gitProject(),
+    );
+    await writeFile(path.join(project, 'package-lock.json'), '{}');
+    await startSession();
+    const { session } = await manager.create({
+      projectId: 'p',
+      agent: 'claude',
+      cwd: project,
+      trusted: true,
+    });
+    await waitFor(
+      () =>
+        events.some(
+          (e) =>
+            e.type === 'session.setup' &&
+            e.sessionId === session.id &&
+            (e as { setup: { state: string } }).setup.state === 'approval',
+        ),
+      10_000,
+    );
+    expect(runs).toEqual([]);
+    // O que escreves não fica preso à espera de uma aprovação.
+    expect(await manager.send(session.id, 'olá')).toMatchObject({ how: 'sent' });
+  });
+
   it('sem git, a segunda sessão partilha a pasta', async () => {
     makeManager(true, undefined, undefined, new WorktreeManager({ root: path.join(root, 'wt') }));
     await startSession();

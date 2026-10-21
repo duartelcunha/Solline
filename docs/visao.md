@@ -92,6 +92,13 @@ agentes que o aceitam.
 Inspiração: Conductor (worktrees, scripts, portas), painel de agentes do Warp, vista de sessões do
 Claude e do Codex.
 
+Estado (21/10/2026): feito. A segunda sessão de um projeto git ganha worktree e branch (nome da
+primeira mensagem), traz-se por merge e fecha sem perder nada. A mesa mostra um cartão vivo por
+sessão, ordenado pelo que precisa de ti, com os pedidos respondidos no próprio cartão. Escreve-se
+com o agente a trabalhar: Enter põe na fila, Ctrl+Enter guia o turno (Claude e Codex). Cada
+worktree prepara-se por trás (comando aprovado uma vez, .env ignorados copiados) e cada sessão tem
+10 portas. Decisões e limites em `DECISIONS.md`.
+
 ### M4: best-of-N entre harnesses, com juiz
 
 Um pedido corre em N agentes ou modelos ao mesmo tempo, em N worktrees. As pistas correm lado a lado

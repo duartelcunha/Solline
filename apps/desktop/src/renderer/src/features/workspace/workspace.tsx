@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Folders, GitBranch, GitMerge, RotateCw, Send, Sparkles, X } from 'lucide-react';
+import { Folders, GitBranch, GitMerge, Hammer, RotateCw, Send, Sparkles, X } from 'lucide-react';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
@@ -69,11 +69,24 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
             )}
           </IconSwap>
           <span className="truncate" data-testid="workspace-label">
-            {setup?.state === 'running' ? 'A preparar' : name}
+            {setup?.state === 'running'
+              ? 'A preparar'
+              : setup?.state === 'approval' && setup.command
+                ? 'Por preparar'
+                : name}
           </span>
         </Menu.Trigger>
       }
     >
+      {setup?.state === 'approval' && setup.command ? (
+        <ActionItem
+          title="Preparar a worktree"
+          description={setup.command}
+          icon={<Hammer size={14} />}
+          onSelect={() => void actions.approveSetup(sessionId, setup.command ?? '')}
+          testId="setup-approve"
+        />
+      ) : null}
       {setup?.state === 'failed' ? (
         <>
           {setup.tail ? (

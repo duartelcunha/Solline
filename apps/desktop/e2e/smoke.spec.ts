@@ -514,10 +514,13 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
   await expect(page.getByTestId('session-row')).toHaveCount(2, { timeout: 90_000 });
   await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
   const chip = page.getByTestId('workspace-chip');
+  // A sugestão do conductor.json só corre depois de aprovada (uma vez, com confirmação nativa).
+  const label = page.getByTestId('workspace-label');
+  await expect(label).toHaveText('Por preparar', { timeout: 60_000 });
+  await chip.click();
+  await page.getByTestId('setup-approve').click();
   // A worktree prepara-se por trás e a pastilha volta ao nome do branch quando acaba.
-  await expect(page.getByTestId('workspace-label')).not.toHaveText('A preparar', {
-    timeout: 60_000,
-  });
+  await expect(label).not.toHaveText(/A preparar|Por preparar/, { timeout: 60_000 });
   await expect(chip).toHaveAttribute('data-branch', /^solline\/sessao-/);
 
   await page.getByTestId('pill-model').click();

@@ -91,6 +91,13 @@ describe('worktrees das sessões', { timeout: 30_000 }, () => {
     expect(git(project, 'branch', '--list', wt.branch)).toContain(wt.branch);
   });
 
+  it('trazer recusa com o projeto fora de um branch', async () => {
+    const wt = (await manager.create(project, 'p1'))!;
+    await writeFile(path.join(wt.cwd, 'a.txt'), 'dois\n');
+    git(project, 'checkout', '--quiet', '--detach');
+    await expect(manager.bring(wt, 'Solline: x')).rejects.toThrow(/não está num branch/);
+  });
+
   it('pasta sem git não tem worktree; as que ficaram aparecem como órfãs', async () => {
     const plain = path.join(root, 'sem-git');
     await mkdir(plain);

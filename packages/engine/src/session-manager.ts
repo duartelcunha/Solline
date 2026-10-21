@@ -965,7 +965,21 @@ export class SessionManager {
     };
     report({ state: 'running', tail: null, durationMs: null });
     try {
-      const spec = this.#setups.get(entry.info.projectId) ?? (await detectSetup(projectPath));
+      const saved = this.#setups.get(entry.info.projectId);
+      if (!saved) {
+        // Sem preparação guardada: a sugestão (que o repo pode mudar num git pull) só corre
+        // depois de a aprovares, uma vez, com a confirmação nativa do main.
+        const suggestion = await detectSetup(projectPath);
+        if (abort.signal.aborted) return;
+        report({
+          state: 'approval',
+          command: suggestion.command,
+          tail: null,
+          durationMs: null,
+        });
+        return;
+      }
+      const spec = saved;
       if (spec.copyEnv && this.#worktrees) {
         const names = await envFilesIn(projectPath);
         // Só os que o git ignora: um .env não ignorado entraria no commit do "Trazer".

@@ -195,8 +195,12 @@ export class WorktreeManager {
    * branch atual do projeto. Com conflitos, desfaz o merge no projeto e devolve a lista.
    */
   async bring(wt: Worktree, message: string): Promise<{ result: BringResult; wt: Worktree }> {
-    await this.commitAll(wt, message);
     const into = (await this.#run(wt.top, ['rev-parse', '--abbrev-ref', 'HEAD'])).out.trim();
+    // Num commit solto, o merge ficava fora de qualquer branch e perdia-se depois.
+    if (into === 'HEAD') {
+      throw new Error('O projeto não está num branch: muda para um antes de trazer.');
+    }
+    await this.commitAll(wt, message);
     const merge = await this.#run(
       wt.top,
       ['merge', '--no-ff', '--no-edit', '-m', `Trazer ${wt.branch}`, wt.branch],
