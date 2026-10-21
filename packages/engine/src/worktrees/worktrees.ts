@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { WorktreeStats } from '@solline/protocol';
 import { resolveGit } from '../checkpoints/git.ts';
@@ -221,6 +221,35 @@ export class WorktreeManager {
   }
 
   /** Tira a worktree; com deleteBranch, também o branch. */
+  /**
+   * Uma pasta com o código da base da worktree (antes da mudança), para o Verificador comparar.
+   * As dependências não estão no git: liga-se o node_modules da worktree (junção no Windows).
+   */
+  async baseline(wt: Worktree): Promise<{ cwd: string; dispose: () => Promise<void> }> {
+    const dir = path.join(this.#root, '.base', randomBytes(4).toString('hex'));
+    await mkdir(path.dirname(dir), { recursive: true });
+    await this.#run(wt.top, ['worktree', 'add', '--quiet', '--detach', dir, wt.base]);
+    const rel = path.relative(wt.path, wt.cwd);
+    const cwd = path.join(dir, rel);
+    const deps = path.join(wt.cwd, 'node_modules');
+    if (
+      await stat(deps).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      await symlink(deps, path.join(cwd, 'node_modules'), 'junction').catch(() => undefined);
+    }
+    return {
+      cwd,
+      dispose: async () => {
+        await this.#run(wt.top, ['worktree', 'remove', '--force', dir], true);
+        await rm(dir, { recursive: true, force: true });
+        await this.#run(wt.top, ['worktree', 'prune'], true);
+      },
+    };
+  }
+
   /** Destes nomes (relativos a `dir`), os que o .gitignore do projeto ignora. */
   async ignored(dir: string, names: readonly string[]): Promise<Set<string>> {
     if (names.length === 0) return new Set();

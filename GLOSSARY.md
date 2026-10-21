@@ -24,3 +24,9 @@ Os nomes do domínio da Solline, como o código os usa.
 - **Lida (absorvida)**: a mensagem guiada já chegou ao agente.
 - **SessionTurns**: o dono do turno de uma sessão: um de cada vez, a fila, guiar e as ações que
   não podem coincidir com um turno (rebobinar, desfazer, trazer).
+- **Verificador**: corre as verificações do projeto numa pasta de trabalho e, para as que falham,
+  volta a corrê-las na base, para separar o que a mudança partiu do que já estava partido. É o
+  sinal objetivo antes de qualquer opinião (corridas, segunda opinião, CI, objetivos).
+- **Juiz cego**: desempata tentativas que a execução não separou. Vê o pedido, os diffs e as
+  verificações, com as tentativas por letra; nunca o agente nem o que ele disse. Julga nas duas
+  ordens; se discordarem, é empate e decide o Duarte.
