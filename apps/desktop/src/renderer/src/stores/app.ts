@@ -6,6 +6,7 @@ import type {
   McpServerDescriptor,
   CommandName,
   CommandPayload,
+  CheckSpec,
   CommandResult,
   DiffScope,
   EngineEvent,
@@ -313,6 +314,11 @@ export const actions = {
           if (store.getState().quality === null) store.setState({ quality });
         })
         .catch(() => undefined);
+      void request('checks.get', { sessionId: session.id })
+        .then((checks) => {
+          if (store.getState().checks === null) store.setState({ checks });
+        })
+        .catch(() => undefined);
     } catch (error) {
       useApp.setState({ notice: `Não foi possível abrir a sessão. ${message(error)}` });
     } finally {
@@ -449,6 +455,40 @@ export const actions = {
       return true;
     } catch (error) {
       setActionError(sessionId, error);
+      return false;
+    }
+  },
+
+  /** Volta a correr as verificações do projeto agora. */
+  async runChecks(sessionId: string): Promise<void> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('checks.run', { sessionId });
+    } catch (error) {
+      setActionError(sessionId, error);
+    }
+  },
+
+  /** Manda a falha de uma verificação ao agente. */
+  async fixCheck(sessionId: string, id: string): Promise<void> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('checks.fix', { sessionId, id });
+    } catch (error) {
+      setActionError(sessionId, error);
+    }
+  },
+
+  /** Guarda as verificações de um projeto (null: as do package.json). false se recusaste. */
+  async setProjectChecks(projectId: string, checks: CheckSpec[] | null): Promise<boolean> {
+    try {
+      const { project } = await request('projects.setChecks', { projectId, checks });
+      useApp.setState((s) => ({
+        projects: s.projects.map((p) => (p.id === project.id ? project : p)),
+      }));
+      return JSON.stringify(project.checks ?? null) === JSON.stringify(checks);
+    } catch (error) {
+      useApp.setState({ notice: message(error) });
       return false;
     }
   },

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentId, AskBlock, ConversationDelta, SessionState } from './conversation.ts';
+import { Checks } from './checks.ts';
 import { Quality } from './quality.ts';
 import { Timeline } from './review.ts';
 
@@ -57,6 +58,14 @@ export const SessionQualityEvent = z.object({
   quality: Quality,
 });
 
+/** As verificações do projeto desta sessão mudaram: começaram, acabaram ou foram esquecidas. */
+export const SessionChecksEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.checks'),
+  sessionId: z.string(),
+  checks: Checks,
+});
+
 export const EngineErrorEvent = z.object({
   kind: z.literal('event'),
   type: z.literal('engine.error'),
@@ -81,6 +90,7 @@ export const EngineEvent = z.discriminatedUnion('type', [
   PermissionRequestEvent,
   SessionTimelineEvent,
   SessionQualityEvent,
+  SessionChecksEvent,
   EngineErrorEvent,
 ]);
 export type EngineEvent = z.infer<typeof EngineEvent>;
@@ -89,4 +99,5 @@ export type SessionStateEvent = z.infer<typeof SessionStateEvent>;
 export type PermissionRequestEvent = z.infer<typeof PermissionRequestEvent>;
 export type SessionTimelineEvent = z.infer<typeof SessionTimelineEvent>;
 export type SessionQualityEvent = z.infer<typeof SessionQualityEvent>;
+export type SessionChecksEvent = z.infer<typeof SessionChecksEvent>;
 export type AgentsChangedEvent = z.infer<typeof AgentsChangedEvent>;

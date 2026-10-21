@@ -9,6 +9,7 @@ import {
   SessionInfo,
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
+import { CheckList, CheckSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
 
 /**
@@ -47,6 +48,8 @@ export const Project = z.object({
    * (no Claude, o .claude/ e o CLAUDE.md da pasta) e "Permitir sempre" só vale na sessão.
    */
   trusted: z.boolean(),
+  /** As verificações guardadas; sem elas, valem as que a Solline encontra no package.json. */
+  checks: CheckList.nullable().optional(),
 });
 export type Project = z.infer<typeof Project>;
 
@@ -73,6 +76,7 @@ export const SessionCreatePayload = z
 export const SessionStartPayload = SessionCreatePayload.extend({
   cwd: z.string().min(1),
   trusted: z.boolean(),
+  checks: CheckList.nullable().optional(),
 }).strict();
 export type SessionStartPayload = z.infer<typeof SessionStartPayload>;
 
@@ -142,8 +146,19 @@ export const commandSchemas = {
     payload: z.object({ projectId: z.string().min(1).max(64), trusted: z.boolean() }).strict(),
     result: z.object({ project: Project }),
   },
+  /**
+   * Guarda as verificações de um projeto (null: volta às do package.json). Um comando novo ou
+   * mudado pede confirmação nativa; project volta igual se a recusares.
+   */
+  'projects.setChecks': {
+    payload: z
+      .object({ projectId: z.string().min(1).max(64), checks: CheckList.nullable() })
+      .strict(),
+    result: z.object({ project: Project }),
+  },
   ...reviewCommandSchemas,
   ...qualityCommandSchemas,
+  ...checksCommandSchemas,
 } as const;
 
 /**
@@ -156,6 +171,7 @@ export const MAIN_COMMANDS = [
   'projects.list',
   'projects.add',
   'projects.setTrusted',
+  'projects.setChecks',
   'session.create',
 ] as const satisfies CommandName[];
 export type MainCommandName = (typeof MAIN_COMMANDS)[number];
@@ -192,6 +208,18 @@ export const internalCommandSchemas = {
   /** A confiança de um projeto mudou: as próximas retomas das suas sessões usam a nova. */
   'projects.trustChanged': {
     payload: z.object({ projectId: z.string().min(1).max(64), trusted: z.boolean() }).strict(),
+    result: Empty,
+  },
+  /** As verificações que a Solline encontra no package.json de uma pasta (para comparar). */
+  'projects.detectChecks': {
+    payload: z.object({ cwd: z.string().min(1) }).strict(),
+    result: z.object({ checks: z.array(CheckSpec) }),
+  },
+  /** As verificações de um projeto mudaram (o main já pediu confirmação). */
+  'projects.checksChanged': {
+    payload: z
+      .object({ projectId: z.string().min(1).max(64), checks: CheckList.nullable() })
+      .strict(),
     result: Empty,
   },
 } as const;

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ProjectStore } from './projects.ts';
+import { ProjectStore, newCommands } from './projects.ts';
 
 let dir: string;
 let file: string;
@@ -46,5 +46,30 @@ describe('ProjectStore', () => {
     const project = await store.add(join(dir, 'App'), true);
     const found = await store.find(join(dir, process.platform === 'win32' ? 'APP' : 'App'));
     expect(found?.id).toBe(project.id);
+  });
+});
+
+describe('verificações do projeto', () => {
+  const check = (command: string, enabled = true) => ({
+    id: command.replace(/\W/g, ''),
+    label: 'x',
+    command,
+    enabled,
+  });
+
+  it('só um comando novo pede confirmação; ligar ou desligar não', () => {
+    const before = [check('pnpm lint'), check('pnpm test', false)];
+    expect(newCommands(before, [check('pnpm lint', false), check('pnpm test')])).toEqual([]);
+    expect(newCommands(before, [check('pnpm lint'), check('rm -rf .')])).toEqual(['rm -rf .']);
+  });
+
+  it('a lista guarda-se por projeto e volta a null', async () => {
+    const store = new ProjectStore(file);
+    const project = await store.add(dir, true);
+    await store.setChecks(project.id, [check('pnpm lint')]);
+    const again = new ProjectStore(file);
+    expect((await again.get(project.id))?.checks).toEqual([check('pnpm lint')]);
+    await again.setChecks(project.id, null);
+    expect((await new ProjectStore(file).get(project.id))?.checks).toBeNull();
   });
 });

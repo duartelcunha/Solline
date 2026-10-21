@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
-import { Project } from '@solline/protocol';
+import { Project, type CheckSpec } from '@solline/protocol';
 
 /** v1 não tinha confiança: os projetos que já lá estavam ficam de confiança (como antes). */
 const ProjectsFileV1 = z.object({
@@ -16,6 +16,12 @@ function parseFile(raw: unknown): Project[] {
   if (v2.success) return v2.data.projects;
   const v1 = ProjectsFileV1.safeParse(raw);
   return v1.success ? v1.data.projects.map((p) => ({ ...p, trusted: true })) : [];
+}
+
+/** Os comandos da lista nova que ainda não estavam na antiga: só esses pedem confirmação. */
+export function newCommands(before: readonly CheckSpec[], after: readonly CheckSpec[]): string[] {
+  const known = new Set(before.map((c) => c.command));
+  return [...new Set(after.map((c) => c.command).filter((c) => !known.has(c)))];
 }
 
 /** Pastas que o Duarte abriu na Solline, guardadas num JSON na pasta de dados da app. */
@@ -76,6 +82,17 @@ export class ProjectStore {
     const current = projects.find((p) => p.id === id);
     if (!current) throw new Error('Projeto desconhecido');
     const project = { ...current, trusted };
+    this.#cache = projects.map((p) => (p.id === id ? project : p));
+    await this.#save();
+    return project;
+  }
+
+  /** Guarda as verificações do projeto (null: volta às do package.json). */
+  async setChecks(id: string, checks: CheckSpec[] | null): Promise<Project> {
+    const projects = await this.list();
+    const current = projects.find((p) => p.id === id);
+    if (!current) throw new Error('Projeto desconhecido');
+    const project = { ...current, checks };
     this.#cache = projects.map((p) => (p.id === id ? project : p));
     await this.#save();
     return project;

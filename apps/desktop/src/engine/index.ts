@@ -22,6 +22,8 @@ const engine = new Engine({
   ...(process.env.SOLLINE_REVIEWER === '1'
     ? { reviewer: claudeReviewer({ claudeExecutable }) }
     : {}),
+  // E as verificações do projeto, que isolado ficam desligadas.
+  ...(process.env.SOLLINE_CHECKS === '1' ? { checks: {} } : {}),
   emit: (event) => {
     // Validado antes de sair; o main volta a validar ao receber.
     const checked = EngineEvent.safeParse(event);

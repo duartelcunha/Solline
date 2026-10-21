@@ -26,12 +26,23 @@ test.beforeAll(async () => {
   userData = await mkdtemp(join(tmpdir(), 'solline-e2e-data-'));
   project = await mkdtemp(join(tmpdir(), 'solline-e2e-proj-'));
   await writeFile(join(project, 'notes.txt'), 'The quick alpha fox.\n');
+  // Duas verificações: os tipos passam, o lint falha com uma linha que se reconhece.
+  await writeFile(
+    join(project, 'package.json'),
+    JSON.stringify({
+      private: true,
+      scripts: {
+        typecheck: 'node -e "process.exit(0)"',
+        lint: 'node -e "console.error(String.fromCharCode(108,105,110,116,32,112,97,114,116,105,117)); process.exit(1)"',
+      },
+    }),
+  );
   const env = {
     ...process.env,
     SOLLINE_USER_DATA: userData,
     SOLLINE_ISOLATED: '1',
     // Com o SDK real, o revisor também corre (lê o turno e deixa achados).
-    ...(process.env.SOLLINE_E2E_SDK === '1' ? { SOLLINE_REVIEWER: '1' } : {}),
+    ...(process.env.SOLLINE_E2E_SDK === '1' ? { SOLLINE_REVIEWER: '1', SOLLINE_CHECKS: '1' } : {}),
   } as Record<string, string>;
   app = exe
     ? await electron.launch({ executablePath: exe, env })
@@ -373,6 +384,16 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
     timeout: 120_000,
   });
   await shot(page, 'quality-chip');
+  // As verificações do projeto correm ao mesmo tempo: os tipos passam, o lint falha.
+  const pill = (id: string) => page.locator(`[data-testid="check-pill"][data-check="${id}"]`);
+  await expect(pill('typecheck')).toHaveAttribute('data-state-check', 'passed', {
+    timeout: 60_000,
+  });
+  await expect(pill('lint')).toHaveAttribute('data-state-check', 'failed', { timeout: 60_000 });
+  await pill('lint').click();
+  await expect(page.getByTestId('check-tail')).toContainText('lint partiu');
+  await shot(page, 'checks-failed');
+  await page.keyboard.press('Escape');
   expect(await readFile(join(project, 'notes.txt'), 'utf8')).toContain('beta');
   console.info(
     `[sessão ${exe ? 'instalada' : 'build'}] custo ${await page.getByTestId('session-cost').innerText()}`,

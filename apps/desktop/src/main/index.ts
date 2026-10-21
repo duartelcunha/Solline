@@ -25,7 +25,7 @@ import {
 import { addedKeys, allowedLoginUrl } from './agent-policy.ts';
 import { AttentionTracker, type Attention } from './attention.ts';
 import { EngineHost } from './engine-host.ts';
-import { ProjectStore } from './projects.ts';
+import { ProjectStore, newCommands } from './projects.ts';
 import { resolveSessionStart } from './session-policy.ts';
 
 app.setName(APP_NAME);
@@ -118,6 +118,24 @@ async function confirmKeys(label: string, keys: readonly string[]): Promise<bool
   return response === 0;
 }
 
+/** Diálogo nativo: um comando novo só corre no projeto depois de um clique teu fora da interface. */
+async function confirmChecks(name: string, commands: readonly string[]): Promise<boolean> {
+  const options = {
+    type: 'question' as const,
+    title: 'Verificações do projeto',
+    message: `Correr estes comandos em ${name} no fim de cada turno?`,
+    detail: `${commands.join('\n')}\n\nCorrem na pasta do projeto, sem os segredos do teu ambiente.`,
+    buttons: ['Correr', 'Cancelar'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options);
+  return response === 0;
+}
+
 async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
   switch (command) {
     case 'agents.login': {
@@ -169,6 +187,22 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       const updated = await projects.setTrusted(projectId, trusted);
       // As sessões abertas guardam a confiança com que arrancaram; a retoma passa a usar esta.
       await engine.request('projects.trustChanged', { projectId, trusted });
+      return { project: updated };
+    }
+    case 'projects.setChecks': {
+      const { projectId, checks } = payload as CommandPayload<'projects.setChecks'>;
+      const project = await projects.get(projectId);
+      if (!project) throw new Error('Projeto desconhecido');
+      // Compara com a lista em uso: a guardada, ou a que o motor encontra no package.json.
+      const before =
+        project.checks ??
+        (await engine.request('projects.detectChecks', { cwd: project.path })).checks;
+      const after =
+        checks ?? (await engine.request('projects.detectChecks', { cwd: project.path })).checks;
+      const added = newCommands(before, after);
+      if (added.length > 0 && !(await confirmChecks(project.name, added))) return { project };
+      const updated = await projects.setChecks(projectId, checks);
+      await engine.request('projects.checksChanged', { projectId, checks });
       return { project: updated };
     }
     case 'session.create': {

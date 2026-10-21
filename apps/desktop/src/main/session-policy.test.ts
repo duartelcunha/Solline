@@ -25,6 +25,7 @@ describe('resolveSessionStart', () => {
       mode: 'plan',
       cwd: project.path,
       trusted: false,
+      checks: null,
     });
   });
 

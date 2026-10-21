@@ -17,7 +17,8 @@ import { fileAgentSettings, memoryAgentSettings, type AgentSettings } from './ag
 import { SECRET_NAME } from './env.ts';
 import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
-import { SessionManager } from './session-manager.ts';
+import { SessionManager, type ChecksOptions } from './session-manager.ts';
+import { detectChecks } from './checks/detect.ts';
 import { ENGINE_VERSION } from './version.ts';
 
 export interface EngineOptions {
@@ -40,6 +41,8 @@ export interface EngineOptions {
   checkpoints?: CheckpointStoreOptions | false;
   /** A segunda opinião no fim de cada turno (por omissão um Claude só de leitura); false desliga. */
   reviewer?: Reviewer | false;
+  /** As verificações do projeto no fim de cada turno (por omissão ligadas, menos isolado); false desliga. */
+  checks?: ChecksOptions | false;
   /** Para testes: troca onde ficam as variáveis escolhidas para cada agente. */
   settings?: AgentSettings;
   /** Para testes: o ambiente onde se procuram nomes de segredos. */
@@ -94,6 +97,11 @@ export class Engine {
             (options.isolated
               ? undefined
               : claudeReviewer({ claudeExecutable: options.claudeExecutable }))),
+      // Nos testes isolados não se correm comandos do repositório da própria Solline.
+      checks:
+        options.checks === false
+          ? undefined
+          : (options.checks ?? (options.isolated ? undefined : {})),
     });
     this.logins = new LoginManager({
       onChange: (agent, error) =>
@@ -164,6 +172,8 @@ export class Engine {
       }),
       'session.start': (p) => s.create(p),
       'projects.trustChanged': async (p) => (s.setProjectTrust(p.projectId, p.trusted), ok),
+      'projects.detectChecks': async (p) => ({ checks: await detectChecks(p.cwd) }),
+      'projects.checksChanged': async (p) => (await s.setProjectChecks(p.projectId, p.checks), ok),
       'session.resume': (p) => s.resume(p.sessionId),
       'session.send': async (p) => ({ turnId: await s.send(p.sessionId, p.text) }),
       'session.interrupt': async (p) => (await s.interrupt(p.sessionId), ok),
@@ -184,6 +194,9 @@ export class Engine {
       'quality.setEnabled': async (p) => s.setQualityEnabled(p.sessionId, p.enabled),
       'quality.review': (p) => s.reviewNow(p.sessionId),
       'quality.fix': async (p) => ({ turnId: await s.fix(p.sessionId, p.ids) }),
+      'checks.get': async (p) => s.checks(p.sessionId),
+      'checks.run': (p) => s.runChecks(p.sessionId),
+      'checks.fix': async (p) => ({ turnId: await s.fixCheck(p.sessionId, p.id) }),
     };
   }
 

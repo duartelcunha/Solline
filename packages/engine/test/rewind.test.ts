@@ -6,9 +6,11 @@ import type {
   AgentCapabilities,
   ConversationDelta,
   EngineEvent,
+  SessionChecksEvent,
   SessionQualityEvent,
   SessionTimelineEvent,
 } from '@solline/protocol';
+import type { ChecksOptions } from '../src/session-manager.ts';
 import {
   ClaudeSdkAdapter,
   CodexAppServerAdapter,
@@ -113,7 +115,7 @@ let store: CheckpointStore;
 let manager: SessionManager;
 let events: EngineEvent[];
 
-function makeManager(native: boolean, reviewer?: Reviewer) {
+function makeManager(native: boolean, reviewer?: Reviewer, checks?: ChecksOptions) {
   events = [];
   manager = new SessionManager({
     emit: (event) => events.push(event),
@@ -122,6 +124,7 @@ function makeManager(native: boolean, reviewer?: Reviewer) {
     }),
     checkpoints: store,
     reviewer,
+    checks,
   });
 }
 
@@ -475,5 +478,56 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
     await waitFor(() => quality(id)?.review.state === 'error', 10_000);
     expect(quality(id)!.review.error).toBe('sem rede');
     await turn(id, 'escreve f.txt=v2');
+  });
+});
+
+describe('verificações do projeto no fim de cada turno', { timeout: 60_000 }, () => {
+  const checks = (sessionId: string) =>
+    events
+      .filter(
+        (e): e is SessionChecksEvent => e.type === 'session.checks' && e.sessionId === sessionId,
+      )
+      .at(-1)?.checks;
+  const spec = { id: 'lint', label: 'Lint', command: 'pnpm lint', enabled: true };
+
+  it('corre depois de um turno que mudou ficheiros; a falha segue para o agente', async () => {
+    const ran: string[] = [];
+    makeManager(true, undefined, {
+      detect: async () => [spec],
+      run: async (command) => {
+        ran.push(command);
+        return { state: 'failed', tail: 'a.ts:1 erro', durationMs: 3 };
+      },
+    });
+    const id = await startSession();
+    await turn(id, 'só uma pergunta');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(ran).toEqual([]);
+    const t2 = await turn(id, 'escreve f.txt=v1');
+    await waitFor(() => checks(id)?.results[0]?.state === 'failed', 10_000);
+    expect(ran).toEqual(['pnpm lint']);
+    expect(checks(id)).toMatchObject({ turnId: t2, detected: true });
+
+    await manager.fixCheck(id, 'lint');
+    expect(ScriptedAdapter.received.at(-1)!.text).toContain('a.ts:1 erro');
+  });
+
+  it('sem confiança não corre; rebobinar esquece os resultados', async () => {
+    let calls = 0;
+    makeManager(true, undefined, {
+      detect: async () => [spec],
+      run: async () => (calls++, { state: 'passed', tail: null, durationMs: 1 }),
+    });
+    const id = await startSession();
+    const t1 = await turn(id, 'escreve f.txt=v1');
+    await waitFor(() => checks(id)?.results[0]?.state === 'passed', 10_000);
+    await manager.rewind(id, t1, { files: true, conversation: false });
+    expect(manager.checks(id)).toMatchObject({ turnId: null, results: [] });
+
+    manager.setProjectTrust('p', false);
+    await turn(id, 'escreve f.txt=v2');
+    await new Promise((r) => setTimeout(r, 200));
+    expect(calls).toBe(1);
+    await expect(manager.runChecks(id)).rejects.toThrow('confiança');
   });
 });

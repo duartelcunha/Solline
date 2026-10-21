@@ -2,6 +2,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   applyDelta,
   type AgentCapabilities,
+  type Checks,
   type EngineEvent,
   type Quality,
   type SessionInfo,
@@ -27,6 +28,8 @@ export interface SessionData {
   draft: string | null;
   /** A segunda opinião: se está ligada e o que o revisor achou do último turno. */
   quality: Quality | null;
+  /** As verificações do projeto (tipos, lint, testes) depois do último turno que mudou ficheiros. */
+  checks: Checks | null;
   /** Desde quando a sessão está no estado atual (ms). */
   stateSince: number;
   /** Quando acabou o último turno (ms), ou null se ainda não acabou nenhum. */
@@ -53,6 +56,7 @@ export function createSessionStore(
     timeline: null,
     draft: null,
     quality: null,
+    checks: null,
     stateSince: Date.now(),
     turnEndedAt: null,
   }));
@@ -99,6 +103,8 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       return { ...data, timeline: event.timeline };
     case 'session.quality':
       return { ...data, quality: event.quality };
+    case 'session.checks':
+      return { ...data, checks: event.checks };
     case 'session.state': {
       if (event.state === data.info.state) return data;
       const now = Date.now();

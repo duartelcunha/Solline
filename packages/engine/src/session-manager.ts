@@ -14,6 +14,8 @@ import {
   type ReviewComment,
   type SessionInfo,
   type SessionStartPayload,
+  type CheckSpec,
+  type Checks,
   type Quality,
   type Timeline,
   type Turn,
@@ -24,6 +26,8 @@ import type { CheckpointStore } from './checkpoints/store.ts';
 import { commentsMessage, summaryOf, textOf } from './review.ts';
 import type { Reviewer } from './quality/reviewer.ts';
 import { NO_REVIEW, SessionQuality, fixMessage } from './quality/session-quality.ts';
+import { ProjectChecks, checkFixMessage } from './checks/project-checks.ts';
+import type { RunCommand } from './checks/run.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
@@ -50,6 +54,12 @@ async function defaultCheckCwd(cwd: string): Promise<void> {
     () => false,
   );
   if (!isDir) throw new Error('A pasta do projeto já não existe');
+}
+
+/** Para testes: troca como se correm e encontram os comandos. */
+export interface ChecksOptions {
+  run?: RunCommand;
+  detect?: (cwd: string) => Promise<CheckSpec[]>;
 }
 
 interface Entry {
@@ -103,6 +113,9 @@ export class SessionManager {
   readonly #store: CheckpointStore | undefined;
   readonly #keysFor: (agent: string) => Promise<readonly string[]>;
   readonly #reviewer: Reviewer | undefined;
+  readonly #checksOptions: ChecksOptions | undefined;
+  /** As verificações de cada projeto (por projectId), partilhadas pelas suas sessões. */
+  readonly #checks = new Map<string, ProjectChecks>();
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
@@ -118,6 +131,8 @@ export class SessionManager {
     keysFor?: (agent: string) => Promise<readonly string[]>;
     /** Quem dá a segunda opinião no fim de cada turno que mude ficheiros. */
     reviewer?: Reviewer | undefined;
+    /** As verificações do projeto no fim de cada turno que mude ficheiros; sem isto, não há. */
+    checks?: ChecksOptions | undefined;
   }) {
     this.#emit = options.emit;
     this.#registry = options.registry;
@@ -126,6 +141,7 @@ export class SessionManager {
     this.#store = options.checkpoints;
     this.#keysFor = options.keysFor ?? (async () => []);
     this.#reviewer = options.reviewer;
+    this.#checksOptions = options.checks;
   }
 
   async create(payload: SessionStartPayload): Promise<SessionResult> {
@@ -180,6 +196,7 @@ export class SessionManager {
         : undefined,
     };
     this.#memory.set(info.id, memory);
+    this.#checksFor(info.projectId, info.cwd, payload.trusted, payload.checks ?? null);
     let result: SessionResult;
     try {
       result = await this.#start(info, definition, payload.trusted, mcp, undefined, {
@@ -205,6 +222,59 @@ export class SessionManager {
     for (const entry of this.#sessions.values()) {
       if (entry.info.projectId === projectId) entry.trusted = trusted;
     }
+    // As verificações seguem a confiança já: sem ela, nada corre a partir de agora.
+    this.#checks.get(projectId)?.setTrusted(trusted);
+  }
+
+  /** As verificações de um projeto mudaram no main (já com a tua confirmação). */
+  async setProjectChecks(projectId: string, checks: CheckSpec[] | null): Promise<void> {
+    await this.#checks.get(projectId)?.configure(checks);
+  }
+
+  checks(sessionId: string): Checks {
+    return this.#projectChecks(sessionId).state;
+  }
+
+  /** Volta a correr as verificações agora; o resultado chega por session.checks. */
+  async runChecks(sessionId: string): Promise<Checks> {
+    const checks = this.#projectChecks(sessionId);
+    if (!checks.state.trusted) throw new Error('As verificações só correm em projetos de confiança');
+    const last = this.#memoryOf(sessionId).checkpoints?.timeline().checkpoints.at(-1);
+    void checks.run(last?.state === 'done' ? last.turnId : null);
+    return checks.state;
+  }
+
+  /** Manda a falha de uma verificação ao agente da sessão. */
+  async fixCheck(sessionId: string, id: string): Promise<string> {
+    const failure = this.#projectChecks(sessionId).failure(id);
+    if (!failure) throw new Error('Essa verificação já não está a falhar');
+    return this.send(sessionId, checkFixMessage(failure.spec, failure.result));
+  }
+
+  #projectChecks(sessionId: string): ProjectChecks {
+    const { info } = this.#get(sessionId);
+    const checks = this.#checks.get(info.projectId);
+    if (!checks) throw new Error('As verificações não estão disponíveis');
+    return checks;
+  }
+
+  /** Abre (uma vez por projeto) as verificações e espalha cada mudança pelas suas sessões. */
+  #checksFor(projectId: string, cwd: string, trusted: boolean, saved: CheckSpec[] | null): void {
+    if (!this.#checksOptions || this.#checks.has(projectId)) return;
+    const checks = new ProjectChecks({
+      cwd,
+      saved,
+      trusted,
+      ...this.#checksOptions,
+      emit: (state) => {
+        for (const entry of this.#sessions.values()) {
+          if (entry.info.projectId !== projectId) continue;
+          this.#emit({ kind: 'event', type: 'session.checks', sessionId: entry.info.id, checks: state });
+        }
+      },
+    });
+    this.#checks.set(projectId, checks);
+    void checks.refresh();
   }
 
   /** Abre de novo uma sessão que caiu, com resume no agente e as mesmas definições. */
@@ -225,6 +295,8 @@ export class SessionManager {
     const memory = this.#memoryOf(sessionId);
     this.#requireIdle(entry, memory, 'mandar outra mensagem');
     memory.busy = true;
+    // Um turno novo muda os ficheiros: a ronda de verificações a meio deixa de valer.
+    this.#checks.get(entry.info.projectId)?.cancel();
     try {
       const turnId = crypto.randomUUID();
       const point = entry.adapter.rewindPoint?.();
@@ -286,6 +358,7 @@ export class SessionManager {
   async undo(sessionId: string): Promise<Timeline> {
     this.#requireIdle(this.#get(sessionId), this.#memoryOf(sessionId), 'desfazer');
     const timeline = await this.#checkpoints(sessionId).undo();
+    this.#checks.get(this.#get(sessionId).info.projectId)?.reset();
     this.#emitTimeline(sessionId, timeline);
     return timeline;
   }
@@ -329,6 +402,7 @@ export class SessionManager {
     if (index === -1) throw new Error('Este turno já não está na conversa');
     // Os achados falavam de código que vai deixar de existir.
     memory.quality?.reset();
+    this.#checks.get(entry.info.projectId)?.reset();
     const userTurn = memory.turns[index];
     if (options.files) {
       const checkpoints = this.#checkpoints(sessionId);
@@ -427,6 +501,8 @@ export class SessionManager {
     this.#memory.clear();
     await Promise.all(entries.map((entry) => entry.adapter.close()));
     for (const m of memories) m.quality?.dispose();
+    for (const c of this.#checks.values()) c.dispose();
+    this.#checks.clear();
     await Promise.all(memories.map((m) => m.checkpoints?.dispose()));
   }
 
@@ -467,6 +543,7 @@ export class SessionManager {
     void memory.checkpoints.endTurn(turnId).then(() => {
       this.#emitTimeline(sessionId);
       if (memory.quality?.state.enabled) void this.#review(sessionId, turnId);
+      void this.#check(sessionId, turnId);
     });
   }
 
@@ -486,6 +563,17 @@ export class SessionManager {
         ? null
         : { cwd: entry.info.cwd, diff, request: turn ? textOf(turn) : '' };
     });
+  }
+
+  /** As verificações do projeto depois de um turno que mudou ficheiros. */
+  async #check(sessionId: string, turnId: string): Promise<void> {
+    const entry = this.#sessions.get(sessionId);
+    const checkpoint = this.#memory
+      .get(sessionId)
+      ?.checkpoints?.timeline()
+      .checkpoints.find((c) => c.turnId === turnId);
+    if (!entry || !checkpoint || checkpoint.stats.files === 0) return;
+    await this.#checks.get(entry.info.projectId)?.run(turnId);
   }
 
   quality(sessionId: string): Quality {
