@@ -26,6 +26,10 @@ Cada decisão mede-se em cinco coisas:
 Antes de desenhar: que harness faz isto melhor hoje, e como o fazemos melhor e ligado ao resto?
 Sem resposta, não entra.
 
+**/grilling em tudo:** arquitetura, codebase, design, marca, funcionalidades, ideias e as skills a
+usar passam por uma ronda de /grilling com o Duarte antes de se fazerem. As perguntas partem de
+factos (capturas, código, auditorias), cada uma com a resposta recomendada.
+
 ## Regras de arquitetura
 
 1. Três peças, um só sentido de dependência: **motor** (`packages/engine`, Node, SDK, sessões)
