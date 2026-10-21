@@ -170,7 +170,12 @@ function TimelineTrack({
 
   return (
     <div className="mb-2.5" data-testid="timeline">
-      <div className="flex items-center gap-3">
+      {/* Calma até lá chegares: compacta (no máximo 56 px por turno) e meio apagada. */}
+      <div
+        className={`flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100 ${
+          picked === null && !timeline.rewoundTo ? 'opacity-55' : ''
+        }`}
+      >
         <History size={14} strokeWidth={1.75} className="shrink-0 text-subtle" aria-hidden />
         <div
           ref={track}
@@ -179,10 +184,11 @@ function TimelineTrack({
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           className={`relative h-8 flex-1 touch-none ${busy ? 'opacity-60' : 'cursor-pointer'}`}
+          style={{ maxWidth: stops * 56 }}
           title={busy ? 'Espera que o agente acabe para rebobinar' : undefined}
         >
-          {/* A linha engrossa e aquece nos turnos que mudaram ficheiros: quanto mais, mais forte. */}
-          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line-strong" />
+          {/* A linha engrossa nos turnos que mudaram ficheiros: quanto mais, mais forte. */}
+          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line" />
           {checkpoints.map((c, i) => {
             const weight = changes(c) === 0 ? 0 : Math.log1p(changes(c)) / Math.log1p(max);
             const from = xOf(i) + 7;
@@ -192,8 +198,8 @@ function TimelineTrack({
                 {weight > 0 && to > from ? (
                   <span
                     aria-hidden
-                    className="absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-accent"
-                    style={{ left: from, width: to - from, opacity: 0.2 + weight * 0.45 }}
+                    className="absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-fg"
+                    style={{ left: from, width: to - from, opacity: 0.1 + weight * 0.3 }}
                   />
                 ) : null}
                 <button
@@ -239,11 +245,13 @@ function TimelineTrack({
             disabled={busy || working}
             onKeyDown={onKeyDown}
             data-testid="timeline-handle"
-            className="absolute top-1/2 left-0 -mt-[7px] size-[14px] rounded-full border-2 border-surface bg-accent shadow-raised outline-none focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] active:cursor-grabbing"
+            className={`absolute top-1/2 left-0 -mt-[7px] size-[14px] rounded-full border-2 border-surface shadow-raised transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] active:cursor-grabbing ${
+              picked === null ? 'bg-fg/80' : 'bg-accent'
+            }`}
             style={{ cursor: busy ? 'default' : 'grab' }}
           />
         </div>
-        <span className="w-28 shrink-0 truncate text-right text-[11.5px] text-muted tabular-nums">
+        <span className="shrink-0 truncate text-[11.5px] text-muted tabular-nums">
           {label(position)}
         </span>
       </div>
