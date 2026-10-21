@@ -299,11 +299,15 @@ export const actions = {
         agent,
         ...(mcpServerIds.length ? { mcpServerIds } : {}),
       });
-      sessionStores.set(session.id, createSessionStore(session, projectId, capabilities));
+      const store = createSessionStore(session, projectId, capabilities);
+      sessionStores.set(session.id, store);
       useApp.setState((s) => ({
         sessionIds: [session.id, ...s.sessionIds],
         activeSessionId: session.id,
       }));
+      void request('quality.get', { sessionId: session.id })
+        .then((quality) => store.setState({ quality }))
+        .catch(() => undefined);
     } catch (error) {
       useApp.setState({ notice: `Não foi possível abrir a sessão. ${message(error)}` });
     } finally {
@@ -404,6 +408,37 @@ export const actions = {
     sessionStores.get(sessionId)?.setState({ actionError: null });
     try {
       await request('review.comment', { sessionId, comments, ...(note ? { note } : {}) });
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
+  /** Liga ou desliga a segunda opinião nesta sessão. */
+  async setQualityEnabled(sessionId: string, enabled: boolean): Promise<void> {
+    try {
+      const quality = await request('quality.setEnabled', { sessionId, enabled });
+      sessionStores.get(sessionId)?.setState({ quality });
+    } catch (error) {
+      setActionError(sessionId, error);
+    }
+  },
+
+  /** Volta a rever o último turno (depois de uma falha, por exemplo). */
+  async reviewAgain(sessionId: string): Promise<void> {
+    try {
+      await request('quality.review', { sessionId });
+    } catch (error) {
+      setActionError(sessionId, error);
+    }
+  },
+
+  /** Pede ao agente para corrigir os achados escolhidos. */
+  async fixFindings(sessionId: string, ids: string[]): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('quality.fix', { sessionId, ids });
       return true;
     } catch (error) {
       setActionError(sessionId, error);

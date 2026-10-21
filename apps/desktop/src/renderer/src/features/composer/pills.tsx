@@ -80,11 +80,18 @@ export function SettingsPills({
               disabled={disabled}
               data-testid="pill-effort"
               aria-label={`Effort: ${settings.effort ?? 'padrão'}. Mudar`}
+              title={`Effort: ${settings.effort ?? 'padrão'}`}
               className={triggerClass}
             >
               <Gauge aria-hidden size={13} strokeWidth={1.9} />
-              {settings.effort ?? 'effort padrão'}
-              <ChevronDown aria-hidden size={12} strokeWidth={2} className="opacity-60" />
+              {/* Estreito (painel de rever aberto): só o ícone; o nome fica no tooltip. */}
+              <span className="@max-[30rem]:hidden">{settings.effort ?? 'effort padrão'}</span>
+              <ChevronDown
+                aria-hidden
+                size={12}
+                strokeWidth={2}
+                className="opacity-60 @max-[30rem]:hidden"
+              />
             </Menu.Trigger>
           }
         >
@@ -104,11 +111,17 @@ export function SettingsPills({
               disabled={disabled}
               data-testid="pill-mode"
               aria-label={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}. Mudar`}
+              title={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}`}
               className={triggerClass}
             >
               <ModeIcon risk={mode?.risk ?? 'ask'} size={14} />
-              {mode?.label ?? settings.mode ?? 'Modo'}
-              <ChevronDown aria-hidden size={12} strokeWidth={2} className="opacity-60" />
+              <span className="@max-[30rem]:hidden">{mode?.label ?? settings.mode ?? 'Modo'}</span>
+              <ChevronDown
+                aria-hidden
+                size={12}
+                strokeWidth={2}
+                className="opacity-60 @max-[30rem]:hidden"
+              />
             </Menu.Trigger>
           }
         >

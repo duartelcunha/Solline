@@ -3,6 +3,7 @@ import {
   applyDelta,
   type AgentCapabilities,
   type EngineEvent,
+  type Quality,
   type SessionInfo,
   type Timeline,
   type Turn,
@@ -24,6 +25,8 @@ export interface SessionData {
   timeline: Timeline | null;
   /** Texto que volta à caixa de mensagem (depois de rebobinar a conversa). */
   draft: string | null;
+  /** A segunda opinião: se está ligada e o que o revisor achou do último turno. */
+  quality: Quality | null;
 }
 
 export type SessionStore = StoreApi<SessionData>;
@@ -45,6 +48,7 @@ export function createSessionStore(
     actionError: null,
     timeline: null,
     draft: null,
+    quality: null,
   }));
 }
 
@@ -87,6 +91,8 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       };
     case 'session.timeline':
       return { ...data, timeline: event.timeline };
+    case 'session.quality':
+      return { ...data, quality: event.quality };
     case 'session.state':
       return {
         ...data,

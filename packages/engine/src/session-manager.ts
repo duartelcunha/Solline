@@ -489,7 +489,13 @@ export class SessionManager {
 
   quality(sessionId: string): Quality {
     this.#get(sessionId);
-    return this.#memoryOf(sessionId).quality?.state ?? { enabled: false, review: NO_REVIEW };
+    return (
+      this.#memoryOf(sessionId).quality?.state ?? {
+        available: false,
+        enabled: false,
+        review: NO_REVIEW,
+      }
+    );
   }
 
   setQualityEnabled(sessionId: string, enabled: boolean): Quality {

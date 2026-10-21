@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { Check, ChevronRight, MessageSquarePlus, Undo2, X } from 'lucide-react';
-import type { DiffLine, FileDiff, Hunk, ReviewAction, ReviewComment } from '@solline/protocol';
+import type {
+  DiffLine,
+  FileDiff,
+  Finding,
+  Hunk,
+  ReviewAction,
+  ReviewComment,
+} from '@solline/protocol';
 import { shouldAnimate } from '@solline/ui/motion';
+import { FindingRow } from '../quality/quality.tsx';
 
 /**
  * Um ficheiro do diff, hunk a hunk. Cada linha aceita um comentário (clicar no número ou no
@@ -22,6 +30,10 @@ interface Props {
   /** Texto vazio tira o comentário dessa linha. */
   onComment: (at: { path: string; side: 'old' | 'new'; line: number }, text: string) => void;
   onAction: (action: ReviewAction, hunk?: Hunk) => Promise<void>;
+  /** O que o revisor achou neste ficheiro. */
+  findings?: readonly Finding[];
+  picked?: ReadonlySet<string>;
+  onPick?: (id: string, picked: boolean) => void;
 }
 
 const STATUS: Record<FileDiff['status'], string | null> = {
@@ -30,13 +42,35 @@ const STATUS: Record<FileDiff['status'], string | null> = {
   modified: null,
 };
 
-export function FileDiffView({ file, actionable, comments, onComment, onAction }: Props) {
+export function FileDiffView({
+  file,
+  actionable,
+  comments,
+  onComment,
+  onAction,
+  findings = [],
+  picked,
+  onPick,
+}: Props) {
   const [open, setOpen] = useState(true);
   const [leaving, setLeaving] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ side: 'old' | 'new'; line: number } | null>(null);
   const slash = file.path.lastIndexOf('/');
   const dir = slash === -1 ? '' : file.path.slice(0, slash + 1);
   const name = file.path.slice(slash + 1);
+  // Cada achado fica na sua linha da versão nova; os que não têm linha à vista vão para o topo.
+  const shownLines = new Set(
+    file.hunks.flatMap((h) => h.lines.flatMap((l) => (l.newNo === null ? [] : [l.newNo]))),
+  );
+  const loose = findings.filter((f) => f.line === null || !shownLines.has(f.line));
+  const finding = (f: Finding) => (
+    <FindingRow
+      key={f.id}
+      finding={f}
+      picked={picked?.has(f.id) ?? false}
+      onPick={(value) => onPick?.(f.id, value)}
+    />
+  );
 
   async function act(action: ReviewAction, hunk: Hunk | undefined, event: React.MouseEvent) {
     // A saída só anima quando veio do rato; no teclado o hunk sai logo.
@@ -97,6 +131,7 @@ export function FileDiffView({ file, actionable, comments, onComment, onAction }
           </span>
         ) : null}
       </header>
+      {open && loose.length > 0 ? <div>{loose.map(finding)}</div> : null}
       {open ? (
         file.binary || file.truncated ? (
           <p className="px-3 py-2.5 text-[12px] text-muted">
@@ -153,6 +188,9 @@ export function FileDiffView({ file, actionable, comments, onComment, onAction }
                           line={line}
                           onComment={no === null ? undefined : () => setEditing({ side, line: no })}
                         />
+                        {line.kind !== 'del' && line.newNo !== null
+                          ? findings.filter((f) => f.line === line.newNo).map(finding)
+                          : null}
                         {isEditing ? (
                           <CommentEditor
                             initial={comment?.text ?? ''}

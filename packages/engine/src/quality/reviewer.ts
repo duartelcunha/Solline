@@ -34,7 +34,7 @@ Report only real problems, most severe first:
 Never report what a formatter fixes, personal taste, or praise. At most 8 findings; none is a fine answer.
 Each title is one short sentence (at most 12 words). Each detail says why and what to do, in at most 3 short sentences.
 line is the line number in the new version of the file, or null for the whole file.
-Write titles and details in the language of the user's request.`;
+Write titles and details in European Portuguese (pt-PT), whatever the language of the request.`;
 
 const OUTPUT = z.object({
   findings: z

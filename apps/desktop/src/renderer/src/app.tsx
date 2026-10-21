@@ -6,6 +6,7 @@ import { Composer } from './features/composer/composer.tsx';
 import { AgentsPanel } from './features/agents/agents-panel.tsx';
 import { NewSessionButton } from './features/agents/new-session-button.tsx';
 import { Conversation } from './features/conversation/conversation.tsx';
+import { QualityChip } from './features/quality/quality.tsx';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
 import { Sidebar, StateDot } from './features/sidebar/sidebar.tsx';
@@ -209,6 +210,7 @@ export function App() {
         <header className="drag flex h-11 shrink-0 items-center gap-3 pr-[9.5rem] pl-5">
           {activeSessionId ? <SessionHeaderTitle sessionId={activeSessionId} /> : null}
           <div className="ml-auto flex items-center gap-1">
+            {activeSessionId ? <QualityChip sessionId={activeSessionId} /> : null}
             {activeSessionId ? <ReviewButton sessionId={activeSessionId} /> : null}
             <button
               type="button"

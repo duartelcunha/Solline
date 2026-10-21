@@ -26,10 +26,13 @@ test.beforeAll(async () => {
   userData = await mkdtemp(join(tmpdir(), 'solline-e2e-data-'));
   project = await mkdtemp(join(tmpdir(), 'solline-e2e-proj-'));
   await writeFile(join(project, 'notes.txt'), 'The quick alpha fox.\n');
-  const env = { ...process.env, SOLLINE_USER_DATA: userData, SOLLINE_ISOLATED: '1' } as Record<
-    string,
-    string
-  >;
+  const env = {
+    ...process.env,
+    SOLLINE_USER_DATA: userData,
+    SOLLINE_ISOLATED: '1',
+    // Com o SDK real, o revisor também corre (lê o turno e deixa achados).
+    ...(process.env.SOLLINE_E2E_SDK === '1' ? { SOLLINE_REVIEWER: '1' } : {}),
+  } as Record<string, string>;
   app = exe
     ? await electron.launch({ executablePath: exe, env })
     : await electron.launch({ args: [join(__dirname, '..', 'out', 'main', 'index.js')], env });
@@ -348,6 +351,11 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await expect(page.getByTestId('assistant-text').last()).toBeVisible();
   await expect(page.getByTestId('session-cost')).toContainText(/US\$|\$/);
   await expect(page.getByTestId('context-meter')).toBeVisible({ timeout: 15_000 });
+  // A segunda opinião lê o turno que mudou o notes.txt e acaba limpa ou com achados.
+  await expect(page.getByTestId('quality-chip')).toHaveAttribute('data-state', /clean|found/, {
+    timeout: 120_000,
+  });
+  await shot(page, 'quality-chip');
   expect(await readFile(join(project, 'notes.txt'), 'utf8')).toContain('beta');
   console.info(
     `[sessão ${exe ? 'instalada' : 'build'}] custo ${await page.getByTestId('session-cost').innerText()}`,

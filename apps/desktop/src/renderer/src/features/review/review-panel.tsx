@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronDown, CircleCheck, MessageSquare, Undo2, X } from 'lucide-react';
-import type { DiffScope, FileDiff, Hunk, ReviewAction, ReviewComment } from '@solline/protocol';
+import { Check, ChevronDown, CircleCheck, MessageSquare, Undo2, Wand2, X } from 'lucide-react';
+import type {
+  DiffScope,
+  FileDiff,
+  Finding,
+  Hunk,
+  ReviewAction,
+  ReviewComment,
+} from '@solline/protocol';
 import { usePresence } from '@solline/ui/react';
 import { MenuShell, triggerClass } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
+import { FindingRow } from '../quality/quality.tsx';
 import { commentKey, FileDiffView, type CommentKey } from './diff-view.tsx';
+
+const NO_FINDINGS: readonly Finding[] = [];
 
 /** O painel entra pela direita e sai por onde entrou. */
 export function ReviewPanel({ sessionId }: { sessionId: string }) {
@@ -39,6 +49,15 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
+  const findings = useSession(sessionId, (s) => s.quality?.review.findings ?? NO_FINDINGS);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [fixing, setFixing] = useState(false);
+  // Achados novos (outro turno) recomeçam a escolha.
+  const [seenFindings, setSeenFindings] = useState(findings);
+  if (seenFindings !== findings) {
+    setSeenFindings(findings);
+    setPicked(new Set());
+  }
 
   const checkpoints = useMemo(() => timeline?.checkpoints ?? [], [timeline]);
   // Vários pedidos de diff podem cruzar-se (fim de turno, aceitar, rejeitar): só vale o último.
@@ -108,6 +127,22 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
     });
   }
 
+  function pick(id: string, value: boolean) {
+    setPicked((current) => {
+      const next = new Set(current);
+      if (value) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function fix() {
+    setFixing(true);
+    const ok = await actions.fixFindings(sessionId, [...picked]);
+    setFixing(false);
+    if (ok) setPicked(new Set());
+  }
+
   async function sendComments() {
     setSending(true);
     const ok = await actions.comment(sessionId, [...comments.values()], note.trim() || undefined);
@@ -119,6 +154,8 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   }
 
   const pending = timeline.pending;
+  const shownPaths = new Set(files?.map((f) => f.path) ?? []);
+  const elsewhere = files === null ? [] : findings.filter((f) => !shownPaths.has(f.path));
   const total = files?.reduce(
     (acc, f) => ({ add: acc.add + f.additions, del: acc.del + f.deletions }),
     { add: 0, del: 0 },
@@ -220,6 +257,18 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
       </header>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3" data-testid="review-files">
+        {elsewhere.length > 0 ? (
+          <section className="overflow-hidden rounded-lg border border-line bg-surface">
+            {elsewhere.map((f) => (
+              <FindingRow
+                key={f.id}
+                finding={{ ...f, title: `${f.path}${f.line ? `:${f.line}` : ''} · ${f.title}` }}
+                picked={picked.has(f.id)}
+                onPick={(value) => pick(f.id, value)}
+              />
+            ))}
+          </section>
+        ) : null}
         {files === null ? null : files.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <CircleCheck
@@ -248,10 +297,35 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               onAction={(action, hunk) =>
                 act(action, { path: file.path, ...(hunk ? { hunk } : {}) })
               }
+              findings={findings.filter((f) => f.path === file.path)}
+              picked={picked}
+              onPick={pick}
             />
           ))
         )}
       </div>
+
+      {picked.size > 0 ? (
+        <footer className="sl-enter sl-motion flex shrink-0 items-center justify-end gap-2 border-t border-line p-3">
+          <button
+            type="button"
+            onClick={() => setPicked(new Set())}
+            className="sl-press h-8 rounded-md px-3 text-[12.5px] text-muted hover:bg-surface-hover hover:text-fg"
+          >
+            Limpar
+          </button>
+          <button
+            type="button"
+            disabled={busy || fixing}
+            onClick={() => void fix()}
+            title={busy ? 'Espera que o agente acabe o turno' : undefined}
+            data-testid="fix-findings"
+            className="sl-press inline-flex h-8 items-center gap-1.5 rounded-md bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-50"
+          >
+            <Wand2 size={13} strokeWidth={2} /> Corrigir {picked.size}
+          </button>
+        </footer>
+      ) : null}
 
       {comments.size > 0 ? (
         <footer className="sl-enter sl-motion shrink-0 border-t border-line p-3">

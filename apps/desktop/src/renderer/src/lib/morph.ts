@@ -19,7 +19,10 @@ export function createMorphQueue(): (update: () => void, transform: boolean) => 
   return (update, transform) => {
     if (waiting > 0) {
       waiting += 1;
-      tail = tail.then(update).catch(() => undefined).finally(settle);
+      tail = tail
+        .then(update)
+        .catch(() => undefined)
+        .finally(settle);
       return;
     }
     if (!transform || typeof document.startViewTransition !== 'function' || !shouldAnimate()) {

@@ -21,7 +21,7 @@ export class SessionQuality {
   constructor(options: { reviewer: Reviewer; emit: (quality: Quality) => void; enabled: boolean }) {
     this.#reviewer = options.reviewer;
     this.#emit = options.emit;
-    this.#state = { enabled: options.enabled, review: NO_REVIEW };
+    this.#state = { available: true, enabled: options.enabled, review: NO_REVIEW };
   }
 
   get state(): Quality {

@@ -33,6 +33,8 @@ export const QualityReview = z.object({
 export type QualityReview = z.infer<typeof QualityReview>;
 
 export const Quality = z.object({
+  /** Há revisor neste motor (nos testes isolados não há). */
+  available: z.boolean(),
   /** O revisor corre sozinho no fim de cada turno que mude ficheiros. */
   enabled: z.boolean(),
   review: QualityReview,

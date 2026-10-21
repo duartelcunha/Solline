@@ -333,3 +333,23 @@
 - **O Gemini CLI fica de fora:** o login de consumidor acabou a 18/06/2026. O Antigravity entra
   pelo ACP com o login dele.
 
+
+## 2026-10-21: qualidade, polimento e morph
+
+- **Regras de ofício** no prompt de sistema do Claude (append) e do Codex
+  (`developerInstructions`), em `packages/engine/src/quality/craft.ts`: código igual ao que está à
+  volta, a mudança mais pequena, nada de enfraquecer testes, correr as verificações antes de dizer
+  que está feito, respostas curtas.
+- **Segunda opinião:** no fim de cada turno que mude ficheiros, um Claude Sonnet com contexto limpo
+  lê o diff do turno (só Read, Grep e Glob; sem hooks nem definições do utilizador; as regras do
+  projeto só com confiança) e devolve até 8 achados em JSON com esquema (erro, risco, ruído), em
+  pt-PT, presos à linha. Revê qualquer agente: o Codex fica com um revisor de outro fabricante. Um
+  turno novo cancela a revisão anterior. Liga e desliga por sessão; "Corrigir" manda os achados
+  escolhidos ao agente da sessão. Gasta a subscrição do Claude (cerca de 5 s por turno).
+- **Morph** com View Transitions (React 19.3 e Chromium do Electron): o cartão de permissão vira a
+  linha resolvida e o enviar vira o parar. Os eventos do motor passam por uma fila para a
+  transição nunca trocar a ordem. A transição só corre na sessão à vista e nunca com o teclado.
+- **Git dos checkpoints por caminho absoluto**, procurado só em pastas absolutas do PATH (um
+  projeto podia plantar um `git.exe`), e direto ao binário verdadeiro do Git for Windows. Cada
+  chamada ao git é um processo novo e, nesta máquina com o PC Manager e o antivírus, chega a 1 s:
+  rejeitar passou de 11 para 9 chamadas, com o diff e as contas em paralelo.
