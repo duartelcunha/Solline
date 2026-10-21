@@ -73,6 +73,27 @@ describe('avisos fora da app', () => {
     expect(t.observe(checks('t2', 'failed'), true)).toBeNull();
   });
 
+  it('um turno que acaba com um pedido aberto também conta; sessões na mesma pasta avisam uma vez', () => {
+    const t = tracker();
+    t.track({ id: 's2', agent: 'codex', state: 'idle' }, 'solline');
+    t.observe(state('s1', 'needs-you'), false);
+    expect(t.observe(state('s1', 'idle'), false)).toMatchObject({ body: 'Turno acabado' });
+    const failing = (sessionId: string): EngineEvent => ({
+      kind: 'event',
+      type: 'session.checks',
+      sessionId,
+      checks: {
+        trusted: true,
+        detected: true,
+        turnId: 'r1',
+        specs: [{ id: 'lint', label: 'Lint', command: 'x', enabled: true }],
+        results: [{ id: 'lint', state: 'failed', tail: null, durationMs: 1 }],
+      },
+    });
+    expect(t.observe(failing('s1'), false)).toMatchObject({ body: 'Lint falhou' });
+    expect(t.observe(failing('s2'), false)).toBeNull();
+  });
+
   it('o nome do agente', () => {
     expect(agentLabel('codex')).toBe('Codex');
     expect(agentLabel('opencode')).toBe('Opencode');

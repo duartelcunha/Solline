@@ -60,7 +60,7 @@ describe('worktrees das sessões', { timeout: 30_000 }, () => {
     expect(await readFile(path.join(project, 'a.txt'), 'utf8')).toBe('dois\n');
     expect(await manager.stats(brought)).toEqual({ files: 0, additions: 0, deletions: 0 });
 
-    await manager.remove(brought, true);
+    await manager.remove(brought, 'always');
     expect(await exists(brought.path)).toBe(false);
     expect(git(project, 'branch', '--list', brought.branch)).toBe('');
   });
@@ -74,6 +74,20 @@ describe('worktrees das sessões', { timeout: 30_000 }, () => {
     expect(result).toEqual({ merged: false, conflicts: ['a.txt'], into: 'main' });
     expect(await readFile(path.join(project, 'a.txt'), 'utf8')).toBe('do projeto\n');
     expect(git(project, 'status', '--porcelain')).toBe('');
+  });
+
+  it('contar não mexe no índice do agente; um branch por trazer nunca se apaga sem querer', async () => {
+    const wt = (await manager.create(project, 'p1'))!;
+    await writeFile(path.join(wt.cwd, 'novo.txt'), 'x\n');
+    expect((await manager.stats(wt)).files).toBe(1);
+    // O índice da worktree continua do agente: o ficheiro novo ainda não está adicionado.
+    expect(git(wt.path, 'diff', '--cached', '--name-only')).toBe('');
+    expect(git(wt.path, 'status', '--porcelain')).toContain('?? novo.txt');
+
+    git(wt.path, 'add', '-A');
+    git(wt.path, 'commit', '--quiet', '-m', 'trabalho do agente');
+    await manager.remove(wt, 'if-merged');
+    expect(git(project, 'branch', '--list', wt.branch)).toContain(wt.branch);
   });
 
   it('pasta sem git não tem worktree; as que ficaram aparecem como órfãs', async () => {

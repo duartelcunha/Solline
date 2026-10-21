@@ -94,12 +94,19 @@ export class WorktreeManager {
     cwd: string,
     args: string[],
     allowFail = false,
+    extraEnv: Record<string, string> = {},
   ): Promise<{ code: number; out: string }> {
     return new Promise((resolve, reject) => {
       execFile(
         this.#git,
         ['-c', 'core.quotepath=false', ...args],
-        { cwd, env: gitEnv(), windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
+        {
+          cwd,
+          env: { ...gitEnv(), ...extraEnv },
+          windowsHide: true,
+          timeout: TIMEOUT_MS,
+          maxBuffer: 16 * 1024 * 1024,
+        },
         (error, stdout, stderr) => {
           const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
           if (code !== 0 && !allowFail) {
@@ -160,8 +167,16 @@ export class WorktreeManager {
 
   /** O que a sessão mudou desde a base, contando os ficheiros por gravar e os novos. */
   async stats(wt: Worktree): Promise<WorktreeStats> {
-    await this.#run(wt.path, ['add', '-A']);
-    const { out } = await this.#run(wt.path, ['diff', '--cached', '--numstat', wt.base]);
+    // Conta num índice à parte: o índice da worktree é do agente (o git diff dele não muda).
+    const index = { GIT_INDEX_FILE: `${wt.path}.index` };
+    await this.#run(wt.path, ['read-tree', 'HEAD'], false, index);
+    await this.#run(wt.path, ['add', '-A'], false, index);
+    const { out } = await this.#run(
+      wt.path,
+      ['diff', '--cached', '--numstat', wt.base],
+      false,
+      index,
+    );
     let files = 0;
     let additions = 0;
     let deletions = 0;
@@ -204,15 +219,27 @@ export class WorktreeManager {
   }
 
   /** Tira a worktree; com deleteBranch, também o branch. */
+  /** O branch já está todo no branch atual do projeto (nada se perde ao apagá-lo). */
+  async merged(wt: Pick<Worktree, 'top' | 'branch'>): Promise<boolean> {
+    const r = await this.#run(wt.top, ['merge-base', '--is-ancestor', wt.branch, 'HEAD'], true);
+    return r.code === 0;
+  }
+
+  /**
+   * Tira a worktree. branch: 'always' apaga o branch (deitar fora), 'if-merged' só se já estiver
+   * no projeto, 'keep' guarda-o. Na dúvida, o branch fica.
+   */
   async remove(
     wt: Pick<Worktree, 'path' | 'top' | 'branch'>,
-    deleteBranch: boolean,
+    branch: 'always' | 'if-merged' | 'keep',
   ): Promise<void> {
+    const drop = branch === 'always' || (branch === 'if-merged' && (await this.merged(wt)));
     await this.#run(wt.top, ['worktree', 'remove', '--force', wt.path], true);
     await rm(wt.path, { recursive: true, force: true });
     await this.#run(wt.top, ['worktree', 'prune'], true);
-    if (deleteBranch) await this.#run(wt.top, ['branch', '-D', wt.branch], true);
+    if (drop) await this.#run(wt.top, ['branch', '-D', wt.branch], true);
     await rm(`${wt.path}.json`, { force: true });
+    await rm(`${wt.path}.index`, { force: true });
   }
 
   /** As worktrees no disco que nenhuma sessão aberta usa (ficaram de outra vez). */

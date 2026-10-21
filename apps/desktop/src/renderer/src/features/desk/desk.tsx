@@ -1,4 +1,11 @@
-import { useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { GitBranch, GitMerge, Trash2 } from 'lucide-react';
 import type { Orphan } from '@solline/protocol';
 import { useReducedMotion } from '@solline/ui/react';
@@ -161,6 +168,13 @@ function SessionCard({ sessionId }: { sessionId: string }) {
 /** Uma worktree que ficou por trazer quando a app fechou. */
 function OrphanCard({ orphan }: { orphan: Orphan }) {
   const project = useApp((s) => s.projects.find((p) => p.id === orphan.projectId)?.name);
+  // Deitar fora não se desfaz: o primeiro clique pede confirmação no próprio botão.
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
   return (
     <div
       data-testid="orphan-card"
@@ -187,11 +201,11 @@ function OrphanCard({ orphan }: { orphan: Orphan }) {
         </button>
         <button
           type="button"
-          onClick={() => void actions.discardOrphan(orphan.id)}
-          className={`${smallButton} ml-auto text-subtle hover:text-danger`}
+          onClick={() => (confirming ? void actions.discardOrphan(orphan.id) : setConfirming(true))}
+          className={`${smallButton} ml-auto ${confirming ? 'text-danger' : 'text-subtle hover:text-danger'}`}
           data-testid="orphan-discard"
         >
-          <Trash2 size={13} /> Deitar fora
+          <Trash2 size={13} /> {confirming ? 'Confirmar' : 'Deitar fora'}
         </button>
       </div>
     </div>

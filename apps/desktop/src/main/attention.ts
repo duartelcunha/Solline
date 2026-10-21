@@ -31,6 +31,8 @@ export function agentLabel(agent: string): string {
 
 export class AttentionTracker {
   readonly #sessions = new Map<string, Tracked>();
+  /** Rondas de verificações que já deram aviso: sessões na mesma pasta partilham a ronda. */
+  readonly #warnedRounds = new Set<string>();
 
   /** Uma sessão nova (ou retomada), com o nome do projeto para o título do aviso. */
   track(session: Pick<SessionInfo, 'id' | 'agent' | 'state'>, project: string): void {
@@ -55,7 +57,7 @@ export class AttentionTracker {
     if (event.state === 'needs-you') {
       return { sessionId: event.sessionId, title, body: 'Precisa de ti', urgent: true };
     }
-    if (previous === 'running' && event.state === 'idle') {
+    if ((previous === 'running' || previous === 'needs-you') && event.state === 'idle') {
       return { sessionId: event.sessionId, title, body: 'Turno acabado', urgent: false };
     }
     if (event.state === 'error') {
@@ -74,6 +76,8 @@ export class AttentionTracker {
     const failed = checks.results.filter((r) => r.state === 'failed' || r.state === 'timeout');
     if (failed.length === 0) return null;
     session.checksWarned = checks.turnId;
+    if (this.#warnedRounds.has(checks.turnId)) return null;
+    this.#warnedRounds.add(checks.turnId);
     if (focused) return null;
     const labels = failed.map((r) => checks.specs.find((s) => s.id === r.id)?.label ?? r.id);
     return {

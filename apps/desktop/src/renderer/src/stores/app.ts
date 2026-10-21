@@ -426,7 +426,7 @@ export const actions = {
       });
       if (!result.closed) {
         if (result.conflicts) {
-          const into = 'o projeto';
+          const into = result.into ?? 'o branch do projeto';
           sessionStores.get(sessionId)?.setState({ conflicts: { files: result.conflicts, into } });
           useApp.setState({
             closing: null,

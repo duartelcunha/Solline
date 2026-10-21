@@ -156,6 +156,7 @@ export const commandSchemas = {
       closed: z.boolean(),
       stats: WorktreeStats.optional(),
       conflicts: z.array(z.string()).optional(),
+      into: z.string().optional(),
     }),
   },
   /** As worktrees no disco que nenhuma sessão aberta usa. */

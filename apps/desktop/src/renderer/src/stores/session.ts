@@ -118,7 +118,10 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
         info: { ...data.info, state: event.state },
         stateSince: now,
         turnEndedAt:
-          data.info.state === 'running' && event.state === 'idle' ? now : data.turnEndedAt,
+          (data.info.state === 'running' || data.info.state === 'needs-you') &&
+          event.state === 'idle'
+            ? now
+            : data.turnEndedAt,
         error: event.state === 'error' ? (event.error ?? 'A sessão parou.') : null,
       };
     }
