@@ -163,7 +163,7 @@ export function NewSessionButton({
           aria-label={`Nova sessão em ${project.name}`}
           title="Nova sessão"
           data-testid="new-session"
-          className="grid size-6 shrink-0 place-items-center rounded-sm text-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-fg disabled:opacity-100"
+          className="grid size-6 shrink-0 place-items-center rounded-sm text-subtle sl-press hover:bg-surface-hover hover:text-fg disabled:opacity-100"
         >
           {creating ? <Spinner label="A abrir sessão" /> : <Plus size={14} strokeWidth={2} />}
         </button>
@@ -178,7 +178,7 @@ export function NewSessionButton({
                 aria-label={`Escolher o agente para a nova sessão em ${project.name}`}
                 title="Escolher o agente"
                 data-testid="new-session-agent"
-                className="grid h-6 w-4 shrink-0 place-items-center rounded-sm text-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-fg data-[state=open]:bg-surface-hover data-[state=open]:text-fg"
+                className="grid h-6 w-4 shrink-0 place-items-center rounded-sm text-subtle sl-press hover:bg-surface-hover hover:text-fg data-[state=open]:bg-surface-hover data-[state=open]:text-fg"
               >
                 <ChevronDown size={12} strokeWidth={2} />
               </Menu.Trigger>
@@ -196,7 +196,7 @@ export function NewSessionButton({
         disabled={creating}
         onClick={() => void actions.createSession(project.id)}
         data-testid="welcome-new-session"
-        className="inline-flex h-10 items-center gap-2 pr-4 pl-5 text-[14px] font-medium transition-transform duration-150 active:scale-[0.97] disabled:opacity-60"
+        className="inline-flex h-10 items-center gap-2 pr-4 pl-5 text-[14px] font-medium sl-press disabled:opacity-60"
       >
         <Plus size={16} /> {creating ? 'A abrir…' : 'Nova sessão'}
       </button>
@@ -210,7 +210,7 @@ export function NewSessionButton({
               disabled={creating}
               aria-label="Escolher o agente para a nova sessão"
               data-testid="welcome-new-session-agent"
-              className="grid h-10 place-items-center border-l border-bg/20 pr-4 pl-3 transition-opacity duration-150 disabled:opacity-60"
+              className="grid h-10 place-items-center border-l border-bg/20 pr-4 pl-3 sl-press disabled:opacity-60"
             >
               <ChevronDown size={14} strokeWidth={2} />
             </Menu.Trigger>

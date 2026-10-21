@@ -49,7 +49,7 @@ export function ToolDetail({ tool, onClose }: { tool: ToolBlock | null; onClose:
                 </div>
                 <Dialog.Close
                   aria-label="Fechar detalhe"
-                  className="grid size-7 place-items-center rounded-sm text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg"
+                  className="grid size-7 place-items-center rounded-sm text-muted sl-press hover:bg-surface-hover hover:text-fg"
                 >
                   <X size={15} />
                 </Dialog.Close>

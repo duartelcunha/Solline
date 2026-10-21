@@ -192,7 +192,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
                 <button
                   type="button"
                   onClick={() => void actions.resume(sessionId)}
-                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-fg px-3 text-[13px] font-medium text-bg transition-transform duration-150 active:scale-[0.97]"
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-fg px-3 text-[13px] font-medium text-bg sl-press"
                 >
                   <RotateCcw size={14} /> Retomar
                 </button>

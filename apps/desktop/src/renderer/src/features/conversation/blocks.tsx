@@ -54,7 +54,7 @@ export function ToolRow({ block, onOpen }: { block: ToolBlock; onOpen: () => voi
       data-tool={block.name}
       data-state={block.state}
       aria-label={`${block.summary}: ${block.state === 'running' ? 'a correr' : block.state === 'ok' ? 'concluída' : 'falhou'}. Abrir detalhe`}
-      className="group flex w-full items-center gap-2.5 rounded-md border border-line bg-surface px-3 py-2 text-left transition-[background-color,border-color,transform] duration-150 hover:border-line-strong hover:bg-surface-hover active:scale-[0.995]"
+      className="group flex w-full items-center gap-2.5 rounded-md border border-line bg-surface px-3 py-2 text-left transition-[background-color,border-color] duration-150 hover:border-line-strong hover:bg-surface-hover active:bg-surface-sunken"
     >
       <MorphingIcon state={block.state} />
       <span className="min-w-0 flex-1 truncate text-[13px]">{block.summary}</span>
@@ -77,17 +77,17 @@ export function ThinkingView({ block }: { block: ThinkingBlock }) {
         aria-expanded={open}
         disabled={empty}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-sm py-0.5 text-[12.5px] text-muted transition-colors duration-150 hover:text-fg disabled:cursor-default disabled:hover:text-muted"
+        className="sl-press flex items-center gap-1.5 rounded-sm py-0.5 text-[12.5px] text-muted hover:text-fg disabled:cursor-default disabled:hover:text-muted"
       >
         <ChevronRight
           size={13}
           strokeWidth={2}
-          className={`transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+          className={`transition-transform duration-200 motion-reduce:transition-none ${open ? 'rotate-90' : ''}`}
         />
         {block.done ? 'Pensou' : 'A pensar…'}
       </button>
       {open && !empty ? (
-        <div className="appear mt-1.5 border-l-2 border-line pl-3.5 text-[13px] text-muted">
+        <div className="sl-enter sl-motion mt-1.5 border-l-2 border-line pl-3.5 text-[13px] text-muted">
           <Markdown text={block.text} />
         </div>
       ) : null}

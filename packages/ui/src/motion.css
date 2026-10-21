@@ -38,9 +38,17 @@
   }
 }
 
-/* Premir responde logo, no pointer-down. */
+/*
+ * Premir responde logo, no pointer-down. Leva também as cores do hover: esta regra fica fora das
+ * camadas do Tailwind e ganharia a um transition-colors ao lado, que deixaria de ter efeito.
+ */
 .sl-press {
-  transition: transform var(--sl-dur-press) var(--sl-ease-out);
+  transition:
+    transform var(--sl-dur-press) var(--sl-ease-out),
+    background-color var(--sl-dur-fast) var(--sl-ease-out),
+    border-color var(--sl-dur-fast) var(--sl-ease-out),
+    color var(--sl-dur-fast) var(--sl-ease-out),
+    opacity var(--sl-dur-fast) var(--sl-ease-out);
 }
 .sl-press:active:not(:disabled) {
   transform: scale(var(--sl-press-scale));

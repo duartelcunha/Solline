@@ -27,7 +27,7 @@ function SessionRow({ id }: { id: string }) {
         aria-label={`${title}, ${STATE_LABEL[state]}`}
         data-testid="session-row"
         data-state={state}
-        className={`flex w-full items-center gap-2 rounded-md py-1 pr-2 pl-5 text-left text-[13px] transition-colors duration-150 ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
+        className={`flex w-full items-center gap-2 rounded-md py-1 pr-2 pl-5 text-left text-[13px] transition-colors duration-150 active:bg-surface-hover ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
       >
         <SessionAvatar sessionId={id} size={26} />
         <span className="min-w-0 flex-1 truncate">{title}</span>
@@ -51,7 +51,7 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
           title={project.path}
           aria-label={`Projeto ${project.name}`}
           data-testid="project-row"
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium transition-colors duration-150 ${activeProject ? 'text-fg' : 'text-muted hover:text-fg'}`}
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium transition-colors duration-150 active:bg-surface-hover/70 ${activeProject ? 'text-fg' : 'text-muted hover:text-fg'}`}
         >
           <Folder size={14} strokeWidth={1.75} className="shrink-0 text-subtle" />
           <span className="truncate">{project.name}</span>
@@ -73,7 +73,7 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
           data-testid="project-trust"
           data-trusted={project.trusted}
           // De confiança é o normal: o escudo só aparece ao passar. Sem confiança fica à vista.
-          className={`grid size-6 shrink-0 place-items-center rounded-sm transition-[color,background-color,opacity] duration-150 hover:bg-surface-hover hover:text-fg ${project.trusted ? `text-subtle ${reveal}` : 'text-accent-text'}`}
+          className={`grid size-6 shrink-0 place-items-center rounded-sm sl-press transition-[color,background-color,opacity] duration-150 hover:bg-surface-hover hover:text-fg ${project.trusted ? `text-subtle ${reveal}` : 'text-accent-text'}`}
         >
           {project.trusted ? (
             <ShieldCheck size={14} strokeWidth={1.9} />
@@ -119,7 +119,7 @@ export function Sidebar({
           type="button"
           onClick={() => void actions.addProject()}
           data-testid="add-project"
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg active:scale-[0.99]"
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg active:bg-surface-sunken"
         >
           <FolderPlus size={15} strokeWidth={1.75} />
           Adicionar projeto

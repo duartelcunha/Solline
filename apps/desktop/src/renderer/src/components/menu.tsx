@@ -38,7 +38,7 @@ export function MenuShell({
 }
 
 export const triggerClass =
-  'pill inline-flex h-7 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full border border-line px-2.5 text-[12px] font-medium text-muted outline-none transition-[background-color,color,border-color,transform] duration-150 hover:border-line-strong hover:bg-surface-hover hover:text-fg active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] data-[state=open]:border-line-strong data-[state=open]:bg-surface-hover data-[state=open]:text-fg disabled:opacity-50';
+  'pill inline-flex h-7 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full border border-line px-2.5 text-[12px] font-medium text-muted outline-none sl-press hover:border-line-strong hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] data-[state=open]:border-line-strong data-[state=open]:bg-surface-hover data-[state=open]:text-fg disabled:opacity-50';
 
 const itemClass =
   'group flex cursor-default items-start gap-2.5 rounded-md px-2.5 py-2 text-[13px] outline-none select-none data-[highlighted]:bg-surface-hover data-[disabled]:opacity-50';
