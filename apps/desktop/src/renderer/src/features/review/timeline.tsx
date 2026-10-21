@@ -11,9 +11,13 @@ import { actions, useSession } from '../../stores/app.ts';
  * numa mola e abre a confirmação. Cancelar devolve-a ao sítio, a partir de onde estiver.
  *
  * Teclado: a pega é um slider. As setas mudam de ponto sem animar; Enter confirma.
+ *
+ * Ao passar num ponto, ou com um ponto escolhido, o `<html>` leva `data-rewind-from` com o
+ * turno a partir do qual tudo se perde; a conversa apaga esse turno e os seguintes.
  */
 
 const HANDLE = 14;
+const REWIND_FROM = 'data-rewind-from';
 
 function stopOf(timeline: TimelineData): number {
   const n = timeline.checkpoints.length;
@@ -52,6 +56,8 @@ function TimelineTrack({
   /** O ponto escolhido e ainda por confirmar (null: nenhum). */
   const [picked, setPicked] = useState<number | null>(null);
   const [working, setWorking] = useState(false);
+  /** O ponto debaixo do rato, para mostrar na conversa o que se perderia. */
+  const [hovered, setHovered] = useState<number | null>(null);
   const drag = useRef<{ id: number; offset: number; samples: { x: number; t: number }[] } | null>(
     null,
   );
@@ -81,6 +87,15 @@ function TimelineTrack({
     else s.to(target);
     placed.current = width > 0;
   }, [position, width, stops, reduced, spring]);
+
+  // O turno a partir do qual se perde a conversa: o ponto escolhido manda sobre o do rato.
+  const lostFrom = checkpoints[picked ?? hovered ?? stops]?.turnId;
+  useEffect(() => {
+    if (!lostFrom) return;
+    const root = document.documentElement;
+    root.setAttribute(REWIND_FROM, lostFrom);
+    return () => root.removeAttribute(REWIND_FROM);
+  }, [lostFrom]);
 
   function nearest(x: number): number {
     if (width === 0) return stops;
@@ -147,10 +162,16 @@ function TimelineTrack({
     else if (e.key === 'ArrowRight') next = Math.min(stops, from + 1);
     else if (e.key === 'Home') next = 0;
     else if (e.key === 'End') next = stops;
-    else if (e.key === 'Escape' && picked !== null) next = home;
     if (next === null) return;
     e.preventDefault();
     settleAt(next, 0, false);
+  }
+
+  // Esc cancela de qualquer sítio da linha do tempo (pega, ponto ou confirmação).
+  function onEscape(e: React.KeyboardEvent) {
+    if (e.key !== 'Escape' || picked === null || working) return;
+    e.preventDefault();
+    settleAt(home, 0, false);
   }
 
   async function rewind(what: { files: boolean; conversation: boolean }) {
@@ -169,7 +190,7 @@ function TimelineTrack({
   const target = picked === null ? undefined : checkpoints[picked];
 
   return (
-    <div className="mb-2.5" data-testid="timeline">
+    <div className="mb-2.5" data-testid="timeline" onKeyDown={onEscape}>
       {/* Calma até lá chegares: compacta (no máximo 56 px por turno) e meio apagada. */}
       <div
         className={`flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100 ${
@@ -206,6 +227,10 @@ function TimelineTrack({
                   type="button"
                   tabIndex={-1}
                   disabled={busy || working}
+                  onPointerEnter={() => {
+                    if (!busy && !working) setHovered(i);
+                  }}
+                  onPointerLeave={() => setHovered((h) => (h === i ? null : h))}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     if (!busy && !working) settleAt(i, 0, shouldAnimate(e.nativeEvent));
@@ -263,7 +288,7 @@ function TimelineTrack({
             <button
               type="button"
               onClick={() => void actions.undo(sessionId)}
-              className="sl-press inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-fg hover:bg-surface-hover"
+              className="sl-press inline-flex items-center gap-1 rounded-control px-1.5 py-0.5 font-medium text-fg hover:bg-surface-hover"
               data-testid="timeline-present"
             >
               <Undo2 size={13} /> Voltar ao presente
@@ -279,30 +304,30 @@ function TimelineTrack({
           className="sl-enter sl-motion mt-2 rounded-lg border border-line bg-surface p-3 shadow-raised"
           data-testid="rewind-confirm"
         >
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-[13px] font-semibold">Voltar a antes do turno {target.index}</h3>
-            <span className="min-w-0 flex-1 truncate text-[12px] text-muted">{target.title}</span>
-          </div>
-          <p className="mt-1 text-[12px] text-muted">
-            {timeline.conversationRewind === 'agent'
-              ? 'A conversa volta a esse ponto. Os ficheiros voltam a como estavam, e dá para desfazer.'
-              : 'Este agente não sabe voltar atrás na conversa: abre-se uma sessão nova que leva um resumo do que ficou. Os ficheiros voltam a como estavam, e dá para desfazer.'}
-          </p>
-          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <h3 className="truncate text-[13px] font-semibold" title={target.title}>
+            Voltar a antes do turno {target.index}?
+          </h3>
+          {timeline.conversationRewind === 'summary' ? (
+            <p className="mt-0.5 text-[12px] text-muted">
+              A conversa segue numa sessão nova, com um resumo.
+            </p>
+          ) : null}
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               disabled={working}
               onClick={() => void rewind({ files: true, conversation: true })}
-              className="sl-press inline-flex h-8 items-center gap-1.5 rounded-md bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-60"
+              title="Ficheiros e conversa"
+              className="sl-press inline-flex h-8 items-center gap-1.5 rounded-control bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-60"
               data-testid="rewind-both"
             >
-              <RotateCcw size={13} /> Ficheiros e conversa
+              <RotateCcw size={13} /> Voltar
             </button>
             <button
               type="button"
               disabled={working}
               onClick={() => void rewind({ files: true, conversation: false })}
-              className="sl-press inline-flex h-8 items-center rounded-md border border-line px-3 text-[12.5px] font-medium hover:bg-surface-hover disabled:opacity-60"
+              className="sl-press inline-flex h-7 items-center rounded-control px-2 text-[12px] text-muted hover:bg-surface-hover hover:text-fg disabled:opacity-60"
               data-testid="rewind-files"
             >
               Só ficheiros
@@ -311,18 +336,23 @@ function TimelineTrack({
               type="button"
               disabled={working}
               onClick={() => void rewind({ files: false, conversation: true })}
-              className="sl-press inline-flex h-8 items-center rounded-md border border-line px-3 text-[12.5px] font-medium hover:bg-surface-hover disabled:opacity-60"
+              className="sl-press inline-flex h-7 items-center rounded-control px-2 text-[12px] text-muted hover:bg-surface-hover hover:text-fg disabled:opacity-60"
               data-testid="rewind-conversation"
             >
               Só conversa
             </button>
+            {/* Cancelar também se clica: a tecla é só o atalho. */}
             <button
               type="button"
               disabled={working}
               onClick={(e) => settleAt(home, 0, shouldAnimate(e.nativeEvent))}
-              className="sl-press ml-auto inline-flex h-8 items-center rounded-md px-3 text-[12.5px] text-muted hover:bg-surface-hover hover:text-fg"
+              aria-label="Cancelar"
+              title="Cancelar"
+              className="sl-press ml-auto inline-flex h-7 items-center rounded-control px-1.5 hover:bg-surface-hover disabled:opacity-60"
             >
-              Cancelar
+              <kbd className="rounded-[4px] border border-line bg-surface-sunken px-1 font-sans text-[11px] leading-4 text-subtle">
+                Esc
+              </kbd>
             </button>
           </div>
         </div>

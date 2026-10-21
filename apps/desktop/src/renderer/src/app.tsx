@@ -9,7 +9,9 @@ import { Conversation } from './features/conversation/conversation.tsx';
 import { QualityChip } from './features/quality/quality.tsx';
 import { ChecksRow } from './features/quality/checks.tsx';
 import { CloseDialog, WorkspaceChip } from './features/workspace/workspace.tsx';
-import { Desk } from './features/desk/desk.tsx';
+import { Desk, useNeedsYouCount } from './features/desk/desk.tsx';
+import { IconSwap } from '@solline/ui/icon-swap';
+import { shouldAnimate } from '@solline/ui/motion';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
 import { Familiar, SessionBot } from './features/agents/bots.tsx';
@@ -25,14 +27,23 @@ function initialTheme(): Theme {
   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-function useTheme(): [Theme, () => void] {
+/** O tema e se a última troca deve animar (pelo teclado, troca sem morph). */
+function useTheme(): [Theme, (animate: boolean) => void, boolean] {
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [animates, setAnimates] = useState(true);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(THEME_KEY, theme);
     void window.solline.window.setTheme(theme);
   }, [theme]);
-  return [theme, () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))];
+  return [
+    theme,
+    (animate) => {
+      setAnimates(animate);
+      setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+    },
+    animates,
+  ];
 }
 
 type PingState =
@@ -81,7 +92,7 @@ function EngineStatus({ ping }: { ping: PingState }) {
       title={detail}
     >
       <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${dot}`} />
-      <span className="truncate">{label}</span>
+      <span className={quiet && ping.status === 'ok' ? 'sr-only' : 'truncate'}>{label}</span>
       {detail ? (
         <span className={quiet ? 'sr-only' : 'truncate font-mono text-[11px] text-danger'}>
           {detail}
@@ -94,14 +105,70 @@ function EngineStatus({ ping }: { ping: PingState }) {
 function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
   const title = useSession(sessionId, (s) => s.info.title);
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <SessionBot sessionId={sessionId} size={30} alive />
+    <div className="flex min-w-48 items-center gap-2">
+      {/* O mesmo nome de transição do capuz dos cartões da mesa: abrir uma sessão transforma um no outro. */}
+      <span
+        style={
+          {
+            viewTransitionName: 'session-bot',
+            viewTransitionClass: 'sl-morph',
+          } as React.CSSProperties
+        }
+      >
+        <SessionBot sessionId={sessionId} size={30} alive />
+      </span>
       <h1
         className="truncate text-[13px] font-semibold tracking-[-0.01em]"
         data-testid="session-title"
       >
         {title}
       </h1>
+    </div>
+  );
+}
+
+/** O título da mesa e o resumo de relance: quantas precisam de ti. */
+function DeskTitle() {
+  const hasDesk = useApp((s) => s.sessionIds.length > 0 || s.orphans.length > 0);
+  const waiting = useNeedsYouCount();
+  if (!hasDesk) return null;
+  return (
+    <div className="flex min-w-0 items-baseline gap-2.5">
+      <h1 className="text-[15px] font-semibold tracking-[-0.015em]">Mesa</h1>
+      {waiting > 0 ? (
+        <span className="text-[12px] text-accent-text" data-testid="desk-summary">
+          {waiting} {waiting === 1 ? 'precisa de ti' : 'precisam de ti'}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+const Divider = () => <span aria-hidden className="mx-1.5 h-3.5 w-px shrink-0 bg-line" />;
+
+/**
+ * O estado da sessão aberta, à direita: onde trabalha | verificações e revisor | rever. Três
+ * grupos com um divisor fino entre eles; o que não existe não deixa divisor.
+ */
+function SessionStatus({ sessionId }: { sessionId: string }) {
+  const placed = useSession(
+    sessionId,
+    (s) => s.info.workspace?.kind === 'worktree' || s.info.workspace?.kind === 'shared',
+  );
+  return (
+    <div className="ml-auto flex shrink-0 items-center">
+      {placed ? (
+        <>
+          <WorkspaceChip sessionId={sessionId} />
+          <Divider />
+        </>
+      ) : null}
+      <div className="flex items-center gap-0.5">
+        <ChecksRow sessionId={sessionId} />
+        <QualityChip sessionId={sessionId} />
+      </div>
+      <Divider />
+      <ReviewButton sessionId={sessionId} />
     </div>
   );
 }
@@ -194,7 +261,7 @@ function NoticeBar({ notice }: { notice: string | null }) {
 }
 
 export function App() {
-  const [theme, toggleTheme] = useTheme();
+  const [theme, toggleTheme, themeAnimates] = useTheme();
   const ping = usePing();
   const sessionIds = useApp((s) => s.sessionIds);
   const activeSessionId = useApp((s) => (s.view === 'session' ? s.activeSessionId : null));
@@ -235,11 +302,26 @@ export function App() {
             </div>
             <button
               type="button"
+              onClick={(e) => toggleTheme(shouldAnimate(e.nativeEvent))}
+              aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+              data-testid="theme-toggle"
+              className="grid size-7 shrink-0 place-items-center rounded-control text-muted sl-press hover:bg-surface-hover hover:text-fg"
+            >
+              <IconSwap swapKey={theme} instant={!themeAnimates}>
+                {theme === 'dark' ? (
+                  <Sun size={15} strokeWidth={1.75} />
+                ) : (
+                  <Moon size={15} strokeWidth={1.75} />
+                )}
+              </IconSwap>
+            </button>
+            <button
+              type="button"
               onClick={actions.openAgentsPanel}
               aria-label="Agentes"
               title="Agentes: estado, login e variáveis"
               data-testid="sidebar-agents"
-              className="grid size-7 shrink-0 place-items-center rounded-sm text-muted sl-press hover:bg-surface-hover hover:text-fg"
+              className="grid size-7 shrink-0 place-items-center rounded-control text-muted sl-press hover:bg-surface-hover hover:text-fg"
             >
               <SlidersHorizontal size={15} strokeWidth={1.75} />
             </button>
@@ -251,26 +333,8 @@ export function App() {
 
       <main className="flex min-w-0 flex-col">
         <header className="drag flex h-11 shrink-0 items-center gap-3 pr-[9.5rem] pl-5">
-          {activeSessionId ? <SessionHeaderTitle sessionId={activeSessionId} /> : null}
-          <div className="ml-auto flex items-center gap-1">
-            {activeSessionId ? <WorkspaceChip sessionId={activeSessionId} /> : null}
-            {activeSessionId ? <ChecksRow sessionId={activeSessionId} /> : null}
-            {activeSessionId ? <QualityChip sessionId={activeSessionId} /> : null}
-            {activeSessionId ? <ReviewButton sessionId={activeSessionId} /> : null}
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
-              data-testid="theme-toggle"
-              className="no-drag sl-press grid size-8 place-items-center rounded-sm text-muted hover:bg-surface-hover hover:text-fg"
-            >
-              {theme === 'dark' ? (
-                <Sun size={16} strokeWidth={1.75} />
-              ) : (
-                <Moon size={16} strokeWidth={1.75} />
-              )}
-            </button>
-          </div>
+          {activeSessionId ? <SessionHeaderTitle sessionId={activeSessionId} /> : <DeskTitle />}
+          {activeSessionId ? <SessionStatus sessionId={activeSessionId} /> : null}
         </header>
 
         <NoticeBar notice={notice} />

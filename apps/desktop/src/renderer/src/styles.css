@@ -23,6 +23,7 @@
   --font-sans: var(--sl-font-sans);
   --font-mono: var(--sl-font-mono);
   --radius-sm: var(--sl-radius-sm);
+  --radius-control: var(--sl-radius-control);
   --radius-md: var(--sl-radius-md);
   --radius-lg: var(--sl-radius-lg);
   --shadow-raised: var(--sl-shadow-raised);

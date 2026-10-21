@@ -1,5 +1,6 @@
 import { Logo } from '../../components/logo.tsx';
-import { FolderPlus, Folder, LayoutGrid, ShieldCheck, ShieldOff, X } from 'lucide-react';
+import { Folder, LayoutGrid, Plus, ShieldCheck, ShieldOff, X } from 'lucide-react';
+import { IconSwap } from '@solline/ui/icon-swap';
 import { useNeedsYouCount } from '../desk/desk.tsx';
 import { APP_NAME } from '@solline/protocol/app';
 import type { Project, SessionState } from '@solline/protocol';
@@ -88,11 +89,13 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
           // De confiança é o normal: o escudo só aparece ao passar. Sem confiança fica à vista.
           className={`grid size-6 shrink-0 place-items-center rounded-sm sl-press transition-[color,background-color,opacity] duration-150 hover:bg-surface-hover hover:text-fg ${project.trusted ? `text-subtle ${reveal}` : 'text-accent-text'}`}
         >
-          {project.trusted ? (
-            <ShieldCheck size={14} strokeWidth={1.9} />
-          ) : (
-            <ShieldOff size={14} strokeWidth={1.9} />
-          )}
+          <IconSwap swapKey={project.trusted ? 'on' : 'off'}>
+            {project.trusted ? (
+              <ShieldCheck size={14} strokeWidth={1.9} />
+            ) : (
+              <ShieldOff size={14} strokeWidth={1.9} />
+            )}
+          </IconSwap>
         </button>
         <span className={`flex shrink-0 ${activeProject ? '' : reveal}`}>
           <NewSessionButton project={project} variant="icon" />
@@ -129,25 +132,32 @@ export function Sidebar({
 
       <div className="px-2 pt-1">
         <DeskButton />
+      </div>
+
+      <div className="mt-4 flex items-center pr-2 pl-4">
+        <span className="flex-1 text-[11px] font-medium tracking-[0.04em] text-subtle uppercase">
+          Projetos
+        </span>
         <button
           type="button"
           onClick={() => void actions.addProject()}
+          aria-label="Adicionar projeto"
+          title="Adicionar projeto"
           data-testid="add-project"
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg active:bg-surface-sunken"
+          className="grid size-6 place-items-center rounded-control text-subtle sl-press hover:bg-surface-hover hover:text-fg"
         >
-          <FolderPlus size={15} strokeWidth={1.75} />
-          Adicionar projeto
+          <Plus size={14} strokeWidth={1.9} />
         </button>
-      </div>
-
-      <div className="mt-4 px-4 text-[11px] font-medium tracking-[0.04em] text-subtle uppercase">
-        Projetos
       </div>
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pt-1.5">
         {projects.length === 0 ? (
-          <p className="px-2 pt-1 text-[12.5px] leading-relaxed text-subtle">
+          <button
+            type="button"
+            onClick={() => void actions.addProject()}
+            className="px-2 pt-1 text-left text-[12.5px] leading-relaxed text-subtle hover:text-fg"
+          >
             Adiciona uma pasta para começar.
-          </p>
+          </button>
         ) : (
           <ul>
             {projects.map((project) => (
@@ -176,7 +186,7 @@ function DeskButton() {
       onClick={() => actions.openDesk()}
       aria-current={open ? 'page' : undefined}
       data-testid="open-desk"
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors duration-150 active:bg-surface-sunken ${
+      className={`flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-[13px] transition-colors duration-150 active:bg-surface-sunken ${
         open ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover hover:text-fg'
       }`}
     >

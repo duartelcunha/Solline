@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import type { NoticeBlock, ThinkingBlock, TodoBlock, ToolBlock } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
-import { useChangedSinceMount } from '../../lib/morph.ts';
+import { IconSwap } from '@solline/ui/icon-swap';
 
 export function Spinner({ label }: { label: string }) {
   return (
@@ -30,18 +30,33 @@ export function ToolStateIcon({ state }: { state: ToolBlock['state'] }) {
   return <X aria-label="Falhou" size={14} strokeWidth={2.25} className="text-danger" />;
 }
 
-/** O ícone transforma-se quando a ferramenta acaba; ao abrir o histórico fica quieto. */
-function MorphingIcon({ state }: { state: ToolBlock['state'] }) {
-  const changed = useChangedSinceMount(state);
+/** O ícone troca quando a ferramenta acaba; ao abrir o histórico fica quieto. */
+function StateIcon({ state }: { state: ToolBlock['state'] }) {
   return (
-    <span className="grid size-4 shrink-0 place-items-center text-muted">
-      <span
-        key={state}
-        className={changed ? 'icon-morph grid place-items-center' : 'grid place-items-center'}
-      >
-        <ToolStateIcon state={state} />
-      </span>
-    </span>
+    <IconSwap swapKey={state} className="size-4 shrink-0">
+      <ToolStateIcon state={state} />
+    </IconSwap>
+  );
+}
+
+const STATE_SPOKEN: Record<ToolBlock['state'], string> = {
+  running: 'a correr',
+  ok: 'concluída',
+  error: 'falhou',
+};
+
+const rowClass =
+  'group -mx-2 flex h-7 w-[calc(100%+1rem)] items-center gap-2 rounded-control px-2 text-left text-[13px] text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)]';
+
+/** Seta que só aparece ao passar o rato (ou com foco): em repouso a linha é só texto. */
+function HoverChevron({ open }: { open?: boolean }) {
+  return (
+    <ChevronRight
+      aria-hidden
+      size={13}
+      strokeWidth={1.75}
+      className={`shrink-0 text-subtle transition-[opacity,transform] duration-150 motion-reduce:transition-none ${open ? 'rotate-90' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}
+    />
   );
 }
 
@@ -53,17 +68,53 @@ export function ToolRow({ block, onOpen }: { block: ToolBlock; onOpen: () => voi
       data-testid="tool-block"
       data-tool={block.name}
       data-state={block.state}
-      aria-label={`${block.summary}: ${block.state === 'running' ? 'a correr' : block.state === 'ok' ? 'concluída' : 'falhou'}. Abrir detalhe`}
-      className="group flex w-full items-center gap-2.5 rounded-md border border-line bg-surface px-3 py-2 text-left transition-[background-color,border-color] duration-150 hover:border-line-strong hover:bg-surface-hover active:bg-surface-sunken"
+      aria-label={`${block.summary}: ${STATE_SPOKEN[block.state]}. Abrir detalhe`}
+      className={rowClass}
     >
-      <MorphingIcon state={block.state} />
-      <span className="min-w-0 flex-1 truncate text-[13px]">{block.summary}</span>
-      <ChevronRight
-        size={14}
-        strokeWidth={1.75}
-        className="shrink-0 text-subtle transition-transform duration-150 group-hover:translate-x-0.5"
-      />
+      <StateIcon state={block.state} />
+      <span className="min-w-0 flex-1 truncate">{block.summary}</span>
+      <HoverChevron />
     </button>
+  );
+}
+
+/**
+ * As ferramentas seguidas de um turno numa só linha, "N ações", com o estado da última.
+ * Um clique mostra as linhas; uma ferramenta sozinha é só a linha dela. As linhas ficam no
+ * DOM mesmo fechadas (hidden), para o estado de cada uma continuar a ler-se.
+ */
+export function ToolGroup({
+  blocks,
+  onOpen,
+}: {
+  blocks: ToolBlock[];
+  onOpen: (block: ToolBlock) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const latest = blocks.at(-1);
+  if (!latest) return null;
+  if (blocks.length === 1) return <ToolRow block={latest} onOpen={() => onOpen(latest)} />;
+  return (
+    <div data-testid="tool-group">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`${blocks.length} ações, a última ${STATE_SPOKEN[latest.state]}`}
+        className={rowClass}
+      >
+        <StateIcon state={latest.state} />
+        <span className="min-w-0 flex-1 truncate">{blocks.length} ações</span>
+        <HoverChevron open={open} />
+      </button>
+      <div hidden={!open} className="ml-3 border-l border-line pl-3">
+        {blocks.map((block) => (
+          <div key={block.id} className="sl-enter">
+            <ToolRow block={block} onOpen={() => onOpen(block)} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -127,7 +178,7 @@ export function TodoView({ block }: { block: TodoBlock }) {
       data-testid="todo-block"
       className="rounded-md border border-line bg-surface px-3 py-2.5"
     >
-      <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-muted">
+      <div className="mb-1.5 flex items-center gap-2 text-[12px] text-muted">
         <ListChecks size={14} strokeWidth={1.9} />
         Tarefas
         <span className="ml-auto tabular-nums text-subtle">

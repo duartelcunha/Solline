@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
-import type { TokenUsage } from '@solline/protocol';
+import type { Checks, TokenUsage } from '@solline/protocol';
+import { IconSwap } from '@solline/ui/icon-swap';
 import { actions, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { morphName } from '../../lib/morph.ts';
@@ -14,6 +15,10 @@ export const money = new Intl.NumberFormat('pt-PT', {
 });
 const tokens = new Intl.NumberFormat('pt-PT', { notation: 'compact', maximumFractionDigits: 1 });
 
+/**
+ * O contexto só aparece quando começa a contar (50 %): abaixo disso não há nada a decidir.
+ * Uma fatia cheia, não um arco, para não parecer um carregamento.
+ */
 export function ContextMeter({
   used,
   max,
@@ -23,9 +28,8 @@ export function ContextMeter({
   max: number;
   percent: number;
 }) {
-  const r = 6.5;
-  const c = 2 * Math.PI * r;
   const p = Math.min(Math.max(percent, 0), 100);
+  if (p < 50) return null;
   const tone = p >= 85 ? 'text-danger' : p >= 65 ? 'text-accent-text' : 'text-muted';
   const label = `Contexto: ${tokens.format(used)} de ${tokens.format(max)} tokens (${p}%)`;
   return (
@@ -36,29 +40,13 @@ export function ContextMeter({
       role="img"
       data-testid="context-meter"
     >
-      <svg aria-hidden width="16" height="16" viewBox="0 0 16 16">
-        <circle
-          cx="8"
-          cy="8"
-          r={r}
-          fill="none"
-          stroke="currentColor"
-          strokeOpacity="0.2"
-          strokeWidth="2"
-        />
-        <circle
-          cx="8"
-          cy="8"
-          r={r}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeDasharray={`${(p / 100) * c} ${c}`}
-          transform="rotate(-90 8 8)"
-          className="meter-arc"
-        />
-      </svg>
+      <span
+        aria-hidden
+        className="size-3 shrink-0 rounded-full"
+        style={{
+          background: `conic-gradient(currentColor ${p}%, color-mix(in oklab, currentColor 22%, transparent) 0)`,
+        }}
+      />
       <span className="hidden tabular-nums @[30rem]:inline">{p}%</span>
     </span>
   );
@@ -80,6 +68,15 @@ function TokenCount({ usage }: { usage: TokenUsage }) {
       {tokens.format(usage.input + usage.output)} tokens
     </span>
   );
+}
+
+/** A primeira verificação que falhou no último turno verificado, com o nome dela. */
+function firstFailing(checks: Checks | null): { id: string; label: string } | null {
+  if (!checks?.turnId) return null;
+  const result = checks.results.find((r) => r.state === 'failed' || r.state === 'timeout');
+  if (!result) return null;
+  const spec = checks.specs.find((c) => c.id === result.id);
+  return { id: result.id, label: spec?.label ?? result.id };
 }
 
 export function Composer({ sessionId, above }: { sessionId: string; above?: React.ReactNode }) {
@@ -110,9 +107,11 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
     input.current?.focus();
   }, []);
 
+  const checks = useSession(sessionId, (s) => s.checks);
   const busy = state === 'running' || state === 'needs-you';
   const offline = state === 'starting' || state === 'error';
   const canSend = !busy && !offline && text.trim().length > 0;
+  const failing = firstFailing(checks);
 
   // shortcut: não há fila de mensagens enquanto o agente trabalha; o envio fica bloqueado
   // até ao fim do turno. Rever quando fizer falta mandar mensagens a meio (M2).
@@ -125,8 +124,9 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   }
 
   return (
-    <div className="shrink-0 px-4 pb-5 sm:px-8">
-      <div className="mx-auto max-w-3xl">
+    <div className="shrink-0 pb-5">
+      {/* A mesma largura e margem da conversa: as duas colunas alinham. */}
+      <div className="mx-auto w-full max-w-3xl px-8">
         {above}
         {actionError ? (
           <p
@@ -135,6 +135,22 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             data-testid="action-error"
           >
             {actionError}
+          </p>
+        ) : null}
+        {failing && !busy && !offline ? (
+          <p
+            key={failing.id}
+            data-testid="check-suggestion"
+            className="sl-enter mb-2 flex items-center gap-1.5 px-1 text-[12px] text-muted"
+          >
+            <span className="min-w-0 truncate">{failing.label} falhou ·</span>
+            <button
+              type="button"
+              onClick={() => void actions.fixCheck(sessionId, failing.id)}
+              className="shrink-0 rounded-sm text-fg underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)]"
+            >
+              Mandar ao agente
+            </button>
           </p>
         ) : null}
         <div className="composer @container rounded-xl border border-line bg-surface shadow-raised transition-[border-color,box-shadow] duration-200 focus-within:border-line-strong">
@@ -192,32 +208,25 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
               ) : usage.tokens ? (
                 <TokenCount usage={usage.tokens} />
               ) : null}
-              {busy ? (
-                <button
-                  type="button"
-                  onClick={() => void actions.interrupt(sessionId)}
-                  aria-label="Interromper"
-                  title="Interromper"
-                  data-testid="interrupt"
-                  style={morphName('composer-action')}
-                  className="grid size-8 place-items-center rounded-full bg-fg text-bg sl-press"
-                >
-                  <Square size={11} fill="currentColor" strokeWidth={0} />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void send()}
-                  disabled={!canSend}
-                  aria-label="Enviar"
-                  title="Enviar (Enter)"
-                  data-testid="send"
-                  style={morphName('composer-action')}
-                  className="grid size-8 place-items-center rounded-full bg-fg text-bg sl-press disabled:bg-surface-sunken disabled:text-subtle"
-                >
-                  <ArrowUp size={16} strokeWidth={2.25} />
-                </button>
-              )}
+              {/* Um só botão que muda de papel: o ícone troca no mesmo sítio. */}
+              <button
+                type="button"
+                onClick={() => (busy ? void actions.interrupt(sessionId) : void send())}
+                disabled={!busy && !canSend}
+                aria-label={busy ? 'Interromper' : 'Enviar'}
+                title={busy ? 'Interromper' : 'Enviar (Enter)'}
+                data-testid={busy ? 'interrupt' : 'send'}
+                style={morphName('composer-action')}
+                className="grid size-8 place-items-center rounded-full bg-fg text-bg sl-press disabled:bg-surface-sunken disabled:text-subtle"
+              >
+                <IconSwap swapKey={busy ? 'stop' : 'send'}>
+                  {busy ? (
+                    <Square size={11} fill="currentColor" strokeWidth={0} />
+                  ) : (
+                    <ArrowUp size={16} strokeWidth={2.25} />
+                  )}
+                </IconSwap>
+              </button>
             </div>
           </div>
         </div>

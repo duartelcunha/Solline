@@ -1,12 +1,12 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { RotateCcw, WifiOff } from 'lucide-react';
-import type { PermissionAnswer, ToolBlock, Turn } from '@solline/protocol';
+import type { Block, PermissionAnswer, ToolBlock, Turn } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
 import { actions, useSession } from '../../stores/app.ts';
 import { AgentLabelContext, useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { MorphScope } from '../../lib/morph.ts';
 import { PermissionCard, PlanCard, QuestionCard } from './asks.tsx';
-import { NoticeView, Spinner, ThinkingView, TodoView, ToolRow } from './blocks.tsx';
+import { NoticeView, Spinner, ThinkingView, TodoView, ToolGroup } from './blocks.tsx';
 import { ToolDetail } from './tool-detail.tsx';
 
 function UserTurn({ turn }: { turn: Turn }) {
@@ -18,6 +18,21 @@ function UserTurn({ turn }: { turn: Turn }) {
       </div>
     </div>
   );
+}
+
+/** As ferramentas seguidas ficam juntas num grupo; o resto passa como está. */
+function groupTools(blocks: Block[]): (Exclude<Block, ToolBlock> | ToolBlock[])[] {
+  const out: (Exclude<Block, ToolBlock> | ToolBlock[])[] = [];
+  for (const block of blocks) {
+    if (block.kind !== 'tool') {
+      out.push(block);
+      continue;
+    }
+    const last = out.at(-1);
+    if (Array.isArray(last)) last.push(block);
+    else out.push([block]);
+  }
+  return out;
 }
 
 function AssistantTurn({
@@ -37,26 +52,29 @@ function AssistantTurn({
   // shortcut: os passos de subagentes (parentToolId) aparecem na mesma lista, sem
   // sub-conversa dobrável; isso é do M2.
   // Ferramentas que já aparecem como cartão ou lista de tarefas não se repetem.
-  const blocks = turn.blocks.filter((b) => !(b.kind === 'tool' && b.hidden));
+  // Um texto ainda vazio não parte um grupo de ferramentas.
+  const blocks = groupTools(
+    turn.blocks.filter((b) => !(b.kind === 'tool' && b.hidden) && !(b.kind === 'text' && !b.text)),
+  );
   return (
     <MorphScope.Provider value={latest}>
-      <div className="space-y-3" data-testid="assistant-turn">
+      <div className="space-y-4" data-testid="assistant-turn">
         {blocks.map((block) => {
+          if (Array.isArray(block))
+            return <ToolGroup key={block[0]?.id} blocks={block} onOpen={onOpen} />;
           switch (block.kind) {
             case 'text':
               return block.text ? (
                 <div
                   key={block.id}
                   data-testid="assistant-text"
-                  className="text-[14px] select-text"
+                  className="text-[14.5px] leading-[1.6] select-text"
                 >
                   <Markdown text={block.text} />
                 </div>
               ) : null;
             case 'thinking':
               return <ThinkingView key={block.id} block={block} />;
-            case 'tool':
-              return <ToolRow key={block.id} block={block} onOpen={() => onOpen(block)} />;
             case 'permission':
               return (
                 <PermissionCard
@@ -133,6 +151,10 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   }, [turns]);
 
   const openTool = openToolId ? (tools.get(openToolId) ?? null) : null;
+  // A linha do tempo marca o <html> com o turno de onde se voltaria: esse e os seguintes
+  // ficam esbatidos, para se ver o que se perde antes de confirmar.
+  const rewindFrom = useRewindFrom();
+  const lostFrom = rewindFrom ? turns.findIndex((t) => t.id === rewindFrom) : -1;
   const working = state === 'running' && turns.at(-1)?.role === 'user';
 
   return (
@@ -150,23 +172,29 @@ export function Conversation({ sessionId }: { sessionId: string }) {
           {turns.length === 0 ? (
             <EmptySession cwd={cwd} />
           ) : (
-            <div className="mx-auto w-full max-w-3xl space-y-6 px-8 pt-4 pb-10">
-              {turns.map((turn, index) =>
-                turn.role === 'user' ? (
-                  <UserTurn key={turn.id} turn={turn} />
-                ) : (
-                  <AssistantTurn
-                    key={turn.id}
-                    turn={turn}
-                    firstPendingId={firstPendingId}
-                    latest={index === turns.length - 1}
-                    onOpen={(tool) => setOpenToolId(tool.id)}
-                    onAnswer={(requestId, answer) =>
-                      void actions.answer(sessionId, requestId, answer)
-                    }
-                  />
-                ),
-              )}
+            <div className="mx-auto w-full max-w-3xl space-y-8 px-8 pt-4 pb-10">
+              {turns.map((turn, index) => (
+                <div
+                  key={turn.id}
+                  data-turn-id={turn.id}
+                  className="transition-opacity duration-200"
+                  style={lostFrom >= 0 && index >= lostFrom ? { opacity: 0.4 } : undefined}
+                >
+                  {turn.role === 'user' ? (
+                    <UserTurn turn={turn} />
+                  ) : (
+                    <AssistantTurn
+                      turn={turn}
+                      firstPendingId={firstPendingId}
+                      latest={index === turns.length - 1}
+                      onOpen={(tool) => setOpenToolId(tool.id)}
+                      onAnswer={(requestId, answer) =>
+                        void actions.answer(sessionId, requestId, answer)
+                      }
+                    />
+                  )}
+                </div>
+              ))}
               {working ? (
                 <div
                   className="flex items-center gap-2 text-[12.5px] text-muted"
@@ -204,5 +232,17 @@ export function Conversation({ sessionId }: { sessionId: string }) {
         <ToolDetail tool={openTool} onClose={() => setOpenToolId(null)} />
       </div>
     </AgentLabelContext.Provider>
+  );
+}
+
+/** O turno de onde a linha do tempo voltaria (data-rewind-from no <html>), ou null. */
+function useRewindFrom(): string | null {
+  return useSyncExternalStore(
+    (onChange) => {
+      const observer = new MutationObserver(onChange);
+      observer.observe(document.documentElement, { attributeFilter: ['data-rewind-from'] });
+      return () => observer.disconnect();
+    },
+    () => document.documentElement.dataset.rewindFrom ?? null,
   );
 }

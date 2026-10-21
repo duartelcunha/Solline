@@ -242,3 +242,55 @@
     opacity: 0.6;
   }
 }
+
+/* ---------- Troca de ícone (IconSwap) ----------
+ * O antigo sai desfocado e a encolher; o novo entra desse mesmo desfoque, no mesmo sítio.
+ * Só opacity, transform e filter; nunca a partir de scale(0). */
+.sl-swap {
+  display: inline-grid;
+  place-items: center;
+}
+.sl-swap > * {
+  grid-area: 1 / 1;
+  display: inline-grid;
+  place-items: center;
+}
+@keyframes sl-swap-out {
+  to {
+    opacity: 0;
+    filter: blur(4px);
+    transform: scale(0.8);
+  }
+}
+@keyframes sl-swap-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: scale(0.8);
+  }
+}
+.sl-swap-out {
+  animation: sl-swap-out var(--sl-dur-exit) var(--sl-ease-out) forwards;
+  pointer-events: none;
+}
+.sl-swap-in {
+  animation: sl-swap-in var(--sl-dur-base) var(--sl-ease-out);
+}
+@keyframes sl-swap-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes sl-swap-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sl-swap-out {
+    animation-name: sl-swap-fade-out;
+  }
+  .sl-swap-in {
+    animation-name: sl-swap-fade-in;
+  }
+}

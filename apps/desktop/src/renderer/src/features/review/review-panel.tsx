@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronDown, MessageSquare, Undo2, Wand2, X } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  CircleCheck,
+  MessageSquare,
+  PanelRightClose,
+  Undo2,
+  Wand2,
+  X,
+} from 'lucide-react';
 import type {
   DiffScope,
   FileDiff,
@@ -12,7 +21,6 @@ import type {
 import { usePresence } from '@solline/ui/react';
 import { MenuShell, triggerClass } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { Bot } from '@solline/ui/bot';
 import { FindingRow } from '../quality/quality.tsx';
 import { commentKey, FileDiffView, type CommentKey } from './diff-view.tsx';
 
@@ -207,7 +215,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               onClick={() => void actions.undo(sessionId)}
               title={`Desfazer: ${timeline.undo}`}
               data-testid="review-undo"
-              className="sl-press inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-muted hover:bg-surface-hover hover:text-fg"
+              className="sl-press inline-flex h-7 items-center gap-1 rounded-control px-2 text-[12px] text-muted hover:bg-surface-hover hover:text-fg"
             >
               <Undo2 size={13} /> Desfazer
             </button>
@@ -219,7 +227,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
                 onClick={() => void act('reject')}
                 title="Rejeitar tudo"
                 data-testid="reject-all"
-                className="sl-press inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium whitespace-nowrap text-danger hover:bg-danger/10"
+                className="sl-press inline-flex h-7 items-center gap-1 rounded-control px-2 text-[12px] font-medium whitespace-nowrap text-danger hover:bg-danger/10"
               >
                 <X size={13} strokeWidth={2.25} /> Rejeitar
               </button>
@@ -228,19 +236,22 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
                 onClick={() => void act('accept')}
                 title="Aceitar tudo"
                 data-testid="accept-all"
-                className="sl-press inline-flex h-7 items-center gap-1 rounded-md bg-fg px-2.5 text-[12px] font-medium whitespace-nowrap text-bg"
+                className="sl-press inline-flex h-7 items-center gap-1 rounded-control bg-fg px-2.5 text-[12px] font-medium whitespace-nowrap text-bg"
               >
                 <Check size={13} strokeWidth={2.25} /> Aceitar
               </button>
             </>
           ) : null}
+          {/* Fechar fica à parte, para não se confundir com o "Rejeitar" ao lado. */}
+          <span aria-hidden className="mx-2 h-4 w-px bg-line" />
           <button
             type="button"
             onClick={() => actions.toggleReview(false)}
             aria-label="Fechar o painel de rever"
-            className="sl-press grid size-7 place-items-center rounded-md text-subtle hover:bg-surface-hover hover:text-fg"
+            title="Fechar"
+            className="sl-press grid size-7 place-items-center rounded-control text-subtle hover:bg-surface-hover hover:text-fg"
           >
-            <X size={14} />
+            <PanelRightClose size={15} strokeWidth={1.75} />
           </button>
         </div>
       </header>
@@ -264,9 +275,9 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               className={celebrate ? 'sl-reward' : undefined}
               onAnimationEnd={() => setCelebrate(false)}
             >
-              <Bot hood="reviewer" mood="done" size={64} />
+              <CircleCheck size={20} strokeWidth={1.75} className="text-subtle" aria-hidden />
             </span>
-            <p className="text-[13px] font-medium" data-testid="review-empty">
+            <p className="text-[13px] text-muted" data-testid="review-empty">
               {validScope.kind === 'review' ? 'Nada por rever' : 'Sem alterações'}
             </p>
           </div>
@@ -294,7 +305,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             onClick={() => setPicked(new Set())}
-            className="sl-press h-8 rounded-md px-3 text-[12.5px] text-muted hover:bg-surface-hover hover:text-fg"
+            className="sl-press h-8 rounded-control px-3 text-[12.5px] text-muted hover:bg-surface-hover hover:text-fg"
           >
             Limpar
           </button>
@@ -304,7 +315,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
             onClick={() => void fix()}
             title={busy ? 'O agente ainda está a trabalhar' : undefined}
             data-testid="fix-findings"
-            className="sl-press inline-flex h-8 items-center gap-1.5 rounded-md bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-50"
+            className="sl-press inline-flex h-8 items-center gap-1.5 rounded-control bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-50"
           >
             <Wand2 size={13} strokeWidth={2} /> Corrigir {picked.size}
           </button>
@@ -323,13 +334,13 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
             rows={1}
             placeholder="Nota (opcional)"
             aria-label="Nota para o agente"
-            className="block max-h-32 w-full resize-none rounded-md border border-line bg-surface px-2.5 py-1.5 text-[13px] outline-none [field-sizing:content] focus:border-line-strong"
+            className="block max-h-32 w-full resize-none rounded-control border border-line bg-surface px-2.5 py-1.5 text-[13px] outline-none [field-sizing:content] focus:border-line-strong"
           />
           <div className="mt-2 flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={() => setComments(new Map())}
-              className="sl-press h-8 rounded-md px-3 text-[12.5px] text-muted hover:bg-surface-hover hover:text-fg"
+              className="sl-press h-8 rounded-control px-3 text-[12.5px] text-muted hover:bg-surface-hover hover:text-fg"
             >
               Descartar
             </button>
@@ -339,7 +350,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               onClick={() => void sendComments()}
               title={busy ? 'O agente ainda está a trabalhar' : undefined}
               data-testid="send-comments"
-              className="sl-press inline-flex h-8 items-center gap-1.5 rounded-md bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-50"
+              className="sl-press inline-flex h-8 items-center gap-1.5 rounded-control bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-50"
             >
               Enviar ao agente
             </button>
@@ -375,7 +386,7 @@ function Empty({ title, detail }: { title: string; detail?: string | undefined }
       <button
         type="button"
         onClick={() => actions.toggleReview(false)}
-        className="sl-press mt-3 h-8 rounded-md border border-line px-3 text-[12.5px] hover:bg-surface-hover"
+        className="sl-press mt-3 h-8 rounded-control border border-line px-3 text-[12.5px] hover:bg-surface-hover"
       >
         Fechar
       </button>

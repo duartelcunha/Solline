@@ -1,5 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Check, CheckCheck, ClipboardList, HelpCircle, ShieldQuestion, X } from 'lucide-react';
+import {
+  Check,
+  CheckCheck,
+  ClipboardList,
+  HelpCircle,
+  ShieldCheck,
+  ShieldQuestion,
+  ShieldX,
+  X,
+} from 'lucide-react';
 import type {
   AskStatus,
   PermissionAnswer,
@@ -41,13 +50,14 @@ function useShortcuts(enabled: boolean, keys: Record<string, () => void>): void 
 }
 
 const STATUS_TEXT: Record<Exclude<AskStatus, 'pending'>, string> = {
-  allowed: 'Permitido uma vez',
-  'allowed-always': 'Permitido sempre',
-  denied: 'Negado',
-  'denied-always': 'Negado sempre',
-  cancelled: 'Cancelado',
+  allowed: 'permitido',
+  'allowed-always': 'permitido sempre',
+  denied: 'negado',
+  'denied-always': 'negado sempre',
+  cancelled: 'cancelado',
 };
 
+/** Um pedido respondido encolhe para uma linha: ícone de 12 px com a cor da resposta. */
 function Resolved({
   id,
   status,
@@ -60,24 +70,32 @@ function Resolved({
   icon: React.ReactNode;
 }) {
   const ok = status === 'allowed' || status === 'allowed-always';
+  const denied = status === 'denied' || status === 'denied-always';
   const morph = useMorphName(id);
   return (
     <div
       data-testid="ask-resolved"
       data-status={status}
       style={morph}
-      className="flex items-center gap-2 px-1 text-[12.5px] text-muted"
+      className="flex h-6 items-center gap-1.5 text-[12px] text-muted"
     >
-      <span className={ok ? 'text-success' : 'text-subtle'}>{icon}</span>
-      <span className="truncate">{label}</span>
-      <span aria-hidden className="text-subtle">
-        ·
+      <span
+        className={`grid shrink-0 place-items-center ${ok ? 'text-success' : denied ? 'text-danger' : 'text-subtle'}`}
+      >
+        {icon}
       </span>
-      <span className={ok ? 'text-success' : 'text-subtle'}>
-        {status === 'pending' ? '' : STATUS_TEXT[status]}
-      </span>
+      <span className="min-w-0 truncate">{label}</span>
+      {status === 'pending' ? null : (
+        <span className="shrink-0 text-subtle">· {STATUS_TEXT[status]}</span>
+      )}
     </div>
   );
+}
+
+function permissionIcon(status: AskStatus): React.ReactNode {
+  if (status === 'allowed' || status === 'allowed-always') return <ShieldCheck size={12} />;
+  if (status === 'denied' || status === 'denied-always') return <ShieldX size={12} />;
+  return <ShieldQuestion size={12} />;
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
@@ -157,7 +175,7 @@ export function PermissionCard({
         id={block.id}
         status={block.status}
         label={block.title}
-        icon={<ShieldQuestion size={14} />}
+        icon={permissionIcon(block.status)}
       />
     );
 
@@ -242,7 +260,7 @@ export function PlanCard({ block, onAnswer }: { block: PlanBlock; onAnswer: Answ
         id={block.id}
         status={block.status}
         label="Plano"
-        icon={<ClipboardList size={14} />}
+        icon={<ClipboardList size={12} />}
       />
     );
   }
@@ -290,7 +308,7 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
         id={block.id}
         status={block.status}
         label={summary}
-        icon={<HelpCircle size={14} />}
+        icon={<HelpCircle size={12} />}
       />
     );
   }

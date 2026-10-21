@@ -96,7 +96,10 @@ export function FileDiffView({
           aria-label={open ? `Fechar ${file.path}` : `Abrir ${file.path}`}
           className="sl-press grid size-6 shrink-0 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
         >
-          <ChevronRight size={14} className={open ? 'rotate-90' : ''} />
+          <ChevronRight
+            size={14}
+            className={`transition-transform duration-[160ms] ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${open ? 'rotate-90' : ''}`}
+          />
         </button>
         <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={file.path}>
           <span className="text-subtle">{dir}</span>
@@ -143,15 +146,17 @@ export function FileDiffView({
             {file.hunks.map((hunk) => (
               <div
                 key={hunk.id}
-                className={leaving === hunk.id ? 'sl-leave' : ''}
+                className={`group/hunk ${leaving === hunk.id ? 'sl-leave' : ''}`}
                 data-testid="diff-hunk"
               >
                 <div className="flex items-center gap-2 bg-surface-sunken/60 py-1 pr-1.5 pl-3">
                   <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-subtle">
                     {hunk.header}
                   </span>
+                  {/* Aceitar e rejeitar só aparecem ao passar ou com o foco no hunk; ficam no
+                      DOM e no Tab. */}
                   {actionable ? (
-                    <>
+                    <span className="flex items-center opacity-0 transition-opacity duration-150 group-focus-within/hunk:opacity-100 group-hover/hunk:opacity-100 motion-reduce:transition-none">
                       <SmallAction
                         onClick={(e) => void act('accept', hunk, e)}
                         testId="accept-hunk"
@@ -166,7 +171,7 @@ export function FileDiffView({
                       >
                         <X size={12} strokeWidth={2.5} /> Rejeitar
                       </SmallAction>
-                    </>
+                    </span>
                   ) : null}
                 </div>
                 <div className="font-mono text-[12px] leading-[1.6] select-text">
@@ -274,13 +279,13 @@ function CommentEditor({
         placeholder="O que deve mudar aqui?"
         aria-label="Comentário"
         data-testid="comment-input"
-        className="block w-full resize-none rounded-md border border-line bg-bg px-2.5 py-1.5 text-[13px] outline-none [field-sizing:content] focus:border-line-strong"
+        className="block w-full resize-none rounded-control border border-line bg-bg px-2.5 py-1.5 text-[13px] outline-none [field-sizing:content] focus:border-line-strong"
       />
       <div className="mt-1.5 flex items-center justify-end gap-1.5">
         <button
           type="button"
           onClick={onCancel}
-          className="sl-press h-7 rounded-md px-2.5 text-[12px] text-muted hover:bg-surface-hover hover:text-fg"
+          className="sl-press h-7 rounded-control px-2.5 text-[12px] text-muted hover:bg-surface-hover hover:text-fg"
         >
           Cancelar
         </button>
@@ -290,7 +295,7 @@ function CommentEditor({
           onClick={() => onSave(text.trim())}
           title="Guardar (Ctrl+Enter)"
           data-testid="comment-save"
-          className="sl-press h-7 rounded-md bg-fg px-2.5 text-[12px] font-medium text-bg disabled:opacity-50"
+          className="sl-press h-7 rounded-control bg-fg px-2.5 text-[12px] font-medium text-bg disabled:opacity-50"
         >
           Guardar
         </button>
@@ -349,7 +354,7 @@ function IconAction({
       aria-label={label}
       title={label}
       data-testid={testId}
-      className="sl-press grid size-7 place-items-center rounded-md text-muted hover:bg-surface-hover hover:text-fg"
+      className="sl-press grid size-7 place-items-center rounded-control text-muted hover:bg-surface-hover hover:text-fg"
     >
       {children}
     </button>
@@ -372,7 +377,7 @@ function SmallAction({
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className={`sl-press inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium ${
+      className={`sl-press inline-flex h-6 items-center gap-1 rounded-control px-2 text-[11.5px] font-medium ${
         tone === 'accept' ? 'text-success hover:bg-success/10' : 'text-danger hover:bg-danger/10'
       }`}
     >

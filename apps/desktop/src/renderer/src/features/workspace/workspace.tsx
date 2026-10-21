@@ -49,11 +49,10 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
           title={workspace.branch}
           data-testid="workspace-chip"
           data-branch={workspace.branch}
-          className="no-drag sl-press inline-flex h-7 max-w-[15rem] items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-muted outline-none hover:bg-surface-hover hover:text-fg data-[state=open]:bg-surface-hover"
+          className="no-drag sl-press inline-flex h-7 max-w-[13rem] items-center gap-1.5 rounded-control px-2 text-[12px] text-muted outline-none hover:bg-surface-hover hover:text-fg data-[state=open]:bg-surface-hover"
         >
           <GitBranch size={14} strokeWidth={1.75} className="shrink-0" />
           <span className="truncate">{name}</span>
-          {stats.files > 0 ? <Delta {...stats} /> : null}
         </Menu.Trigger>
       }
     >
@@ -90,7 +89,7 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
 }
 
 const buttonClass =
-  'sl-press inline-flex h-8 items-center rounded-md px-3 text-[12.5px] font-medium disabled:opacity-60';
+  'sl-press inline-flex h-8 items-center rounded-control px-3 text-[12.5px] font-medium disabled:opacity-60';
 
 /** Fechar uma sessão com trabalho por trazer: trazer, guardar o branch ou deitar fora. */
 export function CloseDialog() {

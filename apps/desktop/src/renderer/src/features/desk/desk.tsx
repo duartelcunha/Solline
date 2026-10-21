@@ -9,8 +9,10 @@ import {
 import { GitBranch, GitMerge, Trash2 } from 'lucide-react';
 import type { Orphan } from '@solline/protocol';
 import { useReducedMotion } from '@solline/ui/react';
+import { shouldAnimate } from '@solline/ui/motion';
+import { flushSync } from 'react-dom';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { SessionBot } from '../agents/bots.tsx';
+import { SessionMark } from '../agents/bots.tsx';
 import { ContextMeter, money } from '../composer/composer.tsx';
 import { Mark } from '../quality/checks.tsx';
 import { deskOrder, lastAction, pendingAsk } from './desk-order.ts';
@@ -26,7 +28,7 @@ function Delta({ additions, deletions }: { additions: number; deletions: number 
 }
 
 const smallButton =
-  'sl-press inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium disabled:opacity-50';
+  'sl-press inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-[12px] font-medium disabled:opacity-50';
 
 /** O pedido à espera, em pequeno: o título e Permitir / Negar; o resto abre a conversa. */
 function CompactAsk({ sessionId }: { sessionId: string }) {
@@ -85,26 +87,50 @@ function SessionCard({ sessionId }: { sessionId: string }) {
   const project = useApp((s) => s.projects.find((p) => p.id === projectId)?.name);
   const needsYou = state === 'needs-you';
   const idle = state === 'idle';
-  const enabled = checks?.trusted ? checks.specs.filter((c) => c.enabled) : [];
+  const mark = useRef<HTMLSpanElement>(null);
+  // Ao abrir pelo rato, o capuz do cartão voa para o bot do cabeçalho (o mesmo nome de
+  // transição dos dois lados); pelo teclado ou com movimento reduzido, abre logo.
+  const open = (animate: boolean) => {
+    const el = mark.current;
+    if (!animate || !el || typeof document.startViewTransition !== 'function') {
+      actions.selectSession(sessionId);
+      return;
+    }
+    el.style.setProperty('view-transition-name', 'session-bot');
+    el.style.setProperty('view-transition-class', 'sl-morph');
+    document.startViewTransition(() => {
+      el.style.removeProperty('view-transition-name');
+      flushSync(() => actions.selectSession(sessionId));
+    });
+  };
+  // Na mesa só se veem as verificações que falharam: o que passa não pede atenção.
+  const failing = checks?.trusted
+    ? checks.specs.filter((c) => {
+        const state = checks.results.find((r) => r.id === c.id)?.state;
+        return state === 'failed' || state === 'timeout';
+      })
+    : [];
 
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => actions.selectSession(sessionId)}
+      onClick={(e) => open(shouldAnimate(e.nativeEvent))}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' && e.target === e.currentTarget) actions.selectSession(sessionId);
+        if (e.key === 'Enter' && e.target === e.currentTarget) open(false);
       }}
       data-testid="desk-card"
       data-session={sessionId}
       data-state={state}
       data-flip={sessionId}
-      className={`sl-enter sl-motion sl-press flex cursor-pointer flex-col gap-2.5 rounded-xl border bg-surface p-3.5 text-left outline-none transition-[border-color,box-shadow] duration-200 hover:border-line-strong focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] ${
-        needsYou ? 'border-accent shadow-raised' : 'border-line'
+      className={`sl-enter sl-motion sl-press flex cursor-pointer flex-col gap-3 rounded-xl border bg-surface p-4 text-left outline-none transition-[border-color] duration-200 hover:border-line-strong focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] ${
+        needsYou ? 'border-accent' : 'border-line'
       }`}
     >
       <div className="flex items-start gap-3">
-        <SessionBot sessionId={sessionId} size={36} />
+        <span ref={mark} className="grid h-5 w-5 shrink-0 place-items-center pt-0.5">
+          <SessionMark sessionId={sessionId} size={20} />
+        </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-semibold tracking-[-0.01em]">{title}</div>
           <div className="truncate text-[11.5px] text-subtle">{project ?? ''}</div>
@@ -138,11 +164,12 @@ function SessionCard({ sessionId }: { sessionId: string }) {
             {workspace.stats.files > 0 ? <Delta {...workspace.stats} /> : null}
           </span>
         ) : null}
-        {enabled.length ? (
-          <span className="inline-flex items-center gap-1" data-testid="card-checks">
-            {enabled.map((c) => (
-              <span key={c.id} title={c.label} className="grid size-3.5 place-items-center">
-                <Mark face={checks?.results.find((r) => r.id === c.id)?.state ?? 'waiting'} />
+        {failing.length ? (
+          <span className="inline-flex items-center gap-1 text-danger" data-testid="card-checks">
+            {failing.map((c) => (
+              <span key={c.id} className="inline-flex items-center gap-1">
+                <Mark face={checks?.results.find((r) => r.id === c.id)?.state ?? 'failed'} />
+                {c.label}
               </span>
             ))}
           </span>
@@ -179,7 +206,7 @@ function OrphanCard({ orphan }: { orphan: Orphan }) {
     <div
       data-testid="orphan-card"
       data-flip={orphan.id}
-      className="sl-enter sl-motion flex flex-col gap-2.5 rounded-xl border border-dashed border-line bg-surface-sunken p-3.5"
+      className="sl-enter sl-motion flex flex-col gap-3 rounded-xl border border-dashed border-line bg-surface-sunken p-4"
     >
       <div className="flex items-center gap-2 text-[13px] font-medium text-muted">
         <GitBranch size={14} className="shrink-0" />

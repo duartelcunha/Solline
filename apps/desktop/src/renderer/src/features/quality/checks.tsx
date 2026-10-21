@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Check, Clock, ListChecks, Lock, RotateCw, Send, ShieldCheck, X } from 'lucide-react';
+import { Check, ListChecks, Lock, RotateCw, Send, ShieldCheck, X } from 'lucide-react';
 import type { CheckResult, CheckSpec, Checks } from '@solline/protocol';
+import { IconSwap } from '@solline/ui/icon-swap';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
-import { useChangedSinceMount } from '../../lib/morph.ts';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 
 export type Face = 'waiting' | CheckResult['state'];
@@ -18,7 +18,10 @@ const STATE_LABEL: Record<Face, string> = {
   timeout: 'passou o limite',
 };
 
-/** A marca de cada estado: lê-se pela forma, não só pela cor. */
+/**
+ * A marca de cada estado, com as formas das gravidades do revisor: octógono para falhou,
+ * triângulo para passou o limite. "Por correr" não se desenha (nada aconteceu ainda).
+ */
 export function Mark({ face }: { face: Face }) {
   switch (face) {
     case 'running':
@@ -32,89 +35,50 @@ export function Mark({ face }: { face: Face }) {
     case 'passed':
       return <Check aria-hidden size={13} strokeWidth={2.25} className="text-success" />;
     case 'failed':
-      return <X aria-hidden size={13} strokeWidth={2.25} className="text-danger" />;
+      return (
+        <svg aria-hidden width="11" height="11" viewBox="0 0 10 10" className="text-danger">
+          <path d="M3 0h4l3 3v4l-3 3H3L0 7V3z" fill="currentColor" />
+        </svg>
+      );
     case 'timeout':
-      return <Clock aria-hidden size={12} strokeWidth={2} className="text-accent-text" />;
+      return (
+        <svg aria-hidden width="11" height="11" viewBox="0 0 10 10" className="text-accent-text">
+          <path d="M5 0.5 9.8 9.5H0.2z" fill="currentColor" />
+        </svg>
+      );
     default:
-      return <span aria-hidden className="block size-[7px] rounded-full border border-subtle" />;
+      return null;
   }
 }
 
-const pillClass =
-  'no-drag sl-press inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-muted transition-colors duration-150 outline-none hover:bg-surface-hover hover:text-fg data-[state=open]:bg-surface-hover';
+const chipClass =
+  'no-drag sl-press inline-flex h-7 items-center gap-1.5 rounded-control px-2 text-[12px] text-muted transition-colors duration-150 outline-none hover:bg-surface-hover hover:text-fg data-[state=open]:bg-surface-hover';
 
-function seconds(ms: number | null): string | undefined {
-  if (ms === null) return undefined;
+function seconds(ms: number | null): string {
+  if (ms === null) return '';
   return `${(ms / 1000).toLocaleString('pt-PT', { maximumFractionDigits: 1 })} s`;
 }
 
-/** Uma verificação: a marca muda de forma quando o estado muda; o clique mostra o erro. */
-function CheckPill({
-  sessionId,
-  spec,
-  result,
-  busy,
-}: {
-  sessionId: string;
-  spec: CheckSpec;
-  result: CheckResult | undefined;
-  busy: boolean;
-}) {
-  const face: Face = result?.state ?? 'waiting';
-  const changed = useChangedSinceMount(face);
-  const broken = face === 'failed' || face === 'timeout';
-  const label = `${spec.label}: ${STATE_LABEL[face]}`;
-  return (
-    <MenuShell
-      title={spec.label}
-      side="bottom"
-      align="end"
-      trigger={
-        <Menu.Trigger
-          aria-label={label}
-          title={label}
-          data-testid="check-pill"
-          data-check={spec.id}
-          data-state-check={face}
-          className={pillClass}
-        >
-          <span
-            key={face}
-            className={`grid size-3.5 place-items-center ${changed ? 'icon-morph' : ''}`}
-          >
-            <Mark face={face} />
-          </span>
-          {spec.label}
-        </Menu.Trigger>
-      }
-    >
-      {broken && result?.tail ? (
-        <pre
-          data-testid="check-tail"
-          className="mx-1 mb-1 max-h-48 overflow-y-auto rounded-md bg-surface-sunken px-2.5 py-2 font-mono text-[11px] leading-snug [overflow-wrap:anywhere] whitespace-pre-wrap text-muted select-text"
-        >
-          {result.tail}
-        </pre>
-      ) : null}
-      {broken ? (
-        <ActionItem
-          title="Mandar ao agente"
-          icon={<Send size={14} />}
-          disabled={busy}
-          onSelect={() => void actions.fixCheck(sessionId, spec.id)}
-          testId="check-fix"
-        />
-      ) : null}
-      <ActionItem
-        title="Repetir"
-        description={face === 'passed' ? seconds(result?.durationMs ?? null) : undefined}
-        icon={<RotateCw size={14} />}
-        disabled={busy || face === 'running'}
-        onSelect={() => void actions.runChecks(sessionId)}
-        testId="check-again"
-      />
-    </MenuShell>
-  );
+/** O resumo das verificações numa só cara: a correr, tudo bem, ou a primeira que falhou. */
+function summary(enabled: readonly CheckSpec[], results: readonly CheckResult[]) {
+  const of = (id: string) => results.find((r) => r.id === id)?.state ?? 'waiting';
+  const broken = enabled.filter((s) => of(s.id) === 'failed' || of(s.id) === 'timeout');
+  const first = broken[0];
+  if (first) {
+    return {
+      face: of(first.id) as Face,
+      text: broken.length === 1 ? first.label : `${broken.length}`,
+      label: `${broken.map((s) => s.label).join(', ')}: ${broken.length === 1 ? 'falhou' : 'falharam'}`,
+    };
+  }
+  if (enabled.some((s) => of(s.id) === 'running' || of(s.id) === 'pending')) {
+    return { face: 'running' as Face, text: '', label: 'Verificações a correr' };
+  }
+  const passed = enabled.filter((s) => of(s.id) === 'passed').length;
+  if (passed > 0) {
+    return { face: 'passed' as Face, text: `${passed}`, label: `${passed} verificações passaram` };
+  }
+  return { face: 'waiting' as Face, text: '', label: 'Verificações por correr' };
 }
 
 /** Sem confiança: uma pastilha com cadeado que explica e oferece confiar. */
@@ -129,7 +93,7 @@ function LockedPill({ projectId }: { projectId: string }) {
           aria-label="Verificações: o projeto não é de confiança"
           title="Verificações desligadas"
           data-testid="checks-locked"
-          className={pillClass}
+          className={chipClass}
         >
           <Lock size={13} strokeWidth={1.75} className="text-subtle" />
         </Menu.Trigger>
@@ -149,8 +113,8 @@ function LockedPill({ projectId }: { projectId: string }) {
 }
 
 /**
- * As verificações do projeto no cabeçalho, ao lado do revisor: uma pastilha por verificação
- * ligada e um botão para editar a lista.
+ * As verificações do projeto no cabeçalho, numa só pastilha: um visto e quantas passaram, ou a
+ * marca e o nome da que falhou. O clique abre a lista, com o fim do erro e "Mandar ao agente".
  */
 export function ChecksRow({ sessionId }: { sessionId: string }) {
   const checks = useSession(sessionId, (s) => s.checks);
@@ -163,36 +127,96 @@ export function ChecksRow({ sessionId }: { sessionId: string }) {
   if (!checks) return null;
   if (!checks.trusted) return <LockedPill projectId={projectId} />;
   const enabled = checks.specs.filter((s) => s.enabled);
+  const sum = summary(enabled, checks.results);
   return (
-    <div className="flex items-center" data-testid="checks">
-      {enabled.map((spec) => (
-        <CheckPill
-          key={spec.id}
-          sessionId={sessionId}
-          spec={spec}
-          result={checks.results.find((r) => r.id === spec.id)}
-          busy={busy}
-        />
-      ))}
-      <button
-        type="button"
-        onClick={() => setEditing(true)}
-        aria-label="Editar as verificações"
+    <>
+      <MenuShell
         title="Verificações"
-        data-testid="checks-edit"
-        className="no-drag sl-press grid size-7 place-items-center rounded-md text-subtle hover:bg-surface-hover hover:text-fg"
+        side="bottom"
+        align="end"
+        trigger={
+          <Menu.Trigger
+            aria-label={sum.label}
+            title={sum.label}
+            data-testid="checks-chip"
+            data-state-check={sum.face}
+            className={chipClass}
+          >
+            <IconSwap swapKey={sum.face} className="size-3.5">
+              {sum.face === 'waiting' ? (
+                <ListChecks size={14} strokeWidth={1.75} className="text-subtle" />
+              ) : (
+                <Mark face={sum.face} />
+              )}
+            </IconSwap>
+            {sum.text ? <span className="tabular-nums">{sum.text}</span> : null}
+          </Menu.Trigger>
+        }
       >
-        <ListChecks size={14} strokeWidth={1.75} />
-      </button>
+        {enabled.map((spec) => {
+          const result = checks.results.find((r) => r.id === spec.id);
+          const face: Face = result?.state ?? 'waiting';
+          const broken = face === 'failed' || face === 'timeout';
+          return (
+            <Fragment key={spec.id}>
+              <div
+                className="flex items-center gap-2.5 px-2.5 py-1.5 text-[13px]"
+                data-testid="check-row"
+                data-check={spec.id}
+                data-state-check={face}
+              >
+                <span className="grid size-4 place-items-center">
+                  <Mark face={face} />
+                </span>
+                <span className="min-w-0 flex-1 truncate">{spec.label}</span>
+                <span className="text-[11.5px] text-subtle tabular-nums">
+                  {face === 'passed' ? seconds(result?.durationMs ?? null) : STATE_LABEL[face]}
+                </span>
+              </div>
+              {broken && result?.tail ? (
+                <pre
+                  data-testid="check-tail"
+                  className="mx-1 mb-1 max-h-48 overflow-y-auto rounded-control bg-surface-sunken px-2.5 py-2 font-mono text-[11px] leading-snug [overflow-wrap:anywhere] whitespace-pre-wrap text-muted select-text"
+                >
+                  {result.tail}
+                </pre>
+              ) : null}
+              {broken ? (
+                <ActionItem
+                  title="Mandar ao agente"
+                  icon={<Send size={14} />}
+                  disabled={busy}
+                  onSelect={() => void actions.fixCheck(sessionId, spec.id)}
+                  testId="check-fix"
+                />
+              ) : null}
+            </Fragment>
+          );
+        })}
+        <Menu.Separator className="my-1 h-px bg-line" />
+        <ActionItem
+          title="Repetir"
+          icon={<RotateCw size={14} />}
+          disabled={busy || sum.face === 'running'}
+          onSelect={() => void actions.runChecks(sessionId)}
+          testId="check-again"
+        />
+        <ActionItem
+          title="Editar a lista"
+          icon={<ListChecks size={14} />}
+          onSelect={() => setEditing(true)}
+          testId="checks-edit"
+        />
+      </MenuShell>
       {editing ? (
         <ChecksEditor projectId={projectId} checks={checks} onClose={() => setEditing(false)} />
       ) : null}
-    </div>
+    </>
   );
 }
 
 const inputClass =
-  'h-7 min-w-0 rounded-md border border-line bg-bg px-2 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)]';
+  'h-7 min-w-0 rounded-control border border-line bg-bg px-2 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)]';
 
 /** A lista do projeto: ligar, desligar e mudar o comando. Um comando novo pede confirmação. */
 function ChecksEditor({

@@ -7,7 +7,12 @@ import {
   type SessionSettings,
 } from '@solline/protocol';
 import { ModeIcon } from '../../components/icons.tsx';
-import { Item, MenuShell, triggerClass } from '../../components/menu.tsx';
+import { IconSwap } from '@solline/ui/icon-swap';
+import { Item, MenuShell } from '../../components/menu.tsx';
+
+/** Pastilha dentro da caixa do compositor: controlo de 28 px, raio de controlo, borda leve. */
+const pillClass =
+  'pill inline-flex h-7 shrink-0 items-center gap-1.5 rounded-control border border-line px-2.5 text-[12px] whitespace-nowrap text-muted outline-none sl-press hover:border-line-strong hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] disabled:opacity-50 data-[state=open]:border-line-strong data-[state=open]:bg-surface-hover data-[state=open]:text-fg';
 
 /** "Opus 5.5 · Best for..." -> "Opus 5.5"; se não houver versão, o nome do menu. */
 export function shortModelName(model: ModelOption | undefined, current: string | null): string {
@@ -51,7 +56,7 @@ export function SettingsPills({
             disabled={disabled}
             data-testid="pill-model"
             aria-label={`Modelo: ${modelName}. Mudar`}
-            className={triggerClass}
+            className={pillClass}
           >
             <Cpu aria-hidden size={13} strokeWidth={1.9} />
             {modelName}
@@ -81,7 +86,7 @@ export function SettingsPills({
               data-testid="pill-effort"
               aria-label={`Esforço: ${settings.effort ?? 'padrão'}. Mudar`}
               title={`Esforço: ${settings.effort ?? 'padrão'}`}
-              className={triggerClass}
+              className={pillClass}
             >
               <Gauge aria-hidden size={13} strokeWidth={1.9} />
               {/* Estreito (painel de rever aberto): só o ícone; o nome fica no tooltip. */}
@@ -112,9 +117,11 @@ export function SettingsPills({
               data-testid="pill-mode"
               aria-label={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}. Mudar`}
               title={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}`}
-              className={triggerClass}
+              className={pillClass}
             >
-              <ModeIcon risk={mode?.risk ?? 'ask'} size={14} />
+              <IconSwap swapKey={mode?.id ?? settings.mode ?? 'ask'}>
+                <ModeIcon risk={mode?.risk ?? 'ask'} size={14} />
+              </IconSwap>
               {/* O modo é o que diz o risco: o nome fica sempre. */}
               {mode?.label ?? settings.mode ?? 'Modo'}
               <ChevronDown

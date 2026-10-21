@@ -1,6 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import type { ToolBlock } from '@solline/protocol';
+import { IconSwap } from '@solline/ui/icon-swap';
 import { ToolStateIcon } from './blocks.tsx';
 import { ToolInput } from './tool-input.tsx';
 
@@ -36,9 +37,9 @@ export function ToolDetail({ tool, onClose }: { tool: ToolBlock | null; onClose:
           {tool ? (
             <>
               <header className="flex items-start gap-3 border-b border-line px-5 py-4">
-                <span className="mt-1 grid size-4 place-items-center text-muted">
+                <IconSwap swapKey={tool.state} className="mt-1 size-4 shrink-0 text-muted">
                   <ToolStateIcon state={tool.state} />
-                </span>
+                </IconSwap>
                 <div className="min-w-0 flex-1">
                   <Dialog.Title className="truncate text-[15px] font-semibold tracking-[-0.01em]">
                     {tool.summary}

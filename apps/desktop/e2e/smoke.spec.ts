@@ -380,7 +380,8 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   });
   await expect(page.getByTestId('assistant-text').last()).toBeVisible();
   await expect(page.getByTestId('session-cost')).toContainText(/US\$|\$/);
-  await expect(page.getByTestId('context-meter')).toBeVisible({ timeout: 15_000 });
+  // Abaixo de 50% o medidor de contexto não aparece (um turno curto fica longe disso).
+  await expect(page.getByTestId('context-meter')).toHaveCount(0);
   // Sem foco, o turno acabado (e o pedido de permissão) dão aviso do Windows.
   const notices = await app.evaluate(
     () => (globalThis as { notices?: { body: string; title: string }[] }).notices ?? [],
@@ -397,13 +398,15 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
     timeout: 120_000,
   });
   await shot(page, 'quality-chip');
-  // As verificações do projeto correm ao mesmo tempo: os tipos passam, o lint falha.
-  const pill = (id: string) => page.locator(`[data-testid="check-pill"][data-check="${id}"]`);
-  await expect(pill('typecheck')).toHaveAttribute('data-state-check', 'passed', {
-    timeout: 60_000,
-  });
-  await expect(pill('lint')).toHaveAttribute('data-state-check', 'failed', { timeout: 60_000 });
-  await pill('lint').click();
+  // As verificações correm ao mesmo tempo: uma só pastilha mostra o lint que falhou; aberta,
+  // os tipos passaram e o lint traz o fim do erro.
+  const chip = page.getByTestId('checks-chip');
+  await expect(chip).toHaveAttribute('data-state-check', 'failed', { timeout: 60_000 });
+  await expect(chip).toContainText('Lint');
+  await chip.click();
+  const row = (id: string) => page.locator(`[data-testid="check-row"][data-check="${id}"]`);
+  await expect(row('typecheck')).toHaveAttribute('data-state-check', 'passed');
+  await expect(row('lint')).toHaveAttribute('data-state-check', 'failed');
   await expect(page.getByTestId('check-tail')).toContainText('lint partiu');
   await shot(page, 'checks-failed');
   await page.keyboard.press('Escape');
@@ -413,6 +416,8 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   );
   await shot(page, 'conversation-light');
 
+  // Ler e Editar seguidos juntam-se em "2 ações": abre-se o grupo e depois a ferramenta.
+  await page.getByTestId('tool-group').first().click();
   await edit.click();
   await expect(page.getByTestId('tool-detail')).toBeVisible();
   await expect(page.getByTestId('tool-output')).toContainText(/updated|beta/i);
@@ -525,7 +530,7 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
 
   // O branch ganhou o nome da mensagem; o ficheiro está só na worktree até se trazer.
   await expect(chip).toHaveAttribute('data-branch', /^solline\/create-a-file-named-/);
-  await expect(chip).toContainText('+1', { timeout: 30_000 });
+  await expect(page.getByTestId('review-pending')).toContainText('+1', { timeout: 30_000 });
   expect(existsSync(join(project, 'wt.txt'))).toBe(false);
   await shot(page, 'worktree-chip');
   await chip.click();

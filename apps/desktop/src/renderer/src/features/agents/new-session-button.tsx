@@ -3,6 +3,7 @@ import { AgentBot } from './bots.tsx';
 import { Check, ChevronDown, LogIn, Plus, SlidersHorizontal } from 'lucide-react';
 import type { AgentDescriptor, Project } from '@solline/protocol';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
+import { IconSwap } from '@solline/ui/icon-swap';
 import { actions, useApp } from '../../stores/app.ts';
 import { Spinner } from '../conversation/blocks.tsx';
 
@@ -158,7 +159,9 @@ export function NewSessionButton({
           data-testid="new-session"
           className="grid size-6 shrink-0 place-items-center rounded-sm text-subtle sl-press hover:bg-surface-hover hover:text-fg disabled:opacity-100"
         >
-          {creating ? <Spinner label="A abrir sessão" /> : <Plus size={14} strokeWidth={2} />}
+          <IconSwap swapKey={creating ? 'creating' : 'idle'}>
+            {creating ? <Spinner label="A abrir sessão" /> : <Plus size={14} strokeWidth={2} />}
+          </IconSwap>
         </button>
         {choose ? (
           <AgentMenu

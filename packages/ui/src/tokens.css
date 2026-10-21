@@ -21,7 +21,8 @@
   /* Texto */
   --sl-text: oklch(0.22 0.01 70);
   --sl-text-muted: oklch(0.47 0.012 70);
-  --sl-text-subtle: oklch(0.6 0.01 70);
+  /* AA em 11,5 px sobre a tela (4,5:1). */
+  --sl-text-subtle: oklch(0.52 0.01 70);
 
   /* Acento: o âmbar do Solline Pin, usado com parcimónia */
   --sl-accent: oklch(0.68 0.145 78);
@@ -36,6 +37,10 @@
   /* Sombra e forma */
   --sl-shadow-raised: 0 1px 2px oklch(0.2 0.01 70 / 0.06), 0 4px 16px oklch(0.2 0.01 70 / 0.06);
   --sl-radius-sm: 6px;
+  /* Controlos: pastilhas de barra (28 px) e botões de ação (32 px) partilham este raio. */
+  --sl-radius-control: 8px;
+  --sl-control-h-sm: 28px;
+  --sl-control-h: 32px;
   --sl-radius-md: 10px;
   --sl-radius-lg: 16px;
 
@@ -60,7 +65,7 @@
 
   --sl-text: oklch(0.94 0.006 85);
   --sl-text-muted: oklch(0.72 0.008 80);
-  --sl-text-subtle: oklch(0.58 0.008 80);
+  --sl-text-subtle: oklch(0.64 0.008 80);
 
   --sl-accent: oklch(0.79 0.145 82);
   --sl-accent-soft: oklch(0.3 0.05 65);
@@ -88,7 +93,7 @@
 
     --sl-text: oklch(0.94 0.006 85);
     --sl-text-muted: oklch(0.72 0.008 80);
-    --sl-text-subtle: oklch(0.58 0.008 80);
+    --sl-text-subtle: oklch(0.64 0.008 80);
 
     --sl-accent: oklch(0.79 0.145 82);
     --sl-accent-soft: oklch(0.3 0.05 65);

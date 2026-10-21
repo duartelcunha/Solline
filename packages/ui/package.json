@@ -12,6 +12,7 @@
     "./motion.css": "./src/motion.css",
     "./motion": "./src/motion.ts",
     "./react": "./src/react.ts",
+    "./icon-swap": "./src/icon-swap.tsx",
     "./bot": "./src/bot/index.ts"
   },
   "scripts": {

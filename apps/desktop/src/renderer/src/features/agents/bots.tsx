@@ -57,7 +57,7 @@ export function SessionBot({
  * sessão aberta; aqui basta a cor do agente e o estado (âmbar precisa de ti, vermelho caiu,
  * a pulsar enquanto trabalha, apagado a dormir).
  */
-export function SessionMark({ sessionId }: { sessionId: string }) {
+export function SessionMark({ sessionId, size = 12 }: { sessionId: string; size?: number }) {
   const agent = useSession(sessionId, (s) => s.info.agent);
   const transport = useApp((s) => s.agents.find((a) => a.id === agent)?.transport);
   const mood = useSessionMood(sessionId);
@@ -70,8 +70,8 @@ export function SessionMark({ sessionId }: { sessionId: string }) {
   return (
     <svg
       aria-hidden
-      width="12"
-      height="8"
+      width={size}
+      height={(size * 8) / 12}
       viewBox="0 0 12 8"
       data-testid="session-mark"
       data-mood={mood}
