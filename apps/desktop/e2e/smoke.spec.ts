@@ -88,7 +88,7 @@ test('a interface não tem acesso ao Node', async () => {
   expect(surface).toEqual({
     require: 'undefined',
     process: 'undefined',
-    api: ['onEvent', 'request', 'window'],
+    api: ['onEvent', 'onFocusSession', 'request', 'window'],
   });
 });
 
@@ -357,6 +357,17 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await expect(page.getByTestId('assistant-text').last()).toBeVisible();
   await expect(page.getByTestId('session-cost')).toContainText(/US\$|\$/);
   await expect(page.getByTestId('context-meter')).toBeVisible({ timeout: 15_000 });
+  // Sem foco, o turno acabado (e o pedido de permissão) dão aviso do Windows.
+  const notices = await app.evaluate(
+    () => (globalThis as { notices?: { body: string; title: string }[] }).notices ?? [],
+  );
+  const focused = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows().some((w) => w.isFocused()),
+  );
+  if (!focused) {
+    expect(notices.map((n) => n.body)).toContain('Turno acabado');
+    expect(notices[0]?.title).toMatch(/^Claude · /);
+  }
   // A segunda opinião lê o turno que mudou o notes.txt e acaba limpa ou com achados.
   await expect(page.getByTestId('quality-chip')).toHaveAttribute('data-quality', /clean|found/, {
     timeout: 120_000,

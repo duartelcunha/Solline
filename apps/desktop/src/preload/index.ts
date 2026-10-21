@@ -21,6 +21,15 @@ const api: SollineApi = {
   window: {
     setTheme: (theme) => ipcRenderer.invoke(IPC.setTheme, theme),
   },
+  onFocusSession: (listener) => {
+    const handler = (_event: IpcRendererEvent, sessionId: unknown) => {
+      if (typeof sessionId === 'string') listener(sessionId);
+    };
+    ipcRenderer.on(IPC.focusSession, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC.focusSession, handler);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld('solline', api);

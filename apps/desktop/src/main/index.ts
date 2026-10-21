@@ -2,6 +2,7 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   BrowserWindow,
+  Notification,
   app,
   dialog,
   ipcMain,
@@ -22,6 +23,7 @@ import {
   type MainCommandName,
 } from '@solline/protocol';
 import { addedKeys, allowedLoginUrl } from './agent-policy.ts';
+import { AttentionTracker, type Attention } from './attention.ts';
 import { EngineHost } from './engine-host.ts';
 import { ProjectStore } from './projects.ts';
 import { resolveSessionStart } from './session-policy.ts';
@@ -32,9 +34,45 @@ if (process.platform === 'win32') app.setAppUserModelId(`app.${APP_NAME.toLowerC
 if (process.env.SOLLINE_USER_DATA) app.setPath('userData', process.env.SOLLINE_USER_DATA);
 
 let mainWindow: BrowserWindow | undefined;
+const attention = new AttentionTracker();
 const engine = new EngineHost((event) => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.event, event);
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  win?.webContents.send(IPC.event, event);
+  const notice = attention.observe(event, win?.isFocused() ?? false);
+  if (notice) notify(notice);
 });
+
+/** Na app instalada o ícone vem do executável; fora dela, da pasta build. */
+const devIcon = app.isPackaged ? undefined : join(__dirname, '../../build/icon.png');
+
+/**
+ * Aviso do Windows para uma sessão que precisa de ti ou acabou um turno (só chega aqui com a
+ * janela sem foco). Clicar abre essa sessão; "precisa de ti" também faz piscar a barra.
+ */
+function notify(notice: Attention): void {
+  // Nos testes (isolados) os avisos ficam numa lista em vez de aparecerem no ecrã.
+  if (process.env.SOLLINE_ISOLATED === '1') {
+    ((globalThis as { notices?: Attention[] }).notices ??= []).push(notice);
+    return;
+  }
+  const win = mainWindow;
+  if (notice.urgent) win?.flashFrame(true);
+  if (!Notification.isSupported()) return;
+  const toast = new Notification({
+    title: notice.title,
+    body: notice.body,
+    silent: true,
+    ...(devIcon ? { icon: devIcon } : {}),
+  });
+  toast.on('click', () => {
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send(IPC.focusSession, notice.sessionId);
+  });
+  toast.show();
+}
 const projects = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
 
 const TRUST_DETAIL =
@@ -136,7 +174,10 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
     case 'session.create': {
       // A interface pede pelo projeto; a pasta vem sempre do que está guardado aqui.
       const start = await resolveSessionStart(projects, SessionCreatePayload.parse(payload));
-      return engine.request('session.start', start);
+      const created = await engine.request('session.start', start);
+      const project = await projects.get(start.projectId);
+      attention.track(created.session, project?.name ?? basename(start.cwd));
+      return created;
     }
   }
 }
@@ -194,8 +235,7 @@ function createWindow(): void {
   const theme: Theme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   const win = new BrowserWindow({
     title: APP_NAME,
-    // Na app instalada o ícone vem do executável; fora dela, da pasta build.
-    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../build/icon.png') }),
+    ...(devIcon ? { icon: devIcon } : {}),
     width: 1200,
     height: 780,
     minWidth: 760,
@@ -221,6 +261,8 @@ function createWindow(): void {
   win.webContents.on('will-navigate', (event) => event.preventDefault());
 
   mainWindow = win;
+  // Voltaste à janela: a barra deixa de piscar.
+  win.on('focus', () => win.flashFrame(false));
   if (devUrl) void win.loadURL(devUrl);
   else void win.loadFile(rendererFile);
 }

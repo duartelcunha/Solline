@@ -196,9 +196,16 @@ export function App() {
 
   useEffect(() => {
     const off = window.solline.onEvent(dispatch);
+    // Clicar num aviso do Windows abre a sessão de que ele fala.
+    const offFocus = window.solline.onFocusSession((id) => {
+      if (sessionStore(id)) actions.selectSession(id);
+    });
     void actions.loadProjects();
     void actions.loadAgents();
-    return off;
+    return () => {
+      off();
+      offFocus();
+    };
   }, []);
 
   const sessionsByProject = useMemo(() => {

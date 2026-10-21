@@ -12,6 +12,8 @@ export interface SollineApi {
   window: {
     setTheme(theme: Theme): Promise<void>;
   };
+  /** Clicaste num aviso do Windows: a interface abre essa sessão. */
+  onFocusSession(listener: (sessionId: string) => void): () => void;
 }
 
 /** Canais IPC entre preload e main. */
@@ -19,4 +21,5 @@ export const IPC = {
   request: 'solline:request',
   event: 'solline:event',
   setTheme: 'solline:set-theme',
+  focusSession: 'solline:focus-session',
 } as const;
