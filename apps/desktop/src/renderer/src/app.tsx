@@ -107,14 +107,7 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex min-w-48 items-center gap-2">
       {/* O mesmo nome de transição do capuz dos cartões da mesa: abrir uma sessão transforma um no outro. */}
-      <span
-        style={
-          {
-            viewTransitionName: 'session-bot',
-            viewTransitionClass: 'sl-morph',
-          } as React.CSSProperties
-        }
-      >
+      <span className="session-bot-target">
         <SessionBot sessionId={sessionId} size={30} alive />
       </span>
       <h1
@@ -333,8 +326,14 @@ export function App() {
 
       <main className="flex min-w-0 flex-col">
         <header className="drag flex h-11 shrink-0 items-center gap-3 pr-[9.5rem] pl-5">
-          {activeSessionId ? <SessionHeaderTitle sessionId={activeSessionId} /> : <DeskTitle />}
-          {activeSessionId ? <SessionStatus sessionId={activeSessionId} /> : null}
+          {activeSessionId ? (
+            <SessionHeaderTitle key={activeSessionId} sessionId={activeSessionId} />
+          ) : (
+            <DeskTitle />
+          )}
+          {activeSessionId ? (
+            <SessionStatus key={activeSessionId} sessionId={activeSessionId} />
+          ) : null}
         </header>
 
         <NoticeBar notice={notice} />

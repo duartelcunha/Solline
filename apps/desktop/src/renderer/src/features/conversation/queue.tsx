@@ -88,8 +88,17 @@ export function QueueList({ sessionId }: { sessionId: string }) {
               >
                 <button
                   type="button"
-                  aria-label="Arrastar para mudar a ordem"
+                  aria-label="Mudar a ordem (arrastar ou setas)"
                   className="mt-0.5 cursor-grab touch-none text-subtle opacity-0 group-hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing"
+                  onKeyDown={(e) => {
+                    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+                    e.preventDefault();
+                    const to = e.key === 'ArrowUp' ? index - 1 : index + 1;
+                    if (to < 0 || to >= items.length) return;
+                    const ids = items.map((i) => i.id).filter((id) => id !== item.id);
+                    ids.splice(to, 0, item.id);
+                    void actions.reorderQueue(sessionId, ids);
+                  }}
                   onPointerDown={(e) => {
                     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                     setDrag({ id: item.id, dy: 0, start: e.clientY });

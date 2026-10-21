@@ -195,9 +195,7 @@ export class WorktreeManager {
    * branch atual do projeto. Com conflitos, desfaz o merge no projeto e devolve a lista.
    */
   async bring(wt: Worktree, message: string): Promise<{ result: BringResult; wt: Worktree }> {
-    await this.#run(wt.path, ['add', '-A']);
-    const staged = await this.#run(wt.path, ['diff', '--cached', '--quiet'], true);
-    if (staged.code !== 0) await this.#commit(wt.path, message);
+    await this.commitAll(wt, message);
     const into = (await this.#run(wt.top, ['rev-parse', '--abbrev-ref', 'HEAD'])).out.trim();
     const merge = await this.#run(
       wt.top,
@@ -219,6 +217,20 @@ export class WorktreeManager {
   }
 
   /** Tira a worktree; com deleteBranch, também o branch. */
+  /** Destes nomes (relativos a `dir`), os que o .gitignore do projeto ignora. */
+  async ignored(dir: string, names: readonly string[]): Promise<Set<string>> {
+    if (names.length === 0) return new Set();
+    const { out } = await this.#run(dir, ['check-ignore', '--', ...names], true);
+    return new Set(out.split('\n').filter(Boolean));
+  }
+
+  /** Grava num commit tudo o que a worktree tem por gravar (nada, se estiver limpa). */
+  async commitAll(wt: Worktree, message: string): Promise<void> {
+    await this.#run(wt.path, ['add', '-A']);
+    const staged = await this.#run(wt.path, ['diff', '--cached', '--quiet'], true);
+    if (staged.code !== 0) await this.#commit(wt.path, message);
+  }
+
   /** Destes nomes (relativos a `dir`), os que o git do projeto versiona. */
   async tracked(dir: string, names: readonly string[]): Promise<Set<string>> {
     if (names.length === 0) return new Set();

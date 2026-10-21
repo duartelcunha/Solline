@@ -87,6 +87,41 @@ describe('o dono do turno', () => {
     expect(await turns.submit('agora', 'now')).toMatchObject({ how: 'queued' });
   });
 
+  it('o que chega durante uma ação exclusiva segue quando ela acaba', async () => {
+    const { turns, started } = setup();
+    let release: () => void = () => undefined;
+    const action = turns.exclusive('trazer', () => new Promise<void>((r) => (release = r)));
+    expect(await turns.submit('depois de trazer')).toMatchObject({ how: 'queued' });
+    release();
+    await action;
+    await tick();
+    expect(started).toEqual(['depois de trazer']);
+  });
+
+  it('um envio que falha não deixa a fila presa', async () => {
+    let fail = true;
+    const started: string[] = [];
+    const turns = new SessionTurns({
+      start: async (t) => {
+        if (fail) {
+          fail = false;
+          throw new Error('caiu');
+        }
+        started.push(t);
+        return 'turn';
+      },
+      running: () => false,
+      emit: () => undefined,
+    });
+    turns.hold();
+    await turns.submit('um');
+    await turns.submit('dois');
+    turns.release();
+    await tick();
+    await tick();
+    expect(started).toEqual(['dois']);
+  });
+
   it('tirar, reordenar e o exclusivo que recusa a meio', async () => {
     const { turns, stop } = setup();
     await turns.submit('um');

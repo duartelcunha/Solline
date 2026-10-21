@@ -160,7 +160,8 @@ export function dispatch(event: EngineEvent): void {
   if (!store) return;
   const apply = () => store.setState(reduceSession(store.getState(), event));
   // Na sessão à vista, as mudanças de forma (um pedido respondido, a vez a passar) transformam-se.
-  enqueue(apply, event.sessionId === useApp.getState().activeSessionId && morphs(event));
+  const { activeSessionId, view } = useApp.getState();
+  enqueue(apply, view === 'session' && event.sessionId === activeSessionId && morphs(event));
 }
 
 /** Todos os eventos de sessão passam pela mesma fila, para uma transformação não trocar a ordem. */
@@ -503,13 +504,25 @@ export const actions = {
     }
   },
 
-  async unqueue(sessionId: string, id: string): Promise<void> {
-    await request('session.unqueue', { sessionId, id }).catch((error: unknown) =>
-      setActionError(sessionId, error),
-    );
+  async unqueue(sessionId: string, id: string): Promise<boolean> {
+    try {
+      return (await request('session.unqueue', { sessionId, id })).removed;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
   },
 
   async reorderQueue(sessionId: string, ids: string[]): Promise<void> {
+    const store = sessionStores.get(sessionId);
+    const queue = store?.getState().queue;
+    if (store && queue) {
+      const byId = new Map(queue.items.map((i) => [i.id, i]));
+      const items = ids.flatMap((id) =>
+        byId.has(id) ? [byId.get(id) as (typeof queue.items)[number]] : [],
+      );
+      store.setState({ queue: { ...queue, items } });
+    }
     await request('session.reorder', { sessionId, ids }).catch((error: unknown) =>
       setActionError(sessionId, error),
     );
@@ -526,8 +539,8 @@ export const actions = {
     const store = sessionStores.get(sessionId);
     const item = store?.getState().queue?.items.find((i) => i.id === id);
     if (!store || !item) return;
-    await actions.unqueue(sessionId, id);
-    store.setState({ draft: item.text });
+    // Só volta à caixa se ainda estava na fila (se já seguiu, não se duplica).
+    if (await actions.unqueue(sessionId, id)) store.setState({ draft: item.text });
   },
 
   async interrupt(sessionId: string): Promise<void> {

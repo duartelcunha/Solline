@@ -431,6 +431,9 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       }
     } else if (message.type === 'result') {
       this.#inFlight.clear();
+      // Turno acabado (ou interrompido) antes de a ler: o SDK lê-a a seguir e a primeira
+      // resposta que vier marca-a como lida.
+      for (const steer of this.#steers.values()) steer.armed = true;
     }
   }
 

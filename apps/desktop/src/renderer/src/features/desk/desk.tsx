@@ -9,7 +9,7 @@ import {
 import { GitBranch, GitMerge, Trash2 } from 'lucide-react';
 import type { Orphan } from '@solline/protocol';
 import { useReducedMotion } from '@solline/ui/react';
-import { shouldAnimate } from '@solline/ui/motion';
+import { prefersReducedMotion, shouldAnimate } from '@solline/ui/motion';
 import { scrollIntoViewSmooth, useDragScroll } from '@solline/ui/scroll';
 import { flushSync } from 'react-dom';
 import { actions, useApp, useSession } from '../../stores/app.ts';
@@ -106,16 +106,24 @@ function SessionCard({ sessionId }: { sessionId: string }) {
   // transição dos dois lados); pelo teclado ou com movimento reduzido, abre logo.
   const open = (animate: boolean) => {
     const el = mark.current;
-    if (!animate || !el || typeof document.startViewTransition !== 'function') {
+    if (
+      !animate ||
+      !el ||
+      prefersReducedMotion() ||
+      typeof document.startViewTransition !== 'function'
+    ) {
       actions.selectSession(sessionId);
       return;
     }
     el.style.setProperty('view-transition-name', 'session-bot');
     el.style.setProperty('view-transition-class', 'sl-morph');
-    document.startViewTransition(() => {
+    const root = document.documentElement;
+    root.dataset.opening = '';
+    const transition = document.startViewTransition(() => {
       el.style.removeProperty('view-transition-name');
       flushSync(() => actions.selectSession(sessionId));
     });
+    void transition.finished.finally(() => delete root.dataset.opening);
   };
   // Na mesa só se veem as verificações que falharam: o que passa não pede atenção.
   const failing = checks?.trusted

@@ -135,7 +135,8 @@ export const commandSchemas = {
   /** Tira uma mensagem da fila. */
   'session.unqueue': {
     payload: SessionRef.extend({ id: z.string().min(1).max(64) }).strict(),
-    result: Empty,
+    /** removed: false se a mensagem já tinha seguido. */
+    result: z.object({ removed: z.boolean() }),
   },
   /** Muda a ordem da fila (todos os ids, pela ordem nova). */
   'session.reorder': {

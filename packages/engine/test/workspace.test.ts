@@ -74,6 +74,17 @@ describe('preparar a worktree', () => {
     expect(await readFile(path.join(to, '.env.local'), 'utf8')).toBe('JA=LA');
   });
 
+  it('tirar da fila diz se tirou', async () => {
+    const turns = new SessionTurns({
+      start: async () => 'turn',
+      running: () => true,
+      emit: () => undefined,
+    });
+    const { turnId } = await turns.submit('um');
+    expect(turns.unqueue(turnId)).toBe(true);
+    expect(turns.unqueue(turnId)).toBe(false);
+  });
+
   it('enquanto prepara, o que escreves espera; ao acabar, segue', async () => {
     let running = false;
     const started: string[] = [];

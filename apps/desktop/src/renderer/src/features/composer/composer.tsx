@@ -4,7 +4,6 @@ import type { Checks, TokenUsage } from '@solline/protocol';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { actions, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
-import { morphName } from '../../lib/morph.ts';
 import { SettingsPills } from './pills.tsx';
 
 export const money = new Intl.NumberFormat('pt-PT', {
@@ -94,7 +93,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   const [seenDraft, setSeenDraft] = useState<string | null>(null);
   if (draft !== seenDraft) {
     setSeenDraft(draft);
-    if (draft !== null) setText(draft);
+    if (draft !== null) setText((current) => (current.trim() ? `${current}\n${draft}` : draft));
   }
   useEffect(() => {
     if (draft === null) return;
@@ -246,14 +245,18 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
                 data-testid={
                   role === 'stop' ? 'interrupt' : role === 'queue' ? 'queue-send' : 'send'
                 }
-                style={morphName('composer-action')}
                 className="grid size-8 place-items-center rounded-full bg-fg text-bg sl-press disabled:bg-surface-sunken disabled:text-subtle"
               >
-                <IconSwap swapKey={role}>
-                  {role === 'stop' ? (
-                    <Square size={11} fill="currentColor" strokeWidth={0} />
-                  ) : role === 'queue' ? (
-                    <ListPlus size={16} strokeWidth={2} />
+                {/* Anima só quando o agente começa ou acaba; escrever troca parar/fila sem animar. */}
+                <IconSwap swapKey={busy ? 'busy' : 'idle'}>
+                  {busy ? (
+                    <IconSwap swapKey={role} instant>
+                      {role === 'stop' ? (
+                        <Square size={11} fill="currentColor" strokeWidth={0} />
+                      ) : (
+                        <ListPlus size={16} strokeWidth={2} />
+                      )}
+                    </IconSwap>
                   ) : (
                     <ArrowUp size={16} strokeWidth={2.25} />
                   )}

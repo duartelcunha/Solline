@@ -75,7 +75,7 @@ export function SessionMark({ sessionId, size = 12 }: { sessionId: string; size?
       viewBox="0 0 12 8"
       data-testid="session-mark"
       data-mood={mood}
-      className={`shrink-0 transition-opacity duration-300 ${mood === 'working' ? 'dot-pulse' : ''} ${mood === 'sleeping' ? 'opacity-40' : ''}`}
+      className={`shrink-0 transition-opacity duration-300 ${mood === 'working' ? 'mark-pulse' : ''} ${mood === 'sleeping' ? 'opacity-40' : ''}`}
     >
       <path d="M0 7.5a6 6 0 0 1 12 0z" fill={fill} style={{ transition: 'fill 200ms ease' }} />
     </svg>

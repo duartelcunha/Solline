@@ -284,6 +284,10 @@ body {
 .dot-pulse {
   animation: sl-pulse 1.6s ease-in-out infinite;
 }
+/* A marca de uma sessão a trabalhar respira devagar: diz que está viva sem chamar a atenção. */
+.mark-pulse {
+  animation: sl-pulse 2.4s ease-in-out infinite;
+}
 
 .meter-arc {
   transition: stroke-dasharray var(--sl-duration-base) var(--sl-ease-out);
@@ -421,6 +425,12 @@ body {
 *::-webkit-scrollbar {
   display: none;
 }
+/* Abrir uma sessão pela mesa: só durante essa transição o bot do cabeçalho recebe o capuz. */
+:root[data-opening] .session-bot-target {
+  view-transition-name: session-bot;
+  view-transition-class: sl-morph;
+}
+
 /* A mão só aparece enquanto arrastas (useDragScroll), nunca em repouso. */
 [data-dragging] {
   cursor: grabbing;

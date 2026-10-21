@@ -1,7 +1,7 @@
 import { createContext, useContext, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { EngineEvent } from '@solline/protocol';
-import { shouldAnimate } from '@solline/ui/motion';
+import { prefersReducedMotion } from '@solline/ui/motion';
 
 /**
  * Uma mudança de estado que se transforma em vez de saltar: o browser fotografa o antes,
@@ -26,7 +26,14 @@ export function createMorphQueue(): (update: () => void, transform: boolean) => 
         .finally(settle);
       return;
     }
-    if (!transform || typeof document.startViewTransition !== 'function' || !shouldAnimate()) {
+    // O teclado só trava o que ele próprio provoca: o que chega do motor transforma-se sempre,
+    // menos com movimento reduzido ou a janela escondida.
+    if (
+      !transform ||
+      typeof document.startViewTransition !== 'function' ||
+      prefersReducedMotion() ||
+      document.hidden
+    ) {
       update();
       return;
     }

@@ -136,6 +136,27 @@ async function confirmChecks(name: string, commands: readonly string[]): Promise
   return response === 0;
 }
 
+/** Diálogo nativo: preparar cada worktree nova corre este comando, uma vez, logo a seguir aos .env. */
+async function confirmSetup(name: string, command: string, copyEnv: boolean): Promise<boolean> {
+  const options = {
+    type: 'question' as const,
+    title: 'Preparação das worktrees',
+    message: `Preparar cada worktree nova de ${name} com este comando?`,
+    detail:
+      `${command}\n\nCorre uma vez em cada worktree nova` +
+      (copyEnv ? ', depois de copiar os .env ignorados da raiz do projeto' : '') +
+      ', sem os segredos do teu ambiente.',
+    buttons: ['Preparar', 'Cancelar'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options);
+  return response === 0;
+}
+
 async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
   switch (command) {
     case 'agents.login': {
@@ -214,8 +235,9 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
         (await engine.request('projects.detectSetup', { cwd: project.path })).setup;
       const before = project.setup ?? (await suggested());
       const after = setup ?? (await suggested());
-      const added = after.command.trim() && after.command !== before.command ? [after.command] : [];
-      if (added.length > 0 && !(await confirmChecks(project.name, added))) return { project };
+      const isNew = Boolean(after.command.trim()) && after.command !== before.command;
+      if (isNew && !(await confirmSetup(project.name, after.command, after.copyEnv)))
+        return { project };
       const updated = await projects.setSetup(projectId, setup);
       await engine.request('projects.setupChanged', { projectId, setup });
       return { project: updated };

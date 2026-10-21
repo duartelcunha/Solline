@@ -12,6 +12,8 @@ type Axis = 'x' | 'y';
 interface Motion {
   spring: Spring;
   moving: boolean;
+  /** A mola continua um gesto teu (inércia de um arremesso): não é a app a seguir. */
+  user: boolean;
 }
 
 const motions = new WeakMap<HTMLElement, Partial<Record<Axis, Motion>>>();
@@ -48,12 +50,17 @@ function watch(el: HTMLElement): void {
   const stop = () => stopAll(el);
   el.addEventListener('wheel', stop, { passive: true });
   el.addEventListener('touchstart', stop, { passive: true });
+  // Selecionar texto (ou qualquer clique) também para a mola: nada te puxa enquanto mexes.
+  el.addEventListener('pointerdown', stop, { passive: true });
+  el.addEventListener('keydown', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) stop();
+  });
 }
 
 /** A mola desta área está a deslocar (o scroll que provoca não é do Duarte). */
 export function isAutoScrolling(el: HTMLElement): boolean {
   const m = motions.get(el);
-  return Boolean(m?.x?.moving || m?.y?.moving);
+  return Boolean((m?.x?.moving && !m.x.user) || (m?.y?.moving && !m.y.user));
 }
 
 /** Desloca até `to` com uma mola; muda de alvo a meio sem perder a velocidade. */
@@ -75,6 +82,7 @@ export function scrollToSmooth(
   if (!motion || !motion.moving) {
     const fresh: Motion = {
       moving: true,
+      user: false,
       spring: new Spring({
         value: position(el, axis),
         onUpdate: (v) => set(el, axis, v),
@@ -87,6 +95,7 @@ export function scrollToSmooth(
     m[axis] = motion;
   }
   motion.moving = true;
+  motion.user = options.release === true;
   motion.spring.to(target, {
     velocity: options.velocity ?? 0,
     params: options.release ? SPRING.release : SPRING.settle,
@@ -191,6 +200,7 @@ export function useDragScroll(
       }
       if (allowY) axisMove('y', start.top - dy);
       if (allowX) axisMove('x', start.left - dx);
+      if (prefersReducedMotion()) stretch = { x: 0, y: 0 };
       for (const c of content()) {
         c.style.transition = 'none';
         c.style.transform =
@@ -211,11 +221,16 @@ export function useDragScroll(
       // O clique que acaba o arrasto não abre nem escolhe nada.
       el.addEventListener('click', (c) => c.stopPropagation(), { capture: true, once: true });
       if (stretch.x || stretch.y) {
-        // Volta da ponta elástica como uma mola curta (só transform).
-        for (const c of content()) {
-          c.style.transition = 'transform 320ms cubic-bezier(0.23, 1, 0.32, 1)';
+        // Volta da ponta elástica como uma mola curta (só transform); depois limpa tudo, para
+        // não estragar as transições próprias dos blocos.
+        const children = content();
+        for (const c of children) {
+          c.style.transition = 'transform 240ms cubic-bezier(0.23, 1, 0.32, 1)';
           c.style.transform = '';
         }
+        setTimeout(() => {
+          for (const c of children) c.style.transition = '';
+        }, 260);
         stretch = { x: 0, y: 0 };
         return;
       }

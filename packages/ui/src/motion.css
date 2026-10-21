@@ -225,7 +225,11 @@
 }
 /* Janela escondida ou sem foco: o que se repete fica parado. */
 :root[data-ambient='paused'] .bot-dot,
-:root[data-ambient='paused'] .bot-scan {
+:root[data-ambient='paused'] .bot-scan,
+:root[data-ambient='paused'] .dot-pulse,
+:root[data-ambient='paused'] .mark-pulse,
+:root[data-ambient='paused'] .spinner,
+:root[data-ambient='paused'] .icon-spin {
   animation-play-state: paused;
 }
 @media (prefers-reduced-motion: reduce) {

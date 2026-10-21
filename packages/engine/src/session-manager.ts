@@ -104,6 +104,8 @@ interface Memory {
   named: boolean;
   /** Um "Trazer" a meio: fechar espera por ele. */
   bringing: Promise<unknown> | undefined;
+  /** A fechar: "Trazer" recusa. */
+  closing: boolean;
   /** A preparação da worktree a correr (fechar cancela-a). */
   preparing: AbortController | undefined;
 }
@@ -238,6 +240,7 @@ export class SessionManager {
       named: false,
       bringing: undefined,
       preparing: undefined,
+      closing: false,
     };
     this.#memory.set(info.id, memory);
     let result: SessionResult;
@@ -435,9 +438,9 @@ export class SessionManager {
     return this.#memoryOf(sessionId).cycle.queue;
   }
 
-  unqueue(sessionId: string, id: string): void {
+  unqueue(sessionId: string, id: string): boolean {
     this.#get(sessionId);
-    this.#memoryOf(sessionId).cycle.unqueue(id);
+    return this.#memoryOf(sessionId).cycle.unqueue(id);
   }
 
   reorder(sessionId: string, ids: readonly string[]): void {
@@ -767,6 +770,7 @@ export class SessionManager {
     this.#requireIdle(entry, memory, 'trazer o trabalho');
     if (!memory.worktree || !this.#worktrees)
       throw new Error('Esta sessão trabalha na pasta do projeto');
+    if (memory.closing) throw new Error('A sessão está a fechar');
     this.#requireProjectIdle(memory.worktree.top);
     const done = memory.cycle
       .exclusive('trazer o trabalho', () => this.#bring(sessionId, memory))
@@ -810,7 +814,26 @@ export class SessionManager {
     const memory = this.#memoryOf(sessionId);
     const queued = memory.cycle.queue.items.length;
     if (queued > 0 && !dropQueue) return { closed: false, queued };
-    memory.cycle.clear();
+    // A fechar: um "Trazer" que comece agora recusa (não se apaga a worktree a meio dele).
+    memory.closing = true;
+    try {
+      return await this.#close(sessionId, entry, memory, choice);
+    } finally {
+      memory.closing = false;
+    }
+  }
+
+  async #close(
+    sessionId: string,
+    entry: Entry,
+    memory: Memory,
+    choice: 'bring' | 'keep' | 'discard' | undefined,
+  ): Promise<{
+    closed: boolean;
+    stats?: WorktreeStats;
+    conflicts?: string[];
+    into?: string;
+  }> {
     await memory.bringing?.catch(() => undefined);
     const worktree = memory.worktree;
     if (worktree && this.#worktrees) {
@@ -821,12 +844,23 @@ export class SessionManager {
       if (stats.files > 0) {
         if (!choice) return { closed: false, stats };
         if (choice === 'bring') {
+          memory.closing = false;
           const result = await this.bring(sessionId);
+          memory.closing = true;
           if (!result.merged)
             return { closed: false, conflicts: result.conflicts, into: result.into };
         }
+        if (choice === 'keep') {
+          // Guardar o branch é guardar o trabalho: o que não está em commit grava-se antes.
+          const first = memory.turns.find((t) => t.role === 'user');
+          const title =
+            (first ? textOf(first).split('\n')[0] : undefined)?.slice(0, 72) || 'sessão';
+          await this.#worktrees.commitAll(worktree, `Solline: ${title}`);
+        }
       }
     }
+    // Só agora se sabe que fecha: a fila deita-se fora aqui, nunca antes.
+    memory.cycle.clear();
     this.#sessions.delete(sessionId);
     this.#memory.delete(sessionId);
     memory.preparing?.abort();
@@ -934,8 +968,10 @@ export class SessionManager {
       const spec = this.#setups.get(entry.info.projectId) ?? (await detectSetup(projectPath));
       if (spec.copyEnv && this.#worktrees) {
         const names = await envFilesIn(projectPath);
-        const tracked = await this.#worktrees.tracked(projectPath, names);
-        await copyEnvFiles(projectPath, worktreeCwd, tracked);
+        // Só os que o git ignora: um .env não ignorado entraria no commit do "Trazer".
+        const ignored = await this.#worktrees.ignored(projectPath, names);
+        const skip = new Set(names.filter((n) => !ignored.has(n)));
+        await copyEnvFiles(projectPath, worktreeCwd, skip);
       }
       if (abort.signal.aborted) return;
       let outcome: { state: 'passed' | 'failed' | 'timeout'; tail: string | null } = {

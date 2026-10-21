@@ -90,6 +90,8 @@ export class SessionTurns {
       return await fn();
     } finally {
       this.#busy = false;
+      // O que chegou entretanto foi para a fila: segue agora, se o agente estiver parado.
+      this.#drainIfIdle();
     }
   }
 
@@ -131,11 +133,14 @@ export class SessionTurns {
     this.#drainIfIdle();
   }
 
-  unqueue(id: string): void {
+  /** Tira uma mensagem da fila; false se já tinha seguido. */
+  unqueue(id: string): boolean {
     const before = this.#items.length;
     this.#items = this.#items.filter((i) => i.id !== id);
     if (this.#items.length === 0) this.#paused = false;
-    if (this.#items.length !== before) this.#changed();
+    if (this.#items.length === before) return false;
+    this.#changed();
+    return true;
   }
 
   /** A ordem nova (ids que já não estão na fila ficam de fora; os esquecidos vão para o fim). */
@@ -162,9 +167,14 @@ export class SessionTurns {
   async #exclusiveStart(text: string): Promise<string> {
     this.#busy = true;
     try {
-      return await this.#start(text);
-    } finally {
+      const turnId = await this.#start(text);
       this.#busy = false;
+      return turnId;
+    } catch (error) {
+      this.#busy = false;
+      // O envio falhou: a fila não fica presa à espera de um turno que não começou.
+      this.#drainIfIdle();
+      throw error;
     }
   }
 

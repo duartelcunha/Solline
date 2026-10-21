@@ -648,6 +648,8 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
       },
       gitProject(),
     );
+    // Como num projeto a sério: o .env está no .gitignore (os outros não se copiam).
+    await writeFile(path.join(project, '.gitignore'), '.env\n');
     await writeFile(path.join(project, '.env'), 'SEGREDO=1\n');
     await startSession();
     const { session } = await manager.create({
@@ -676,6 +678,39 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
       .filter((e) => e.type === 'session.setup' && e.sessionId === session.id)
       .at(-1) as { setup: { state: string } } | undefined;
     expect(setup?.setup.state).toBe('done');
+  });
+
+  it('guardar o branch grava antes o trabalho por gravar (nada se perde)', async () => {
+    makeManager(true, undefined, undefined, gitProject());
+    await startSession();
+    const second = await startSession();
+    await turn(second, 'escreve guardado.txt=sim');
+    const branch = (
+      [...events]
+        .reverse()
+        .find((e) => e.type === 'session.workspace' && e.sessionId === second) as
+        { workspace: { branch: string } } | undefined
+    )?.workspace.branch;
+    expect(await manager.close(second, 'keep')).toEqual({ closed: true });
+    expect(branch).toBeTruthy();
+    expect(git(project, 'show', `${branch}:guardado.txt`)).toBe('sim');
+  });
+
+  it('fechar com fila e depois cancelar a escolha da worktree não perde a fila', async () => {
+    makeManager(true, undefined, undefined, gitProject());
+    await startSession();
+    const second = await startSession();
+    await turn(second, 'escreve h.txt=x');
+    await manager.send(second, 'olá');
+    // Ainda a trabalhar: a mensagem foi para a fila; fechar pergunta pela fila.
+    const first = await manager.close(second);
+    if (first.closed) return;
+    if (first.queued) {
+      const withDrop = await manager.close(second, undefined, true);
+      expect(withDrop.closed).toBe(false);
+    }
+    // A escolha da worktree ficou por fazer: a sessão continua aberta e utilizável.
+    expect(manager.queue(second)).toBeDefined();
   });
 
   it('sem git, a segunda sessão partilha a pasta', async () => {

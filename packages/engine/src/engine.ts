@@ -190,7 +190,7 @@ export class Engine {
       'projects.checksChanged': async (p) => (await s.setProjectChecks(p.projectId, p.checks), ok),
       'session.resume': (p) => s.resume(p.sessionId),
       'session.send': (p) => s.send(p.sessionId, p.text, p.how),
-      'session.unqueue': async (p) => (s.unqueue(p.sessionId, p.id), ok),
+      'session.unqueue': async (p) => ({ removed: s.unqueue(p.sessionId, p.id) }),
       'session.reorder': async (p) => (s.reorder(p.sessionId, p.ids), ok),
       'session.resumeQueue': async (p) => (s.resumeQueue(p.sessionId), ok),
       'session.bring': (p) => s.bring(p.sessionId),
