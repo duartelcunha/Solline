@@ -22,7 +22,8 @@ import type {
 } from '@solline/protocol';
 import { AsyncQueue } from '../../async-queue.ts';
 import { sanitizedEnv } from '../../env.ts';
-import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts';
+import type { BrokerOutcome } from '../../permission-broker.ts';
+import { SessionShell } from '../shared/session-shell.ts';
 import { ClaudeNormalizer } from './normalizer.ts';
 import { toolShape, toolSummary } from './tools.ts';
 import { withContext } from '../shared/turns.ts';
@@ -259,22 +260,6 @@ export function toPermissionResult(
   }
 }
 
-function statusFor(outcome: BrokerOutcome): AskBlock['status'] {
-  switch (outcome.decision) {
-    case 'allow-once':
-    case 'answer':
-      return 'allowed';
-    case 'allow-always':
-      return 'allowed-always';
-    case 'deny':
-      return 'denied';
-    case 'deny-always':
-      return 'denied-always';
-    case 'cancelled':
-      return 'cancelled';
-  }
-}
-
 interface ClaudePoint {
   session: string;
   /** null: a sessão inteira, como estava ao retomar. */
@@ -295,14 +280,11 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   readonly #options: ClaudeSdkOptions;
   readonly #sink: AdapterSink;
   readonly #normalizer: ClaudeNormalizer;
-  readonly #broker = new PermissionBroker();
-  readonly #asks = new Map<string, AskEntry>();
+  /** Os pedidos, as quedas e o estado da sessão. */
+  readonly #shell: SessionShell;
   #queue: AsyncQueue<SDKUserMessage> | undefined;
   #query: Query | undefined;
   #pump: Promise<void> | undefined;
-  #closing = false;
-  #running = false;
-  #crashed = false;
   #agentSessionId: string | null;
   #capabilities: AgentCapabilities | undefined;
   #settings: SessionSettings;
@@ -313,6 +295,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   constructor(options: ClaudeSdkOptions, sink: AdapterSink) {
     this.#options = options;
     this.#sink = sink;
+    this.#shell = new SessionShell(sink);
     this.#normalizer = new ClaudeNormalizer();
     this.#point = options.fork
       ? parsePoint(options.fork)
@@ -346,7 +329,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     const query = this.#options.queryFn ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
     const queue = new AsyncQueue<SDKUserMessage>();
     this.#queue = queue;
-    this.#sink.state('starting');
+    this.#shell.starting();
     const q = query({ prompt: queue, options: this.#sdkOptions() });
     this.#query = q;
     this.#pump = this.#runPump(q);
@@ -359,22 +342,21 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       this.#capabilities = capabilitiesFrom(init.models);
       if (!this.#settings.model) this.#settings.model = this.#capabilities.models[0]?.id ?? null;
     } catch (error) {
-      this.#closing = true;
+      this.#shell.close();
       queue.close();
       q.close();
       throw new Error(this.#withStderr(error), { cause: error });
     }
-    this.#sink.state('idle');
+    this.#shell.ready();
     return { settings: { ...this.#settings }, capabilities: this.#capabilities };
   }
 
   async send(text: string, options: SendOptions = {}): Promise<string> {
     const queue = this.#queue;
-    if (!queue || queue.closed || this.#crashed) throw new Error('A sessão não está ligada');
+    if (!queue || queue.closed || this.#shell.crashed) throw new Error('A sessão não está ligada');
     const turnId = options.turnId ?? crypto.randomUUID();
     this.#emit(this.#normalizer.userTurn(turnId, text));
-    this.#running = true;
-    this.#sink.state('running');
+    this.#shell.turnStarted();
     queue.push({
       type: 'user',
       message: { role: 'user', content: withContext(text, options.context) },
@@ -387,9 +369,9 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   async interrupt(): Promise<void> {
     const q = this.#query;
     // #444: interromper sem turno a correr (logo após o init) pode pendurar o canal.
-    if (!q || !this.#running) return;
+    if (!q || !this.#shell.running) return;
     this.#normalizer.markInterrupted();
-    this.#cancelAsks('interrupt');
+    this.#shell.interrupted();
     await this.#control(q.interrupt(), 'Interromper');
   }
 
@@ -413,30 +395,11 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   }
 
   answerPermission(requestId: string, answer: PermissionAnswer): boolean {
-    const entry = this.#asks.get(requestId);
-    if (!entry) return false;
-    const { block } = entry;
-    if (
-      answer.decision === 'allow-always' &&
-      !(block.kind === 'permission' && block.canAlwaysAllow)
-    ) {
-      throw new Error('Este pedido não aceita "Permitir sempre"');
-    }
-    if (answer.decision === 'answer' && block.kind !== 'question') {
-      throw new Error('Este pedido não é uma pergunta');
-    }
-    if (
-      answer.decision === 'deny-always' &&
-      !(block.kind === 'permission' && block.canAlwaysDeny === true)
-    ) {
-      throw new Error('Este pedido não aceita "Negar sempre"');
-    }
-    return this.#broker.answer(requestId, answer);
+    return this.#shell.answer(requestId, answer);
   }
 
   async close(): Promise<void> {
-    this.#closing = true;
-    this.#cancelAsks('closed');
+    this.#shell.close();
     this.#queue?.close();
     this.#query?.close();
     if (this.#pump) await withTimeout(this.#pump, 5_000, 'Fechar a sessão').catch(() => undefined);
@@ -507,28 +470,16 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     const block: AskBlock =
       risky && asked.kind === 'permission' ? { ...asked, canAlwaysAllow: false } : asked;
     const entry: AskEntry = { turnId, block, input, suggestions: options.suggestions };
-    this.#asks.set(block.id, entry);
-    this.#sink.ask(turnId, block);
-    this.#sink.state('needs-you');
-    const outcome = await this.#broker.wait(block.id, options.signal);
-    this.#asks.delete(block.id);
-    const answers = outcome.decision === 'answer' ? outcome.answers : undefined;
-    const resolved: AskBlock =
-      block.kind === 'question' && answers
-        ? { ...block, status: statusFor(outcome), answers }
-        : { ...block, status: statusFor(outcome) };
-    this.#emit([{ type: 'block.upsert', turnId, block: resolved }]);
-    if (!this.#crashed)
-      this.#sink.state(this.#asks.size > 0 ? 'needs-you' : this.#running ? 'running' : 'idle');
+    const outcome = await this.#shell.ask(turnId, block, undefined, options.signal);
     return toPermissionResult(entry, outcome, trusted);
   };
 
   async #runPump(q: Query): Promise<void> {
     try {
       for await (const message of q) this.#handle(message);
-      if (!this.#closing) this.#crash(new Error('O canal com o Claude fechou sem aviso'));
+      if (!this.#shell.closing) this.#crash(new Error('O canal com o Claude fechou sem aviso'));
     } catch (error) {
-      if (!this.#closing) this.#crash(error);
+      if (!this.#shell.closing) this.#crash(error);
     }
   }
 
@@ -543,8 +494,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     }
     this.#emit(this.#normalizer.push(message));
     if (message.type === 'result') {
-      this.#running = false;
-      if (this.#asks.size === 0) this.#sink.state('idle');
+      this.#shell.turnEnded();
       void this.#refreshContext();
     }
   }
@@ -580,12 +530,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     this.#emit([{ type: 'settings', settings }]);
   }
 
-  #cancelAsks(reason: string): void {
-    this.#broker.cancelAll(reason);
-  }
-
   #requireQuery(): Query {
-    if (!this.#query || this.#crashed) throw new Error('A sessão não está ligada');
+    if (!this.#query || this.#shell.crashed) throw new Error('A sessão não está ligada');
     return this.#query;
   }
 
@@ -602,13 +548,9 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   }
 
   #crash(error: unknown): void {
-    if (this.#crashed || this.#closing) return;
-    this.#crashed = true;
-    this.#running = false;
+    if (!this.#shell.crash(CRASH_MESSAGE)) return;
     console.error(`[claude-sdk] sessão caiu: ${this.#withStderr(error)}`);
-    this.#cancelAsks('crashed');
     this.#queue?.close();
-    this.#sink.state('error', CRASH_MESSAGE);
   }
 
   #withStderr(error: unknown): string {

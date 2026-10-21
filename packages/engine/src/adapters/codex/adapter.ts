@@ -1,15 +1,15 @@
 import type {
   AgentCapabilities,
-  AskBlock,
   ConversationDelta,
   ModelOption,
   PermissionAnswer,
   PermissionBlock,
   SessionSettings,
 } from '@solline/protocol';
-import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts';
+import type { BrokerOutcome } from '../../permission-broker.ts';
 import { JsonRpcPeer, StderrTail, type RequestId } from '../../rpc/json-rpc.ts';
 import { clip } from '../claude/tools.ts';
+import { SessionShell } from '../shared/session-shell.ts';
 import { crashMessage, errorNotice, withContext, withTimeout } from '../shared/turns.ts';
 import type {
   AdapterSink,
@@ -77,12 +77,6 @@ type ApprovalMethod =
   | 'execCommandApproval'
   | 'applyPatchApproval';
 
-interface AskEntry {
-  turnId: string;
-  block: PermissionBlock;
-  rpcId: RequestId;
-}
-
 /** A resposta da interface no formato de cada pedido de aprovação do Codex. */
 export function codexDecision(
   method: ApprovalMethod,
@@ -129,8 +123,8 @@ export class CodexAppServerAdapter implements AgentAdapter {
   readonly #options: CodexAdapterOptions;
   readonly #sink: AdapterSink;
   readonly #normalizer = new CodexNormalizer();
-  readonly #broker = new PermissionBroker();
-  readonly #asks = new Map<string, AskEntry>();
+  /** Os pedidos, as quedas e o estado da sessão (o id do RPC fica com cada pedido). */
+  readonly #shell: SessionShell<RequestId>;
   readonly #stderr = new StderrTail();
   #transport: CodexTransport | undefined;
   #peer: JsonRpcPeer | undefined;
@@ -145,15 +139,13 @@ export class CodexAppServerAdapter implements AgentAdapter {
   #pending: Partial<
     Pick<TurnStartParams, 'model' | 'effort' | 'approvalPolicy' | 'sandboxPolicy'>
   > = {};
-  #running = false;
   /** Interromper chegou antes de se saber o id do turno: manda-se assim que se souber. */
   #interruptPending = false;
-  #closing = false;
-  #crashed = false;
 
   constructor(options: CodexAdapterOptions, sink: AdapterSink) {
     this.#options = options;
     this.#sink = sink;
+    this.#shell = new SessionShell(sink);
     this.#threadId = options.resume ?? null;
     this.#hasHistory = Boolean(options.resume ?? options.fork);
     this.#settings = {
@@ -178,7 +170,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
   }
 
   async start(): Promise<AgentStartResult> {
-    this.#sink.state('starting');
+    this.#shell.starting();
     const transport = (this.#options.transport ?? (() => this.#spawn()))();
     this.#transport = transport;
     transport.stderr?.on('data', (chunk: Buffer) => this.#stderr.push(chunk));
@@ -205,7 +197,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
       return { answers: {} };
     });
     void peer.closed.then((reason) => {
-      if (!this.#closing) this.#crash(reason);
+      if (!this.#shell.closing) this.#crash(reason);
     });
 
     try {
@@ -271,7 +263,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
         this.#notice('O sandbox do Windows não está pronto: o Codex pede autorização para tudo.');
       }
     } catch (error) {
-      this.#closing = true;
+      this.#shell.close();
       peer.close();
       await transport.kill();
       throw new Error(this.#withStderr(error), { cause: error });
@@ -280,19 +272,18 @@ export class CodexAppServerAdapter implements AgentAdapter {
       { type: 'meta', agentSessionId: this.#threadId },
       { type: 'settings', settings: { ...this.#settings } },
     ]);
-    this.#sink.state('idle');
+    this.#shell.ready();
     return { settings: { ...this.#settings }, capabilities: this.capabilities() };
   }
 
   async send(text: string, options: SendOptions = {}): Promise<string> {
     const peer = this.#peer;
-    if (!peer || peer.isClosed || this.#crashed || !this.#threadId) {
+    if (!peer || peer.isClosed || this.#shell.crashed || !this.#threadId) {
       throw new Error('A sessão não está ligada');
     }
     const turnId = options.turnId ?? crypto.randomUUID();
     this.#emit(this.#normalizer.userTurn(turnId, text));
-    this.#running = true;
-    this.#sink.state('running');
+    this.#shell.turnStarted();
     this.#interruptPending = false;
     const sent = this.#pending;
     const params: TurnStartParams = {
@@ -307,7 +298,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
         this.#turnKnown(response.turn.id);
       })
       .catch((error: unknown) => {
-        if (this.#crashed || this.#closing) return;
+        if (this.#shell.crashed || this.#shell.closing) return;
         // O que não chegou ao Codex vai no turno seguinte; o que mudou entretanto ganha.
         this.#pending = { ...sent, ...this.#pending };
         const { turnId: assistant, deltas } = this.#normalizer.ensureAssistantTurn();
@@ -316,17 +307,16 @@ export class CodexAppServerAdapter implements AgentAdapter {
           errorNotice(assistant, `O Codex não aceitou a mensagem: ${String(error)}`),
           { type: 'turn.end', turnId: assistant, outcome: 'error' },
         ]);
-        this.#running = false;
-        this.#sink.state('idle');
+        this.#shell.turnEnded();
       });
     return turnId;
   }
 
   async interrupt(): Promise<void> {
     const peer = this.#peer;
-    if (!peer || !this.#running || !this.#threadId) return;
+    if (!peer || !this.#shell.running || !this.#threadId) return;
     this.#normalizer.markInterrupted();
-    this.#broker.cancelAll('interrupt');
+    this.#shell.interrupted();
     if (!this.#codexTurnId) {
       this.#interruptPending = true;
       return;
@@ -345,7 +335,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
   }
 
   #turnKnown(turnId: string): void {
-    if (!this.#running) return;
+    if (!this.#shell.running) return;
     this.#codexTurnId = turnId;
     if (this.#interruptPending) {
       this.#interruptPending = false;
@@ -373,20 +363,11 @@ export class CodexAppServerAdapter implements AgentAdapter {
   }
 
   answerPermission(requestId: string, answer: PermissionAnswer): boolean {
-    const entry = this.#asks.get(requestId);
-    if (!entry) return false;
-    if (answer.decision === 'allow-always' && !entry.block.canAlwaysAllow) {
-      throw new Error('Este pedido não aceita "Permitir sempre"');
-    }
-    if (answer.decision === 'deny-always' || answer.decision === 'answer') {
-      throw new Error('O Codex não aceita esta resposta a um pedido de autorização');
-    }
-    return this.#broker.answer(requestId, answer);
+    return this.#shell.answer(requestId, answer);
   }
 
   async close(): Promise<void> {
-    this.#closing = true;
-    this.#broker.cancelAll('closed');
+    this.#shell.close();
     const transport = this.#transport;
     this.#peer?.close();
     if (!transport) return;
@@ -423,9 +404,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
   #onNotification(method: string, params: unknown): void {
     if (method === 'serverRequest/resolved') {
       const requestId = (params as { requestId?: RequestId }).requestId;
-      for (const [id, entry] of this.#asks) {
-        if (entry.rpcId === requestId) this.#broker.cancel(id, 'resolved');
-      }
+      this.#shell.cancelWhere((rpcId) => rpcId === requestId, 'resolved');
       return;
     }
     if (method === 'turn/started') {
@@ -439,10 +418,9 @@ export class CodexAppServerAdapter implements AgentAdapter {
         this.#lastCodexTurn = done;
         this.#hasHistory = true;
       }
-      this.#running = false;
       this.#interruptPending = false;
       this.#codexTurnId = null;
-      if (this.#asks.size === 0) this.#sink.state('idle');
+      this.#shell.turnEnded();
     }
   }
 
@@ -492,24 +470,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
   async #ask(block: PermissionBlock, rpcId: RequestId): Promise<BrokerOutcome> {
     const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
     this.#emit(deltas);
-    this.#asks.set(block.id, { turnId, block, rpcId });
-    this.#sink.ask(turnId, block);
-    this.#sink.state('needs-you');
-    const outcome = await this.#broker.wait(block.id);
-    this.#asks.delete(block.id);
-    const status: AskBlock['status'] =
-      outcome.decision === 'allow-once'
-        ? 'allowed'
-        : outcome.decision === 'allow-always'
-          ? 'allowed-always'
-          : outcome.decision === 'cancelled'
-            ? 'cancelled'
-            : 'denied';
-    this.#emit([{ type: 'block.upsert', turnId, block: { ...block, status } }]);
-    if (!this.#crashed) {
-      this.#sink.state(this.#asks.size > 0 ? 'needs-you' : this.#running ? 'running' : 'idle');
-    }
-    return outcome;
+    return this.#shell.ask(turnId, block, rpcId);
   }
 
   #approvalBlock(method: ApprovalMethod, params: unknown, rpcId: RequestId): PermissionBlock {
@@ -578,12 +539,8 @@ export class CodexAppServerAdapter implements AgentAdapter {
   }
 
   #crash(error: unknown): void {
-    if (this.#crashed || this.#closing) return;
-    this.#crashed = true;
-    this.#running = false;
+    if (!this.#shell.crash(crashMessage('Codex'))) return;
     console.error(`[codex] sessão caiu: ${this.#withStderr(error)}`);
-    this.#broker.cancelAll('crashed');
-    this.#sink.state('error', crashMessage('Codex'));
   }
 
   #withStderr(error: unknown): string {

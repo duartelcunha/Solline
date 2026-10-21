@@ -11,7 +11,6 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type {
   AgentCapabilities,
-  AskBlock,
   ConversationDelta,
   PermissionAnswer,
   ModeRisk,
@@ -19,10 +18,11 @@ import type {
   SessionSettings,
 } from '@solline/protocol';
 import { APP_NAME, CLIENT_APP_ID } from '@solline/protocol/app';
-import { PermissionBroker, type BrokerOutcome } from '../../permission-broker.ts';
+import type { BrokerOutcome } from '../../permission-broker.ts';
 import { JsonRpcPeer, RpcError, StderrTail, type RequestId } from '../../rpc/json-rpc.ts';
 import { killTree, spawnAgent } from '../../rpc/spawn.ts';
 import { ENGINE_VERSION } from '../../version.ts';
+import { SessionShell } from '../shared/session-shell.ts';
 import { crashMessage, withContext, withTimeout } from '../shared/turns.ts';
 import type {
   AdapterSink,
@@ -67,12 +67,6 @@ export interface AcpAdapterOptions extends AgentStartOptions {
 const START_TIMEOUT_MS = 60_000;
 const CONTROL_TIMEOUT_MS = 30_000;
 
-interface AskEntry {
-  turnId: string;
-  block: PermissionBlock;
-  options: PermissionOption[];
-}
-
 /** A resposta da interface como opção do agente: a primeira do tipo pedido. */
 export function acpOutcome(
   options: readonly PermissionOption[],
@@ -112,8 +106,6 @@ export class AcpAdapter implements AgentAdapter {
   readonly #options: AcpAdapterOptions;
   readonly #sink: AdapterSink;
   readonly #normalizer = new AcpNormalizer();
-  readonly #broker = new PermissionBroker();
-  readonly #asks = new Map<string, AskEntry>();
   readonly #stderr = new StderrTail();
   #transport: AcpTransport | undefined;
   #peer: JsonRpcPeer | undefined;
@@ -122,9 +114,8 @@ export class AcpAdapter implements AgentAdapter {
   #config: AcpConfig = {};
   #capabilities: AgentCapabilities | undefined;
   #settings: SessionSettings;
-  #running = false;
-  #closing = false;
-  #crashed = false;
+  /** Os pedidos, as quedas e o estado da sessão (as opções do agente ficam com cada pedido). */
+  readonly #shell: SessionShell<PermissionOption[]>;
   /** Um servidor MCP ligado corre programas: sem Auto e sem "Permitir sempre" na sessão. */
   readonly #restricted: boolean;
 
@@ -132,6 +123,7 @@ export class AcpAdapter implements AgentAdapter {
     this.#restricted = (options.mcpServers ?? []).some((s) => s.executesCode);
     this.#options = options;
     this.#sink = sink;
+    this.#shell = new SessionShell(sink);
     this.#sessionId = options.resume ?? null;
     this.#settings = {
       model: options.model ?? null,
@@ -150,7 +142,7 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   async start(): Promise<AgentStartResult> {
-    this.#sink.state('starting');
+    this.#shell.starting();
     const transport = (this.#options.transport ?? (() => this.#spawn()))();
     this.#transport = transport;
     transport.stderr?.on('data', (chunk: Buffer) => this.#stderr.push(chunk));
@@ -167,7 +159,7 @@ export class AcpAdapter implements AgentAdapter {
       this.#permission(params as RequestPermissionRequest),
     );
     void peer.closed.then((reason) => {
-      if (!this.#closing) this.#crash(reason);
+      if (!this.#shell.closing) this.#crash(reason);
     });
 
     try {
@@ -196,7 +188,7 @@ export class AcpAdapter implements AgentAdapter {
       await this.#leaveFullAccess(peer);
       await this.#applyRequested(peer);
     } catch (error) {
-      this.#closing = true;
+      this.#shell.close();
       peer.close();
       await transport.kill();
       if (isAuthRequired(error)) {
@@ -211,19 +203,18 @@ export class AcpAdapter implements AgentAdapter {
       ...(this.#sessionId ? [{ type: 'meta' as const, agentSessionId: this.#sessionId }] : []),
       { type: 'settings', settings: { ...this.#settings } },
     ]);
-    this.#sink.state('idle');
+    this.#shell.ready();
     return { settings: { ...this.#settings }, capabilities: this.capabilities() };
   }
 
   async send(text: string, options: SendOptions = {}): Promise<string> {
     const peer = this.#peer;
-    if (!peer || peer.isClosed || this.#crashed || !this.#sessionId) {
+    if (!peer || peer.isClosed || this.#shell.crashed || !this.#sessionId) {
       throw new Error('A sessão não está ligada');
     }
     const turnId = options.turnId ?? crypto.randomUUID();
     this.#emit(this.#normalizer.userTurn(turnId, text));
-    this.#running = true;
-    this.#sink.state('running');
+    this.#shell.turnStarted();
     // O session/prompt só responde no fim do turno (com o stopReason): não se espera aqui.
     peer
       .request<PromptResponse>('session/prompt', {
@@ -233,16 +224,16 @@ export class AcpAdapter implements AgentAdapter {
       .then(
         (response) => this.#endTurn(response.stopReason),
         (error: unknown) => {
-          if (!this.#crashed && !this.#closing) this.#endTurn('error', String(error));
+          if (!this.#shell.crashed && !this.#shell.closing) this.#endTurn('error', String(error));
         },
       );
     return turnId;
   }
 
   async interrupt(): Promise<void> {
-    if (!this.#peer || !this.#running || !this.#sessionId) return;
+    if (!this.#peer || !this.#shell.running || !this.#sessionId) return;
     this.#normalizer.markInterrupted();
-    this.#broker.cancelAll('interrupt');
+    this.#shell.interrupted();
     this.#peer.notify('session/cancel', { sessionId: this.#sessionId });
   }
 
@@ -278,21 +269,11 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   answerPermission(requestId: string, answer: PermissionAnswer): boolean {
-    const entry = this.#asks.get(requestId);
-    if (!entry) return false;
-    if (answer.decision === 'allow-always' && !entry.block.canAlwaysAllow) {
-      throw new Error('Este pedido não aceita "Permitir sempre"');
-    }
-    if (answer.decision === 'deny-always' && !entry.block.canAlwaysDeny) {
-      throw new Error('Este pedido não aceita "Negar sempre"');
-    }
-    if (answer.decision === 'answer') throw new Error('Este pedido não é uma pergunta');
-    return this.#broker.answer(requestId, answer);
+    return this.#shell.answer(requestId, answer);
   }
 
   async close(): Promise<void> {
-    this.#closing = true;
-    this.#broker.cancelAll('closed');
+    this.#shell.close();
     const transport = this.#transport;
     const peer = this.#peer;
     if (
@@ -518,32 +499,13 @@ export class AcpAdapter implements AgentAdapter {
       ...(content ? { content } : {}),
       status: 'pending',
     };
-    this.#asks.set(id, { turnId, block, options: request.options });
-    this.#sink.ask(turnId, block);
-    this.#sink.state('needs-you');
-    const outcome = await this.#broker.wait(id);
-    this.#asks.delete(id);
-    const status: AskBlock['status'] =
-      outcome.decision === 'allow-once'
-        ? 'allowed'
-        : outcome.decision === 'allow-always'
-          ? 'allowed-always'
-          : outcome.decision === 'deny-always'
-            ? 'denied-always'
-            : outcome.decision === 'cancelled'
-              ? 'cancelled'
-              : 'denied';
-    this.#emit([{ type: 'block.upsert', turnId, block: { ...block, status } }]);
-    if (!this.#crashed)
-      this.#sink.state(this.#asks.size > 0 ? 'needs-you' : this.#running ? 'running' : 'idle');
+    const outcome = await this.#shell.ask(turnId, block, request.options);
     return acpOutcome(request.options, outcome);
   }
 
   #endTurn(stopReason: PromptResponse['stopReason'] | 'error', message?: string): void {
-    this.#broker.cancelAll('turn ended');
     this.#emit(this.#normalizer.end(stopReason, message));
-    this.#running = false;
-    this.#sink.state('idle');
+    this.#shell.turnEnded({ cancelAsks: true });
   }
 
   #spawn(): AcpTransport {
@@ -573,7 +535,7 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   #require(): JsonRpcPeer {
-    if (!this.#peer || this.#peer.isClosed || this.#crashed || !this.#sessionId) {
+    if (!this.#peer || this.#peer.isClosed || this.#shell.crashed || !this.#sessionId) {
       throw new Error('A sessão não está ligada');
     }
     return this.#peer;
@@ -599,12 +561,8 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   #crash(error: unknown): void {
-    if (this.#crashed || this.#closing) return;
-    this.#crashed = true;
-    this.#running = false;
+    if (!this.#shell.crash(crashMessage(this.#options.label))) return;
     console.error(`[acp] ${this.#options.label} caiu: ${this.#withStderr(error)}`);
-    this.#broker.cancelAll('crashed');
-    this.#sink.state('error', crashMessage(this.#options.label));
   }
 
   #withStderr(error: unknown): string {
