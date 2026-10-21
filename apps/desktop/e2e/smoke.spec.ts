@@ -64,6 +64,8 @@ test('a janela abre com o nome certo e o motor responde ao ping', async () => {
   await expect(page).toHaveTitle('Solline');
   await expect(page.getByTestId('ping-reply')).toContainText('Motor ligado', { timeout: 15_000 });
   await expect(page.getByTestId('ping-reply')).toContainText(/pong em \d+ ms/);
+  // Sem projetos, o familiar recebe-te ao portátil.
+  await expect(page.getByTestId('familiar-laptop')).toBeVisible();
 });
 
 test('o tema alterna entre claro e escuro', async () => {
@@ -315,6 +317,10 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await page.getByTestId('new-session').click();
   await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
   await expect(page.getByTestId('session-row')).toHaveAttribute('data-state', 'idle');
+  // A sessão do Claude é o Áureo, à espera.
+  const avatar = page.getByTestId('session-row').getByTestId('crew-avatar');
+  await expect(avatar).toHaveAttribute('data-character', 'aureo');
+  await expect(avatar).toHaveAttribute('data-pose', 'waiting');
 
   // Modelo e effort pelos botões da barra.
   await page.getByTestId('pill-model').click();
@@ -352,7 +358,7 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await expect(page.getByTestId('session-cost')).toContainText(/US\$|\$/);
   await expect(page.getByTestId('context-meter')).toBeVisible({ timeout: 15_000 });
   // A segunda opinião lê o turno que mudou o notes.txt e acaba limpa ou com achados.
-  await expect(page.getByTestId('quality-chip')).toHaveAttribute('data-state', /clean|found/, {
+  await expect(page.getByTestId('quality-chip')).toHaveAttribute('data-quality', /clean|found/, {
     timeout: 120_000,
   });
   await shot(page, 'quality-chip');

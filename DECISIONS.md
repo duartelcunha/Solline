@@ -353,3 +353,15 @@
   projeto podia plantar um `git.exe`), e direto ao binário verdadeiro do Git for Windows. Cada
   chamada ao git é um processo novo e, nesta máquina com o PC Manager e o antivírus, chega a 1 s:
   rejeitar passou de 11 para 9 chamadas, com o diff e as contas em paralelo.
+
+## 2026-10-21: marca Meridiano e tripulação
+
+- **Marca:** a direção "Meridiano" (proposta do ChatGPT a partir de `docs/branding-prompt.md`),
+  com o Solline Pin como símbolo e ícone da app. Detalhes em `docs/brand.md`.
+- **Tripulação como avatares dos agentes** (Claude, Codex, revisor, ACP, outros), com a pose a
+  seguir o estado da sessão, e o familiar nos momentos raros. Arte provisória cortada da folha
+  gerada; os sprites finais (48×48) entram com os mesmos nomes.
+- **Correções à proposta:** as cores da tripulação seguem a folha (o documento não batia certo);
+  a gravidade dos achados tem forma além de cor e o ruído passa a cinzento (o violeta chocava com
+  o Índigo); a cópia em pt-PT segue o AO90; a maqueta (agentes por fase, um gato como familiar)
+  ficou só como inspiração.

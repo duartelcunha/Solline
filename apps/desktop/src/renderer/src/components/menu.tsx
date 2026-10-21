@@ -54,7 +54,9 @@ function ItemBody({
 }) {
   return (
     <>
-      <span className="mt-0.5 grid size-4 shrink-0 place-items-center text-muted">{icon}</span>
+      <span className="mt-0.5 grid min-h-4 min-w-4 shrink-0 place-items-center text-muted">
+        {icon}
+      </span>
       <span className="min-w-0 flex-1">
         <span className="block font-medium">{title}</span>
         {description ? (

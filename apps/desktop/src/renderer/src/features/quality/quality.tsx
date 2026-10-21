@@ -1,17 +1,39 @@
 import { useState } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { CircleAlert, CircleCheck, Eye, EyeOff, RotateCw } from 'lucide-react';
+import { CircleAlert, Eye, EyeOff, RotateCw } from 'lucide-react';
 import type { Finding, FindingSeverity, Quality } from '@solline/protocol';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useSession } from '../../stores/app.ts';
-import { Spinner } from '../conversation/blocks.tsx';
+import { CrewAvatar } from '../agents/crew.tsx';
 
-/** A cor de cada gravidade, igual no chip, nos pontos e nas linhas do diff. */
-export const SEVERITY: Record<FindingSeverity, { label: string; dot: string; text: string }> = {
-  bug: { label: 'Erro', dot: 'bg-danger', text: 'text-danger' },
-  risk: { label: 'Risco', dot: 'bg-accent', text: 'text-accent-text' },
-  slop: { label: 'Ruído', dot: 'bg-subtle', text: 'text-muted' },
+/** Cada gravidade tem cor e forma: lê-se mesmo sem distinguir as cores. */
+export const SEVERITY: Record<FindingSeverity, { label: string; text: string }> = {
+  bug: { label: 'Erro', text: 'text-danger' },
+  risk: { label: 'Risco', text: 'text-accent-text' },
+  slop: { label: 'Ruído', text: 'text-muted' },
 };
+
+/** Octógono para erro, triângulo para risco, círculo para ruído. */
+export function SeverityMark({ severity, size = 9 }: { severity: FindingSeverity; size?: number }) {
+  return (
+    <svg
+      aria-hidden
+      width={size}
+      height={size}
+      viewBox="0 0 10 10"
+      className={`shrink-0 ${SEVERITY[severity].text}`}
+      fill="currentColor"
+    >
+      {severity === 'bug' ? (
+        <path d="M3 0h4l3 3v4l-3 3H3L0 7V3z" />
+      ) : severity === 'risk' ? (
+        <path d="M5 0.5 9.8 9.5H0.2z" />
+      ) : (
+        <circle cx="5" cy="5" r="4.2" />
+      )}
+    </svg>
+  );
+}
 
 const ORDER: FindingSeverity[] = ['bug', 'risk', 'slop'];
 
@@ -30,7 +52,7 @@ function Counts({ findings }: { findings: readonly Finding[] }) {
         const n = findings.filter((f) => f.severity === severity).length;
         return n ? (
           <span key={severity} className="inline-flex items-center gap-1 tabular-nums">
-            <span aria-hidden className={`size-1.5 rounded-full ${SEVERITY[severity].dot}`} />
+            <SeverityMark severity={severity} />
             {n}
           </span>
         ) : null;
@@ -80,7 +102,7 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
           aria-label={label}
           title={label}
           data-testid="quality-chip"
-          data-state={current}
+          data-quality={current}
           className="no-drag sl-press inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-muted transition-colors duration-150 outline-none hover:bg-surface-hover hover:text-fg data-[state=open]:bg-surface-hover"
         >
           <span
@@ -90,9 +112,9 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
             {current === 'off' ? (
               <EyeOff size={14} strokeWidth={1.75} className="text-subtle" />
             ) : current === 'running' ? (
-              <Spinner label="A rever" />
+              <CrewAvatar character="vertice" pose="working" size={24} />
             ) : current === 'clean' ? (
-              <CircleCheck size={14} strokeWidth={2} className="text-success" />
+              <CrewAvatar character="vertice" pose="done" size={24} />
             ) : current === 'found' ? (
               <Counts findings={review.findings} />
             ) : current === 'error' ? (
@@ -158,7 +180,9 @@ export function FindingRow({
         className="mt-[3px] size-3.5 shrink-0 accent-[var(--sl-accent)]"
         data-testid="finding-pick"
       />
-      <span aria-hidden className={`mt-[7px] size-1.5 shrink-0 rounded-full ${tone.dot}`} />
+      <span className="mt-[5px]">
+        <SeverityMark severity={finding.severity} />
+      </span>
       <button
         type="button"
         onClick={() => setOpen(!open)}

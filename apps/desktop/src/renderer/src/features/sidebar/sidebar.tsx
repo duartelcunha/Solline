@@ -1,7 +1,9 @@
+import { Pin } from '../../components/pin.tsx';
 import { FolderPlus, Folder, ShieldCheck, ShieldOff } from 'lucide-react';
 import { APP_NAME } from '@solline/protocol/app';
 import type { Project, SessionState } from '@solline/protocol';
 import { actions, useApp, useSession } from '../../stores/app.ts';
+import { SessionAvatar } from '../agents/crew.tsx';
 import { NewSessionButton } from '../agents/new-session-button.tsx';
 
 const STATE_LABEL: Record<SessionState, string> = {
@@ -11,25 +13,6 @@ const STATE_LABEL: Record<SessionState, string> = {
   'needs-you': 'precisa de ti',
   error: 'caiu',
 };
-
-export function StateDot({ state }: { state: SessionState }) {
-  const tone =
-    state === 'running'
-      ? 'bg-accent dot-pulse'
-      : state === 'needs-you'
-        ? 'bg-accent ring-[3px] ring-accent/25'
-        : state === 'error'
-          ? 'bg-danger'
-          : state === 'starting'
-            ? 'bg-subtle dot-pulse'
-            : 'bg-line-strong';
-  return (
-    <span
-      aria-hidden
-      className={`inline-block size-2 shrink-0 rounded-full transition-colors duration-200 ${tone}`}
-    />
-  );
-}
 
 function SessionRow({ id }: { id: string }) {
   const title = useSession(id, (s) => s.info.title);
@@ -44,15 +27,10 @@ function SessionRow({ id }: { id: string }) {
         aria-label={`${title}, ${STATE_LABEL[state]}`}
         data-testid="session-row"
         data-state={state}
-        className={`flex w-full items-center gap-2.5 rounded-md py-1.5 pr-2 pl-7 text-left text-[13px] transition-colors duration-150 ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
+        className={`flex w-full items-center gap-2 rounded-md py-1 pr-2 pl-5 text-left text-[13px] transition-colors duration-150 ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
       >
-        <StateDot state={state} />
+        <SessionAvatar sessionId={id} size={26} />
         <span className="min-w-0 flex-1 truncate">{title}</span>
-        {state === 'needs-you' ? (
-          <span className="shrink-0 rounded-full bg-accent-soft px-1.5 text-[10.5px] leading-[18px] font-medium text-accent-text">
-            precisa de ti
-          </span>
-        ) : null}
       </button>
     </li>
   );
@@ -132,8 +110,8 @@ export function Sidebar({
       aria-label="Projetos e sessões"
     >
       <div className="drag flex h-11 shrink-0 items-center gap-2 px-4">
-        <span aria-hidden className="size-2.5 rounded-full bg-accent" />
-        <span className="text-[13px] font-semibold tracking-[-0.01em]">{APP_NAME}</span>
+        <Pin size={20} className="text-accent" />
+        <span className="text-[13px] font-semibold tracking-[-0.035em]">{APP_NAME}</span>
       </div>
 
       <div className="px-2 pt-1">

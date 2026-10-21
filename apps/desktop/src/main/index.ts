@@ -194,6 +194,8 @@ function createWindow(): void {
   const theme: Theme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   const win = new BrowserWindow({
     title: APP_NAME,
+    // Na app instalada o ícone vem do executável; fora dela, da pasta build.
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../build/icon.png') }),
     width: 1200,
     height: 780,
     minWidth: 760,

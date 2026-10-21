@@ -18,6 +18,8 @@ export default {
   },
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
+    // O Solline Pin (scripts/brand-icons.py), com um desenho próprio a 16 px.
+    icon: 'build/icon.ico',
   },
   // Fecha as portas para correr código dentro do executável da app. O motor é um
   // utilityProcess e os agentes são executáveis à parte, por isso nada precisa do runAsNode.

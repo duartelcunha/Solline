@@ -9,7 +9,8 @@ import { Conversation } from './features/conversation/conversation.tsx';
 import { QualityChip } from './features/quality/quality.tsx';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
-import { Sidebar, StateDot } from './features/sidebar/sidebar.tsx';
+import { Familiar, SessionAvatar } from './features/agents/crew.tsx';
+import { Sidebar } from './features/sidebar/sidebar.tsx';
 import { actions, dispatch, sessionStore, useApp, useSession } from './stores/app.ts';
 
 const THEME_KEY = 'solline.theme';
@@ -88,10 +89,9 @@ function EngineStatus({ ping }: { ping: PingState }) {
 
 function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
   const title = useSession(sessionId, (s) => s.info.title);
-  const state = useSession(sessionId, (s) => s.info.state);
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <StateDot state={state} />
+      <SessionAvatar sessionId={sessionId} size={30} />
       <h1
         className="truncate text-[13px] font-semibold tracking-[-0.01em]"
         data-testid="session-title"
@@ -134,6 +134,8 @@ function Welcome() {
   const project = projects.find((p) => p.id === activeProjectId);
   return (
     <section className="flex flex-1 flex-col items-center justify-center gap-6 px-8 text-center">
+      {/* O familiar recebe-te: ao portátil no início, à porta de um projeto ainda vazio. */}
+      <Familiar scene={project ? 'door' : 'laptop'} size={168} />
       <div>
         <h2 className="text-[2rem] leading-tight font-semibold tracking-[-0.025em]">
           {project ? project.name : 'Bem-vindo'}

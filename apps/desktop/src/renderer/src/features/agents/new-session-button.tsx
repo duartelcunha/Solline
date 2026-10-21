@@ -1,4 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
+import { CrewAvatar, characterOf } from './crew.tsx';
 import { Check, ChevronDown, LogIn, Plus, SlidersHorizontal } from 'lucide-react';
 import type { AgentDescriptor, Project } from '@solline/protocol';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
@@ -59,6 +60,13 @@ function AgentMenu({
             key={agent.id}
             title={agent.experimental ? `${agent.label} (experimental)` : agent.label}
             description={blocked ?? undefined}
+            icon={
+              <CrewAvatar
+                character={characterOf(agent.id, agent.transport)}
+                pose="waiting"
+                size={22}
+              />
+            }
             disabled={blocked !== null}
             onSelect={() => void actions.createSession(project.id, agent.id)}
             testId={`agent-${agent.id}`}
