@@ -4,6 +4,23 @@ Cliente de desktop pessoal para agentes de código (Claude Code, Codex e agentes
 A visão e os próximos marcos estão em `docs/visao.md`; o plano multi-agente (feito) em `docs/plano.md`. As decisões estão em
 `DECISIONS.md`.
 
+## Norte (ler antes de tudo)
+
+A Solline tem de ser melhor do que qualquer harness sozinho: tudo o que o Claude Code, o Codex, o
+Cursor, o Conductor e os outros fazem bem, feito melhor, mais o que só existe quando se juntam.
+Cada decisão mede-se em quatro coisas:
+
+1. **Ver:** percebe-se de relance, sem ler paredes de texto.
+2. **Trabalhar:** menos cliques e menos espera do que em qualquer outra ferramenta para o mesmo
+   resultado.
+3. **Qualidade do resultado:** o código final sai melhor (checkpoints, revisor, verificações), não
+   só mais depressa.
+4. **Sinergia:** cada peça nova usa e reforça as outras (a worktree dá ao revisor e às verificações
+   uma pasta limpa; o cartão da mesa mostra as verificações e o revisor; a fila usa os checkpoints).
+
+Antes de desenhar: que harness faz isto melhor hoje, e como o fazemos melhor e ligado ao resto?
+Sem resposta, não entra.
+
 ## Regras de arquitetura
 
 1. Três peças, um só sentido de dependência: **motor** (`packages/engine`, Node, SDK, sessões)

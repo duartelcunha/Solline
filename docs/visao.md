@@ -1,5 +1,7 @@
 # Solline: o melhor de cada harness, numa só ferramenta
 
+O critério de cada decisão está no "Norte", no topo do `CLAUDE.md`.
+
 A Solline já corre o Claude Code, o Codex e qualquer agente ACP no mesmo motor
 (`docs/plano.md`). Isso é a base. O objetivo é outro: pegar no que cada ferramenta faz melhor, dá-lo
 a todos os agentes por igual e embrulhá-lo numa experiência visual que dá gosto usar, como um jogo
