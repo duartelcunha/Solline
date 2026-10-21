@@ -66,13 +66,21 @@ function EngineStatus({ ping }: { ping: PingState }) {
             `pong em ${ping.ms} ms · v${ping.reply.engineVersion}`,
             'ping-reply',
           ];
+  // O detalhe (latência, versão) só interessa quando algo corre mal: ligado, fica no tooltip.
+  const quiet = ping.status !== 'error';
   return (
-    <div className="flex items-start gap-2.5" data-testid={testId}>
-      <span aria-hidden className={`mt-[7px] size-1.5 shrink-0 rounded-full ${dot}`} />
-      <div className="min-w-0">
-        <div className="text-[12.5px]">{label}</div>
-        {detail ? <div className="truncate font-mono text-[11px] text-subtle">{detail}</div> : null}
-      </div>
+    <div
+      className="flex min-w-0 items-center gap-2 text-[12px] text-muted"
+      data-testid={testId}
+      title={detail}
+    >
+      <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${dot}`} />
+      <span className="truncate">{label}</span>
+      {detail ? (
+        <span className={quiet ? 'sr-only' : 'truncate font-mono text-[11px] text-danger'}>
+          {detail}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -178,7 +186,7 @@ export function App() {
       <Sidebar
         sessionsByProject={sessionsByProject}
         footer={
-          <div className="flex items-start gap-2">
+          <div className="flex items-center gap-2">
             <div className="min-w-0 flex-1">
               <EngineStatus ping={ping} />
             </div>

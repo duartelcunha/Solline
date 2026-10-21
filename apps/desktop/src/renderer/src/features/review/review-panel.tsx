@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { Check, ChevronDown, CircleCheck, MessageSquare, Undo2, X } from 'lucide-react';
 import type { DiffScope, FileDiff, Hunk, ReviewAction, ReviewComment } from '@solline/protocol';
@@ -41,6 +41,18 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   const [celebrate, setCelebrate] = useState(false);
 
   const checkpoints = useMemo(() => timeline?.checkpoints ?? [], [timeline]);
+  // Vários pedidos de diff podem cruzar-se (fim de turno, aceitar, rejeitar): só vale o último.
+  const latest = useRef(0);
+  const load = useCallback(
+    async (target: DiffScope): Promise<FileDiff[] | null> => {
+      const ticket = ++latest.current;
+      const next = await actions.diff(sessionId, target);
+      if (ticket !== latest.current || !next) return null;
+      setFiles(next);
+      return next;
+    },
+    [sessionId],
+  );
   const indexOf = (turnId: string) => checkpoints.find((c) => c.turnId === turnId)?.index;
   // Um turno que saiu da linha do tempo (rebobinado) deixa de ser um âmbito válido.
   const validScope =
@@ -53,14 +65,12 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   const scopeKey = JSON.stringify(validScope);
   useEffect(() => {
     if (!timeline?.available) return;
-    let alive = true;
-    void actions.diff(sessionId, JSON.parse(scopeKey) as DiffScope).then((next) => {
-      if (alive && next) setFiles(next);
-    });
+    void load(JSON.parse(scopeKey) as DiffScope);
+    // Ao sair, um pedido a meio deixa de valer.
     return () => {
-      alive = false;
+      latest.current += 1;
     };
-  }, [sessionId, scopeKey, timeline]);
+  }, [load, scopeKey, timeline]);
 
   if (!timeline) return <Empty title="A preparar os checkpoints…" />;
   if (!timeline.available) {
@@ -80,8 +90,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
       ...(target.path ? { path: target.path } : {}),
       ...(target.hunk ? { hunkId: target.hunk.id } : {}),
     });
-    const next = await actions.diff(sessionId, validScope);
-    if (next) setFiles(next);
+    const next = await load(validScope);
     // Uma pequena recompensa quando o último hunk sai da revisão.
     if (ok && before > 0 && next?.length === 0) setCelebrate(true);
   }
@@ -155,7 +164,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
           </Menu.RadioGroup>
         </MenuShell>
         {total ? (
-          <span className="font-mono text-[11px] text-muted tabular-nums">
+          <span className="truncate font-mono text-[11px] text-muted tabular-nums">
             {files?.length ?? 0} {files?.length === 1 ? 'ficheiro' : 'ficheiros'} ·{' '}
             <span className="text-success">+{total.add}</span>{' '}
             <span className="text-danger">−{total.del}</span>
@@ -178,19 +187,20 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               <button
                 type="button"
                 onClick={() => void act('reject')}
-                title="Volta tudo o que está por rever ao que estava"
+                title="Rejeitar tudo: volta o que está por rever ao que estava"
                 data-testid="reject-all"
-                className="sl-press inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-danger hover:bg-danger/10"
+                className="sl-press inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium whitespace-nowrap text-danger hover:bg-danger/10"
               >
-                <X size={13} strokeWidth={2.25} /> Rejeitar tudo
+                <X size={13} strokeWidth={2.25} /> Rejeitar
               </button>
               <button
                 type="button"
                 onClick={() => void act('accept')}
+                title="Aceitar tudo o que está por rever"
                 data-testid="accept-all"
-                className="sl-press inline-flex h-7 items-center gap-1 rounded-md bg-fg px-2.5 text-[12px] font-medium text-bg"
+                className="sl-press inline-flex h-7 items-center gap-1 rounded-md bg-fg px-2.5 text-[12px] font-medium whitespace-nowrap text-bg"
               >
-                <Check size={13} strokeWidth={2.25} /> Aceitar tudo
+                <Check size={13} strokeWidth={2.25} /> Aceitar
               </button>
             </>
           ) : null}

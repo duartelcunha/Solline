@@ -50,7 +50,7 @@ function ContextMeter({ used, max, percent }: { used: number; max: number; perce
           className="meter-arc"
         />
       </svg>
-      <span className="tabular-nums">{p}%</span>
+      <span className="hidden tabular-nums @[30rem]:inline">{p}%</span>
     </span>
   );
 }
@@ -62,7 +62,12 @@ function TokenCount({ usage }: { usage: TokenUsage }) {
     `, ${tokens.format(usage.output)} de saída` +
     (usage.reasoning ? ` (${tokens.format(usage.reasoning)} a pensar)` : '');
   return (
-    <span className="tabular-nums" title={label} aria-label={label} data-testid="session-tokens">
+    <span
+      className="hidden tabular-nums @[34rem]:inline"
+      title={label}
+      aria-label={label}
+      data-testid="session-tokens"
+    >
       {tokens.format(usage.input + usage.output)} tokens
     </span>
   );
@@ -111,7 +116,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   }
 
   return (
-    <div className="shrink-0 px-8 pb-5">
+    <div className="shrink-0 px-4 pb-5 sm:px-8">
       <div className="mx-auto max-w-3xl">
         {above}
         {actionError ? (
@@ -123,7 +128,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             {actionError}
           </p>
         ) : null}
-        <div className="composer rounded-xl border border-line bg-surface shadow-raised transition-[border-color,box-shadow] duration-200 focus-within:border-line-strong">
+        <div className="composer @container rounded-xl border border-line bg-surface shadow-raised transition-[border-color,box-shadow] duration-200 focus-within:border-line-strong">
           <textarea
             ref={input}
             value={text}
@@ -148,6 +153,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             className="block max-h-64 min-h-12 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-[1.5] outline-none [field-sizing:content] placeholder:text-subtle disabled:cursor-default"
           />
           <div className="flex items-center gap-3 px-2.5 pt-1 pb-2.5">
+            {/* Estreito (painel de rever aberto): as pílulas ficam numa linha e saem os números. */}
             {capabilities ? (
               <SettingsPills
                 settings={settings}
@@ -168,7 +174,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
               ) : null}
               {usage.costUsd !== null && features?.cost !== false ? (
                 <span
-                  className="tabular-nums"
+                  className="hidden tabular-nums @[34rem]:inline"
                   title="Custo estimado desta sessão"
                   data-testid="session-cost"
                 >

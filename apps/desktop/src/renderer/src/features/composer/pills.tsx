@@ -40,7 +40,7 @@ export function SettingsPills({
   const showMode = capabilities.modes.length > 0;
   return (
     <div
-      className="flex flex-wrap items-center gap-1.5"
+      className="flex min-w-0 flex-nowrap items-center gap-1.5"
       role="group"
       aria-label="Modelo, effort e modo"
     >

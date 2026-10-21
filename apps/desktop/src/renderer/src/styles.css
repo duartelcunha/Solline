@@ -55,6 +55,20 @@ body {
     outline: 2px solid var(--sl-focus);
     outline-offset: 2px;
   }
+
+  /* O que o browser desenha sozinho também leva as cores da app. */
+  ::selection {
+    background: var(--sl-accent-soft);
+    color: var(--sl-text);
+  }
+  textarea,
+  input {
+    caret-color: var(--sl-accent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--sl-border-strong) transparent;
+  }
 }
 
 .drag {

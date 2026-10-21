@@ -131,8 +131,8 @@ describe('LoginManager', () => {
     const logins = new LoginManager({ onChange: (a, e) => changes.push([a, e]) });
     const first = manualFlow('https://auth.openai.com/1');
     const second = manualFlow('https://auth.openai.com/2');
-    expect(await logins.start('codex', async () => first.flow)).toBe(first.flow.url);
-    expect(await logins.start('codex', async () => second.flow)).toBe(second.flow.url);
+    expect(await logins.start('codex', async () => first.flow)).toBe(first.flow);
+    expect(await logins.start('codex', async () => second.flow)).toBe(second.flow);
     expect(first.cancelled).toHaveLength(1);
     expect(logins.pending('codex')).toBe(true);
     second.resolve();
@@ -167,7 +167,7 @@ describe('LoginManager', () => {
     });
     expect(logins.pending('codex')).toBe(true);
     const two = logins.start('codex', async () => second.flow);
-    expect(await two).toBe(second.flow.url);
+    expect(await two).toBe(second.flow);
     release();
     await expect(one).rejects.toThrow('substituído');
     expect(first.cancelled).toHaveLength(1);

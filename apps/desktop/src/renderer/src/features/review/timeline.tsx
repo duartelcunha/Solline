@@ -181,18 +181,19 @@ function TimelineTrack({
           className={`relative h-8 flex-1 touch-none ${busy ? 'opacity-60' : 'cursor-pointer'}`}
           title={busy ? 'Espera que o agente acabe para rebobinar' : undefined}
         >
-          {/* Linha e barras: quanto cada turno mudou, à vista. */}
+          {/* A linha engrossa e aquece nos turnos que mudaram ficheiros: quanto mais, mais forte. */}
           <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line-strong" />
           {checkpoints.map((c, i) => {
-            const h =
-              changes(c) === 0 ? 0 : 3 + Math.round((Math.log1p(changes(c)) / Math.log1p(max)) * 9);
+            const weight = changes(c) === 0 ? 0 : Math.log1p(changes(c)) / Math.log1p(max);
+            const from = xOf(i) + 7;
+            const to = xOf(i + 1) - 7;
             return (
               <div key={c.turnId}>
-                {h > 0 ? (
+                {weight > 0 && to > from ? (
                   <span
                     aria-hidden
-                    className="absolute bottom-1/2 mb-1 w-[3px] -translate-x-1/2 rounded-full bg-accent/50"
-                    style={{ left: (xOf(i) + xOf(i + 1)) / 2, height: h }}
+                    className="absolute top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-accent"
+                    style={{ left: from, width: to - from, opacity: 0.3 + weight * 0.6 }}
                   />
                 ) : null}
                 <button

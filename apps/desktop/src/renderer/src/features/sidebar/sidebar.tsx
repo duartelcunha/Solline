@@ -58,6 +58,10 @@ function SessionRow({ id }: { id: string }) {
   );
 }
 
+/** Ações de linha que só aparecem ao passar ou com o foco lá dentro. */
+const reveal =
+  'opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 has-[[data-state=open]]:opacity-100';
+
 function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: string[] }) {
   const activeProject = useApp((s) => s.activeProjectId === project.id);
   return (
@@ -90,7 +94,8 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
           }
           data-testid="project-trust"
           data-trusted={project.trusted}
-          className={`grid size-6 shrink-0 place-items-center rounded-sm transition-colors duration-150 hover:bg-surface-hover hover:text-fg ${project.trusted ? 'text-subtle' : 'text-accent-text'}`}
+          // De confiança é o normal: o escudo só aparece ao passar. Sem confiança fica à vista.
+          className={`grid size-6 shrink-0 place-items-center rounded-sm transition-[color,background-color,opacity] duration-150 hover:bg-surface-hover hover:text-fg ${project.trusted ? `text-subtle ${reveal}` : 'text-accent-text'}`}
         >
           {project.trusted ? (
             <ShieldCheck size={14} strokeWidth={1.9} />
@@ -98,7 +103,9 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
             <ShieldOff size={14} strokeWidth={1.9} />
           )}
         </button>
-        <NewSessionButton project={project} variant="icon" />
+        <span className={`flex shrink-0 ${activeProject ? '' : reveal}`}>
+          <NewSessionButton project={project} variant="icon" />
+        </span>
       </div>
       {sessionIds.length > 0 ? (
         <ul className="mt-0.5 space-y-px">
