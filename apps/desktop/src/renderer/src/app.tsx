@@ -92,7 +92,7 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
   const title = useSession(sessionId, (s) => s.info.title);
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <SessionBot sessionId={sessionId} size={30} />
+      <SessionBot sessionId={sessionId} size={30} alive />
       <h1
         className="truncate text-[13px] font-semibold tracking-[-0.01em]"
         data-testid="session-title"

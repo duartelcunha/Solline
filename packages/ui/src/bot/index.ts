@@ -1,6 +1,7 @@
 export { Bot } from './bot.tsx';
 export {
   HOODS,
+  HOOD_ORIGIN,
   MOODS,
   STATE_COLOURS,
   VIEWBOX,

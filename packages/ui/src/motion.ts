@@ -240,3 +240,24 @@ export function shouldAnimate(event?: { detail?: number } | null): boolean {
   if (event && event.detail === 0) return false;
   return !lastInputWasKeyboard();
 }
+
+/**
+ * Marca o <html> com data-ambient="paused" enquanto a janela está escondida ou sem foco: o
+ * que se repete (os pontos de "a trabalhar", a fenda de "a ler") fica parado e não gasta
+ * nada. Muda uma vez por evento, nunca por frame.
+ */
+export function trackAmbient(doc: Document = document, win: Window = window): () => void {
+  const update = () => {
+    const paused = doc.hidden || !doc.hasFocus();
+    doc.documentElement.dataset.ambient = paused ? 'paused' : 'running';
+  };
+  update();
+  doc.addEventListener('visibilitychange', update);
+  win.addEventListener('focus', update);
+  win.addEventListener('blur', update);
+  return () => {
+    doc.removeEventListener('visibilitychange', update);
+    win.removeEventListener('focus', update);
+    win.removeEventListener('blur', update);
+  };
+}

@@ -55,6 +55,8 @@ export interface BotFrame {
   /** O capuz (meio disco) e a sua transformação para o humor (levantado, descaído). */
   hood: string;
   hoodTransform: string;
+  /** A mesma transformação em CSS (com HOOD_ORIGIN), para poder fazer transição. */
+  hoodCss: string;
   /** A abertura escura onde vive a cara. */
   face: string;
   /** A bainha: a linha do tempo da marca. */
@@ -119,6 +121,22 @@ function hoodTransform(mood: Mood): string {
   }
 }
 
+/** O pivô do capuz (o centro da bainha), em unidades da grelha. */
+export const HOOD_ORIGIN = `${CX}px ${HEM_Y}px`;
+
+function hoodCss(mood: Mood): string {
+  switch (mood) {
+    case 'needs-you':
+      return 'scale(1.05)';
+    case 'crashed':
+      return 'scale(1, 0.9)';
+    case 'sleeping':
+      return 'scale(1, 0.92)';
+    default:
+      return 'scale(1)';
+  }
+}
+
 function toneOf(mood: Mood): Tone {
   if (mood === 'needs-you') return 'attention';
   if (mood === 'crashed') return 'danger';
@@ -130,6 +148,7 @@ export function botFrame(mood: Mood): BotFrame {
   return {
     hood: halfDisc(CX, BASE, HOOD_R, HOOD_RY),
     hoodTransform: hoodTransform(mood),
+    hoodCss: hoodCss(mood),
     face: halfDisc(CX, BASE, FACE_R, FACE_RY),
     hem: `M${HEM_X0} ${HEM_Y}H${HEM_X1}`,
     eyes: eyes(mood),

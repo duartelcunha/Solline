@@ -28,11 +28,28 @@ function useSessionMood(sessionId: string): Mood {
   return moodOf(input, Math.max(now, stateSince));
 }
 
-export function SessionBot({ sessionId, size }: { sessionId: string; size?: number }) {
+/** alive: o bot da sessão aberta, o único que pisca. */
+export function SessionBot({
+  sessionId,
+  size,
+  alive = false,
+}: {
+  sessionId: string;
+  size?: number;
+  alive?: boolean;
+}) {
   const agent = useSession(sessionId, (s) => s.info.agent);
   const transport = useApp((s) => s.agents.find((a) => a.id === agent)?.transport);
   const hood = hoodOf(agent, transport);
-  return <Bot hood={hood} mood={useSessionMood(sessionId)} size={size} title={NAMES[hood]} />;
+  return (
+    <Bot
+      hood={hood}
+      mood={useSessionMood(sessionId)}
+      size={size}
+      title={NAMES[hood]}
+      alive={alive}
+    />
+  );
 }
 
 /** O bot de um agente fora de uma sessão (escolha do agente, painel), cinzento se não está pronto. */

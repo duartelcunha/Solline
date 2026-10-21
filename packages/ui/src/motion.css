@@ -169,3 +169,76 @@
     filter: none;
   }
 }
+
+/*
+ * Bots (packages/ui/src/bot): mudam de humor a transformar-se, sem animar nada que não seja
+ * estado. Os olhos novos nascem dos antigos; o capuz levanta-se (ease-out) ou descai
+ * (in-out) a partir da bainha; a bainha muda de cor. Os pontos de "a trabalhar" pulsam e a
+ * fenda de "a ler" varre, só enquanto esse humor dura, e param com a janela escondida.
+ */
+.bot-hood {
+  transition: transform var(--sl-dur-base) var(--sl-ease-out);
+}
+[data-mood='crashed'] .bot-hood,
+[data-mood='sleeping'] .bot-hood {
+  transition: transform var(--sl-dur-slow) var(--sl-ease-in-out);
+}
+.bot-hem {
+  transition: stroke var(--sl-dur-base) ease;
+}
+@keyframes sl-bot-eyes {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+.bot-eyes-in {
+  animation: sl-bot-eyes var(--sl-dur-base) var(--sl-ease-out);
+}
+@keyframes sl-bot-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sl-bot-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.bot-dot {
+  animation: sl-bot-dot 1.2s ease-in-out infinite both;
+}
+@keyframes sl-bot-scan {
+  from {
+    transform: translateX(-10px);
+  }
+  to {
+    transform: translateX(10px);
+  }
+}
+.bot-scan {
+  animation: sl-bot-scan 1.2s var(--sl-ease-in-out) infinite alternate;
+}
+/* Janela escondida ou sem foco: o que se repete fica parado. */
+:root[data-ambient='paused'] .bot-dot,
+:root[data-ambient='paused'] .bot-scan {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-hood,
+  .bot-hem {
+    transition: none;
+  }
+  .bot-eyes-in {
+    animation-name: sl-bot-fade;
+  }
+  .bot-dot,
+  .bot-scan {
+    animation: none;
+    opacity: 0.6;
+  }
+}

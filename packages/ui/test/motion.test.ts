@@ -120,3 +120,36 @@ describe('gestos', () => {
     expect(shouldAnimate({ detail: 1 })).toBe(true);
   });
 });
+
+describe('pausa do que se repete', () => {
+  it('fica em pausa com a janela escondida ou sem foco, e volta', async () => {
+    const { trackAmbient } = await import('../src/motion.ts');
+    const listeners: Record<string, () => void> = {};
+    const state = { hidden: false, focus: true };
+    const html = { dataset: {} as Record<string, string> };
+    const doc = {
+      get hidden() {
+        return state.hidden;
+      },
+      hasFocus: () => state.focus,
+      documentElement: html,
+      addEventListener: (type: string, fn: () => void) => (listeners[type] = fn),
+      removeEventListener: () => undefined,
+    } as unknown as Document;
+    const win = {
+      addEventListener: (type: string, fn: () => void) => (listeners[type] = fn),
+      removeEventListener: () => undefined,
+    } as unknown as Window;
+    trackAmbient(doc, win);
+    expect(html.dataset.ambient).toBe('running');
+    state.focus = false;
+    listeners.blur!();
+    expect(html.dataset.ambient).toBe('paused');
+    state.focus = true;
+    listeners.focus!();
+    expect(html.dataset.ambient).toBe('running');
+    state.hidden = true;
+    listeners.visibilitychange!();
+    expect(html.dataset.ambient).toBe('paused');
+  });
+});
