@@ -26,6 +26,11 @@
   --radius-md: var(--sl-radius-md);
   --radius-lg: var(--sl-radius-lg);
   --shadow-raised: var(--sl-shadow-raised);
+  /* As transições do Tailwind (transition-colors, ...) usam a curva e a duração do motion system. */
+  --default-transition-timing-function: var(--sl-ease-out);
+  --default-transition-duration: var(--sl-dur-fast);
+  --ease-out: var(--sl-ease-out);
+  --ease-in-out: var(--sl-ease-in-out);
 }
 
 html,
@@ -275,17 +280,35 @@ body {
     transform: translateY(var(--sl-rise)) scale(var(--sl-pop-scale));
   }
 }
+/* A saída faz o caminho inverso, mais depressa; o Radix espera pelo fim antes de desmontar. */
+@keyframes sl-pop-out {
+  to {
+    opacity: 0;
+    transform: translateY(var(--sl-rise)) scale(var(--sl-pop-scale));
+  }
+}
 .menu-content {
   transform-origin: var(--radix-dropdown-menu-content-transform-origin);
-  animation: sl-pop 160ms var(--sl-ease-out);
+  animation: sl-pop var(--sl-dur-fast) var(--sl-ease-out);
+}
+.menu-content[data-state='closed'] {
+  animation: sl-pop-out var(--sl-dur-exit) var(--sl-ease-out) forwards;
 }
 @keyframes sl-fade {
   from {
     opacity: 0;
   }
 }
+@keyframes sl-fade-out {
+  to {
+    opacity: 0;
+  }
+}
 .dialog-overlay {
-  animation: sl-fade var(--sl-duration-base) var(--sl-ease-out);
+  animation: sl-fade var(--sl-dur-base) var(--sl-ease-out);
+}
+.dialog-overlay[data-state='closed'] {
+  animation: sl-fade-out var(--sl-dur-exit) var(--sl-ease-out) forwards;
 }
 /* Só opacity e scale: o centro do diálogo vive na propriedade translate do Tailwind. */
 @keyframes sl-dialog {
@@ -294,8 +317,17 @@ body {
     scale: var(--sl-pop-scale);
   }
 }
+@keyframes sl-dialog-out {
+  to {
+    opacity: 0;
+    scale: var(--sl-pop-scale);
+  }
+}
 .dialog-content {
-  animation: sl-dialog 220ms var(--sl-ease-out);
+  animation: sl-dialog var(--sl-dur-base) var(--sl-ease-out);
+}
+.dialog-content[data-state='closed'] {
+  animation: sl-dialog-out var(--sl-dur-exit) var(--sl-ease-out) forwards;
 }
 
 /* ---------- Agentes ---------- */
@@ -329,7 +361,7 @@ body {
 
 /* Um chip novo cresce do sítio onde aparece, nunca do nada. */
 .chip-in {
-  animation: sl-pop 160ms var(--sl-ease-out);
+  animation: sl-pop var(--sl-dur-fast) var(--sl-ease-out);
 }
 
 /* A linha de cada agente entra em cascata curta quando o painel abre. */
@@ -349,6 +381,11 @@ body {
     transform var(--sl-duration-fast) var(--sl-ease-out);
 }
 
+/* Ações de teclado não animam: menus, diálogos e entradas abertos pelo teclado aparecem já no sítio. */
+:root[data-input='keyboard'] :is(.appear, .menu-content, .dialog-overlay, .dialog-content, .status-swap, .chip-in, .row-in) {
+  animation-duration: 0ms !important;
+}
+
 /* A conversa desvanece por baixo do cabeçalho em vez de uma linha dura. */
 .scroll-fade {
   mask-image: linear-gradient(to bottom, transparent 0, black 16px);
@@ -356,9 +393,20 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .appear,
-  .menu-content,
-  .dialog-content {
+  .menu-content:not([data-state='closed']),
+  .dialog-content:not([data-state='closed']) {
     animation-name: sl-fade !important;
+  }
+  .menu-content[data-state='closed'],
+  .dialog-content[data-state='closed'] {
+    animation-name: sl-fade-out !important;
+  }
+  /* O arco e os pontos mudam sem crescer. */
+  .meter-arc {
+    transition: none;
+  }
+  .meter-dot {
+    transition: background-color var(--sl-duration-base) ease;
   }
   .spinner {
     animation: none !important;

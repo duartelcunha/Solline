@@ -61,7 +61,7 @@ export function FileDiffView({ file, actionable, comments, onComment, onAction }
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-label={open ? `Fechar ${file.path}` : `Abrir ${file.path}`}
-          className="grid size-6 shrink-0 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
+          className="sl-press grid size-6 shrink-0 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
         >
           <ChevronRight size={14} className={open ? 'rotate-90' : ''} />
         </button>
@@ -288,7 +288,7 @@ function CommentChip({
         type="button"
         onClick={onRemove}
         aria-label="Tirar o comentário"
-        className="grid size-5 shrink-0 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
+        className="sl-press grid size-5 shrink-0 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
       >
         <X size={12} />
       </button>
@@ -337,7 +337,7 @@ function SmallAction({
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className={`sl-press inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium transition-colors duration-150 ${
+      className={`sl-press inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium ${
         tone === 'accept' ? 'text-success hover:bg-success/10' : 'text-danger hover:bg-danger/10'
       }`}
     >

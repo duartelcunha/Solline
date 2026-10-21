@@ -184,7 +184,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
                   aria-label="Interromper"
                   title="Interromper"
                   data-testid="interrupt"
-                  className="grid size-8 place-items-center rounded-full bg-fg text-bg transition-transform duration-150 active:scale-95"
+                  className="grid size-8 place-items-center rounded-full bg-fg text-bg sl-press"
                 >
                   <Square size={11} fill="currentColor" strokeWidth={0} />
                 </button>
@@ -196,7 +196,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
                   aria-label="Enviar"
                   title="Enviar (Enter)"
                   data-testid="send"
-                  className="grid size-8 place-items-center rounded-full bg-fg text-bg transition-[transform,opacity,background-color] duration-150 active:scale-95 disabled:bg-surface-sunken disabled:text-subtle"
+                  className="grid size-8 place-items-center rounded-full bg-fg text-bg sl-press disabled:bg-surface-sunken disabled:text-subtle"
                 >
                   <ArrowUp size={16} strokeWidth={2.25} />
                 </button>

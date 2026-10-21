@@ -210,7 +210,7 @@ function TimelineTrack({
                   style={{ left: xOf(i) }}
                 >
                   <span
-                    className={`block size-2 rounded-full transition-[background-color,transform] duration-150 group-hover:scale-125 ${
+                    className={`block size-2 rounded-full transition-[background-color,transform] duration-150 group-hover:scale-125 motion-reduce:group-hover:scale-100 ${
                       c.state === 'running'
                         ? 'dot-pulse bg-accent'
                         : i >= home

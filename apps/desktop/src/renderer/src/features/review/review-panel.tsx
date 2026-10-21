@@ -198,7 +198,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
             type="button"
             onClick={() => actions.toggleReview(false)}
             aria-label="Fechar o painel de rever"
-            className="grid size-7 place-items-center rounded-md text-subtle hover:bg-surface-hover hover:text-fg"
+            className="sl-press grid size-7 place-items-center rounded-md text-subtle hover:bg-surface-hover hover:text-fg"
           >
             <X size={14} />
           </button>

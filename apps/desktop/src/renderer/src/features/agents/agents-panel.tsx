@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Check, LogIn, Plus, RefreshCw, X } from 'lucide-react';
 import { EnvKeyName, type AgentDescriptor } from '@solline/protocol';
+import { DURATION, EASE } from '@solline/ui/motion';
 import { actions, useApp } from '../../stores/app.ts';
 import { Spinner } from '../conversation/blocks.tsx';
 
@@ -34,7 +35,7 @@ const STATUS: Record<Status, { label: string; dot: string; chip: string }> = {
 };
 
 const smallButton =
-  'inline-flex h-7 items-center gap-1.5 rounded-full border border-line px-2.5 text-[12px] font-medium text-muted transition-[background-color,color,border-color,transform] duration-150 hover:border-line-strong hover:bg-surface-hover hover:text-fg active:scale-[0.97] disabled:opacity-50';
+  'inline-flex h-7 items-center gap-1.5 rounded-full border border-line px-2.5 text-[12px] font-medium text-muted sl-press hover:border-line-strong hover:bg-surface-hover hover:text-fg disabled:opacity-50';
 
 function reducedMotion(): boolean {
   return matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -51,7 +52,7 @@ function shake(element: HTMLElement | null): void {
       { transform: 'translateX(-2px)' },
       { transform: 'translateX(0)' },
     ],
-    { duration: 260, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+    { duration: DURATION.slow, easing: `cubic-bezier(${EASE.out.join(', ')})` },
   );
 }
 
@@ -108,7 +109,7 @@ function LoginButton({ agent }: { agent: AgentDescriptor }) {
       disabled={asking}
       aria-busy={asking}
       data-testid={`login-${agent.id}`}
-      className="status-swap inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-fg px-3 text-[12px] font-medium text-bg transition-transform duration-150 active:scale-[0.97]"
+      className="status-swap inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-fg px-3 text-[12px] font-medium text-bg sl-press"
     >
       <LogIn size={13} strokeWidth={2} /> {agent.login.label}
     </button>
@@ -168,7 +169,7 @@ function KeysEditor({ agent, candidates }: { agent: AgentDescriptor; candidates:
                 type="button"
                 aria-label={`Tirar ${key}`}
                 onClick={() => setKeys(keys.filter((k) => k !== key))}
-                className="grid size-4 place-items-center rounded-full text-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-fg"
+                className="grid size-4 place-items-center rounded-full text-subtle sl-press hover:bg-surface-hover hover:text-fg"
               >
                 <X size={11} />
               </button>
@@ -219,7 +220,7 @@ function KeysEditor({ agent, candidates }: { agent: AgentDescriptor; candidates:
                 key={candidate}
                 type="button"
                 onClick={() => add(candidate)}
-                className="inline-flex h-6 items-center gap-1 rounded-full border border-dashed border-line px-2.5 font-mono text-[11.5px] text-muted transition-[border-color,color,transform] duration-150 hover:border-line-strong hover:text-fg active:scale-[0.97]"
+                className="inline-flex h-6 items-center gap-1 rounded-full border border-dashed border-line px-2.5 font-mono text-[11.5px] text-muted sl-press hover:border-line-strong hover:text-fg"
               >
                 <Plus size={11} /> {candidate}
               </button>
@@ -248,7 +249,7 @@ function KeysEditor({ agent, candidates }: { agent: AgentDescriptor; candidates:
               else setKeys(saved);
             });
           }}
-          className="inline-flex h-7 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-full bg-fg px-3 text-[12px] font-medium text-bg transition-transform duration-150 active:scale-[0.97] disabled:opacity-40"
+          className="inline-flex h-7 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-full bg-fg px-3 text-[12px] font-medium text-bg sl-press disabled:opacity-40"
         >
           <span
             key={saving ? 's' : justSaved ? 'ok' : 'idle'}
@@ -398,7 +399,7 @@ export function AgentsPanel() {
             </button>
             <Dialog.Close
               aria-label="Fechar o painel de agentes"
-              className="grid size-7 place-items-center rounded-sm text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg"
+              className="grid size-7 place-items-center rounded-sm text-muted sl-press hover:bg-surface-hover hover:text-fg"
             >
               <X size={15} />
             </Dialog.Close>

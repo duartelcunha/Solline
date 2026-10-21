@@ -9,6 +9,7 @@ import { Conversation } from './features/conversation/conversation.tsx';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
 import { Sidebar, StateDot } from './features/sidebar/sidebar.tsx';
+import { usePresence } from '@solline/ui/react';
 import { actions, dispatch, sessionStore, useApp, useSession } from './stores/app.ts';
 
 const THEME_KEY = 'solline.theme';
@@ -105,7 +106,7 @@ function ReviewButton({ sessionId }: { sessionId: string }) {
       aria-pressed={open}
       aria-label={count ? `Rever: ${count} ficheiros por rever` : 'Rever alterações'}
       data-testid="review-toggle"
-      className={`no-drag sl-press inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium transition-colors duration-150 ${open ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover hover:text-fg'}`}
+      className={`no-drag sl-press inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium ${open ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover hover:text-fg'}`}
     >
       <FileDiff size={14} strokeWidth={1.75} />
       Rever
@@ -141,12 +142,42 @@ function Welcome() {
         <button
           type="button"
           onClick={() => void actions.addProject()}
-          className="inline-flex h-10 items-center gap-2 rounded-full bg-fg px-5 text-[14px] font-medium text-bg transition-transform duration-150 active:scale-[0.97]"
+          className="inline-flex h-10 items-center gap-2 rounded-full bg-fg px-5 text-[14px] font-medium text-bg sl-press"
         >
           <FolderPlus size={16} /> Adicionar projeto
         </button>
       )}
     </section>
+  );
+}
+
+/** O aviso entra e sai pelo mesmo caminho; enquanto sai, mostra ainda o último texto. */
+function NoticeBar({ notice }: { notice: string | null }) {
+  const { mounted, state } = usePresence(notice !== null);
+  const [shown, setShown] = useState(notice);
+  if (notice !== null && notice !== shown) setShown(notice);
+  if (!mounted) return null;
+  return (
+    <div
+      role="status"
+      data-state={state}
+      className="sl-enter sl-motion mx-auto mt-1 flex w-full max-w-3xl items-center gap-3 px-8"
+    >
+      <p
+        className="min-w-0 flex-1 rounded-md border border-line bg-surface px-3 py-2 text-[12.5px] text-muted"
+        data-testid="app-notice"
+      >
+        {notice ?? shown}
+      </p>
+      <button
+        type="button"
+        aria-label="Fechar aviso"
+        onClick={actions.dismissNotice}
+        className="sl-press grid size-7 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
+      >
+        <X size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -188,7 +219,7 @@ export function App() {
               aria-label="Agentes"
               title="Agentes: estado, login e variáveis"
               data-testid="sidebar-agents"
-              className="grid size-7 shrink-0 place-items-center rounded-sm text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg active:scale-95"
+              className="grid size-7 shrink-0 place-items-center rounded-sm text-muted sl-press hover:bg-surface-hover hover:text-fg"
             >
               <SlidersHorizontal size={15} strokeWidth={1.75} />
             </button>
@@ -207,7 +238,7 @@ export function App() {
               onClick={toggleTheme}
               aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
               data-testid="theme-toggle"
-              className="no-drag sl-press grid size-8 place-items-center rounded-sm text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg"
+              className="no-drag sl-press grid size-8 place-items-center rounded-sm text-muted hover:bg-surface-hover hover:text-fg"
             >
               {theme === 'dark' ? (
                 <Sun size={16} strokeWidth={1.75} />
@@ -218,27 +249,7 @@ export function App() {
           </div>
         </header>
 
-        {notice ? (
-          <div
-            role="status"
-            className="appear mx-auto mt-1 flex w-full max-w-3xl items-center gap-3 px-8"
-          >
-            <p
-              className="min-w-0 flex-1 rounded-md border border-line bg-surface px-3 py-2 text-[12.5px] text-muted"
-              data-testid="app-notice"
-            >
-              {notice}
-            </p>
-            <button
-              type="button"
-              aria-label="Fechar aviso"
-              onClick={actions.dismissNotice}
-              className="grid size-7 place-items-center rounded-sm text-subtle hover:bg-surface-hover hover:text-fg"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        ) : null}
+        <NoticeBar notice={notice} />
 
         {activeSessionId ? (
           <div className="flex min-h-0 flex-1">

@@ -87,7 +87,7 @@ function Kbd({ children }: { children: React.ReactNode }) {
 }
 
 const button =
-  'inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium transition-[background-color,transform,box-shadow] duration-150 active:scale-[0.97] disabled:opacity-50';
+  'inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium sl-press disabled:opacity-50';
 const primary = `${button} bg-fg text-bg hover:opacity-90`;
 const secondary = `${button} border border-line-strong bg-surface hover:bg-surface-hover`;
 const quiet = `${button} text-muted hover:bg-surface-hover hover:text-fg`;
@@ -299,7 +299,7 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
                     role={q.multiSelect ? 'checkbox' : 'radio'}
                     aria-checked={on}
                     onClick={() => toggle(q.question, option.label, q.multiSelect)}
-                    className={`rounded-md border px-3 py-2 text-left transition-[background-color,border-color] duration-150 ${on ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface-hover'}`}
+                    className={`rounded-md border px-3 py-2 text-left transition-[background-color,border-color] duration-150 ${on ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface-hover active:bg-surface-sunken'}`}
                   >
                     <div className="text-[13px] font-medium">{option.label}</div>
                     {option.description ? (
