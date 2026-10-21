@@ -30,6 +30,8 @@ export interface SessionData {
   quality: Quality | null;
   /** As verificações do projeto (tipos, lint, testes) depois do último turno que mudou ficheiros. */
   checks: Checks | null;
+  /** O último "Trazer" deu conflitos nestes ficheiros (para pedir ao agente que os resolva). */
+  conflicts: { files: string[]; into: string } | null;
   /** Desde quando a sessão está no estado atual (ms). */
   stateSince: number;
   /** Quando acabou o último turno (ms), ou null se ainda não acabou nenhum. */
@@ -57,6 +59,7 @@ export function createSessionStore(
     draft: null,
     quality: null,
     checks: null,
+    conflicts: null,
     stateSince: Date.now(),
     turnEndedAt: null,
   }));
@@ -105,6 +108,8 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       return { ...data, quality: event.quality };
     case 'session.checks':
       return { ...data, checks: event.checks };
+    case 'session.workspace':
+      return { ...data, info: { ...data.info, workspace: event.workspace } };
     case 'session.state': {
       if (event.state === data.info.state) return data;
       const now = Date.now();

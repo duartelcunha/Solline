@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,6 +39,14 @@ test.beforeAll(async () => {
       },
     }),
   );
+  // O projeto é um repositório git: a segunda sessão ao mesmo tempo ganha a sua worktree.
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: project, windowsHide: true });
+  git('init', '--quiet', '-b', 'main');
+  git('config', 'user.email', 'e2e@solline.local');
+  git('config', 'user.name', 'E2E');
+  git('config', 'core.autocrlf', 'false');
+  git('add', '-A');
+  git('commit', '--quiet', '-m', 'início');
   const env = {
     ...process.env,
     SOLLINE_USER_DATA: userData,
@@ -474,6 +484,50 @@ test('rever o diff, comentar, rejeitar, desfazer e rebobinar (SDK real)', async 
   await slow(page.getByTestId('composer-input')).toHaveValue(/replace the word "alpha"/);
   await slow(page.getByTestId('composer-input')).toBeEnabled({ timeout: 60_000 });
   await shot(page, 'timeline-rewound');
+});
+
+test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'depende da sessão real dos testes anteriores');
+  test.setTimeout(240_000);
+  const page = await app.firstWindow();
+  await page.getByTestId('new-session').click();
+  await expect(page.getByTestId('session-row')).toHaveCount(2, { timeout: 90_000 });
+  await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
+  const chip = page.getByTestId('workspace-chip');
+  await expect(chip).toHaveAttribute('data-branch', /^solline\/sessao-/);
+
+  await page.getByTestId('pill-model').click();
+  await page.getByTestId('model-haiku').click();
+  await page.getByTestId('pill-effort').click();
+  await page.getByTestId('effort-low').click();
+  await page
+    .getByTestId('composer-input')
+    .fill(
+      'Create a file named wt.txt containing exactly the word hello. Reply with one short sentence.',
+    );
+  await page.getByTestId('send').click();
+  const card = page.getByTestId('permission-card');
+  await expect(card).toBeVisible({ timeout: 120_000 });
+  await card.getByRole('button', { name: /Permitir uma vez/ }).click();
+  await expect(page.getByTestId('session-row').first()).toHaveAttribute('data-state', 'idle', {
+    timeout: 120_000,
+  });
+
+  // O branch ganhou o nome da mensagem; o ficheiro está só na worktree até se trazer.
+  await expect(chip).toHaveAttribute('data-branch', /^solline\/create-a-file-named-/);
+  await expect(chip).toContainText('+1', { timeout: 30_000 });
+  expect(existsSync(join(project, 'wt.txt'))).toBe(false);
+  await shot(page, 'worktree-chip');
+  await chip.click();
+  await page.getByTestId('workspace-bring').click();
+  await expect
+    .poll(() => readFile(join(project, 'wt.txt'), 'utf8').catch(() => ''), { timeout: 30_000 })
+    .toContain('hello');
+
+  // Já trazida, fecha sem perguntar e a worktree sai.
+  await chip.click();
+  await page.getByTestId('workspace-close').click();
+  await expect(page.getByTestId('session-row')).toHaveCount(1, { timeout: 30_000 });
 });
 
 test('Codex por clique: sessão, resposta e tokens (Codex real)', async () => {

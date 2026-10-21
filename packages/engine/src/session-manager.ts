@@ -17,6 +17,8 @@ import {
   type CheckSpec,
   type Checks,
   type Quality,
+  type Workspace,
+  type WorktreeStats,
   type Timeline,
   type Turn,
 } from '@solline/protocol';
@@ -28,6 +30,7 @@ import type { Reviewer } from './quality/reviewer.ts';
 import { NO_REVIEW, SessionQuality, fixMessage } from './quality/session-quality.ts';
 import { ProjectChecks, checkFixMessage } from './checks/project-checks.ts';
 import type { RunCommand } from './checks/run.ts';
+import type { Worktree, WorktreeManager } from './worktrees/worktrees.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
@@ -62,6 +65,8 @@ export interface ChecksOptions {
   detect?: (cwd: string) => Promise<CheckSpec[]>;
 }
 
+const NO_STATS: WorktreeStats = { files: 0, additions: 0, deletions: 0 };
+
 interface Entry {
   info: SessionInfo;
   adapter: AgentAdapter;
@@ -85,6 +90,10 @@ interface Memory {
   context: string | undefined;
   /** A segunda opinião: um revisor lê o diff de cada turno (sem revisor, não existe). */
   quality: SessionQuality | undefined;
+  /** A worktree da sessão (só quando o projeto já tinha uma sessão na pasta). */
+  worktree: Worktree | undefined;
+  /** O branch já tem o nome da primeira mensagem. */
+  named: boolean;
 }
 
 const DISABLED_TIMELINE = (rewind: ConversationRewind): Timeline => ({
@@ -114,8 +123,11 @@ export class SessionManager {
   readonly #keysFor: (agent: string) => Promise<readonly string[]>;
   readonly #reviewer: Reviewer | undefined;
   readonly #checksOptions: ChecksOptions | undefined;
-  /** As verificações de cada projeto (por projectId), partilhadas pelas suas sessões. */
+  /** As verificações de cada pasta de trabalho (por cwd), partilhadas pelas sessões que lá estão. */
   readonly #checks = new Map<string, ProjectChecks>();
+  /** O projeto de cada pasta com verificações (para a confiança e a lista do projeto). */
+  readonly #checkProjects = new Map<string, string>();
+  readonly #worktrees: WorktreeManager | undefined;
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
@@ -133,6 +145,8 @@ export class SessionManager {
     reviewer?: Reviewer | undefined;
     /** As verificações do projeto no fim de cada turno que mude ficheiros; sem isto, não há. */
     checks?: ChecksOptions | undefined;
+    /** Worktrees para as sessões a mais de um projeto; sem isto, partilham a pasta. */
+    worktrees?: WorktreeManager | undefined;
   }) {
     this.#emit = options.emit;
     this.#registry = options.registry;
@@ -142,6 +156,7 @@ export class SessionManager {
     this.#keysFor = options.keysFor ?? (async () => []);
     this.#reviewer = options.reviewer;
     this.#checksOptions = options.checks;
+    this.#worktrees = options.worktrees;
   }
 
   async create(payload: SessionStartPayload): Promise<SessionResult> {
@@ -163,11 +178,13 @@ export class SessionManager {
         'Com um servidor MCP que corre programas, escolhe um modo que pergunte antes',
       );
     }
+    const place = await this.#placeFor(payload.projectId, payload.cwd);
     const info: SessionInfo = {
       id: crypto.randomUUID(),
       projectId: payload.projectId,
       agent: payload.agent,
-      cwd: payload.cwd,
+      cwd: place.cwd,
+      workspace: place.workspace,
       // O título vem da primeira mensagem, na interface.
       title: 'Nova sessão',
       state: 'starting',
@@ -194,6 +211,8 @@ export class SessionManager {
               this.#emit({ kind: 'event', type: 'session.quality', sessionId: info.id, quality }),
           })
         : undefined,
+      worktree: place.worktree,
+      named: false,
     };
     this.#memory.set(info.id, memory);
     this.#checksFor(info.projectId, info.cwd, payload.trusted, payload.checks ?? null);
@@ -205,6 +224,8 @@ export class SessionManager {
       });
     } catch (error) {
       this.#memory.delete(info.id);
+      if (place.worktree)
+        await this.#worktrees?.remove(place.worktree, true).catch(() => undefined);
       throw error;
     }
     // O primeiro checkpoint (o disco antes de tudo) faz-se por trás: a sessão já está pronta.
@@ -223,12 +244,18 @@ export class SessionManager {
       if (entry.info.projectId === projectId) entry.trusted = trusted;
     }
     // As verificações seguem a confiança já: sem ela, nada corre a partir de agora.
-    this.#checks.get(projectId)?.setTrusted(trusted);
+    for (const checks of this.#checksOf(projectId)) checks.setTrusted(trusted);
   }
 
   /** As verificações de um projeto mudaram no main (já com a tua confirmação). */
   async setProjectChecks(projectId: string, checks: CheckSpec[] | null): Promise<void> {
-    await this.#checks.get(projectId)?.configure(checks);
+    await Promise.all(this.#checksOf(projectId).map((c) => c.configure(checks)));
+  }
+
+  #checksOf(projectId: string): ProjectChecks[] {
+    return [...this.#checks.entries()]
+      .filter(([cwd]) => this.#checkProjects.get(cwd) === projectId)
+      .map(([, checks]) => checks);
   }
 
   checks(sessionId: string): Checks {
@@ -238,7 +265,8 @@ export class SessionManager {
   /** Volta a correr as verificações agora; o resultado chega por session.checks. */
   async runChecks(sessionId: string): Promise<Checks> {
     const checks = this.#projectChecks(sessionId);
-    if (!checks.state.trusted) throw new Error('As verificações só correm em projetos de confiança');
+    if (!checks.state.trusted)
+      throw new Error('As verificações só correm em projetos de confiança');
     const last = this.#memoryOf(sessionId).checkpoints?.timeline().checkpoints.at(-1);
     void checks.run(last?.state === 'done' ? last.turnId : null);
     return checks.state;
@@ -253,14 +281,14 @@ export class SessionManager {
 
   #projectChecks(sessionId: string): ProjectChecks {
     const { info } = this.#get(sessionId);
-    const checks = this.#checks.get(info.projectId);
+    const checks = this.#checks.get(info.cwd);
     if (!checks) throw new Error('As verificações não estão disponíveis');
     return checks;
   }
 
-  /** Abre (uma vez por projeto) as verificações e espalha cada mudança pelas suas sessões. */
+  /** Abre (uma vez por pasta) as verificações e espalha cada mudança pelas sessões de lá. */
   #checksFor(projectId: string, cwd: string, trusted: boolean, saved: CheckSpec[] | null): void {
-    if (!this.#checksOptions || this.#checks.has(projectId)) return;
+    if (!this.#checksOptions || this.#checks.has(cwd)) return;
     const checks = new ProjectChecks({
       cwd,
       saved,
@@ -268,12 +296,18 @@ export class SessionManager {
       ...this.#checksOptions,
       emit: (state) => {
         for (const entry of this.#sessions.values()) {
-          if (entry.info.projectId !== projectId) continue;
-          this.#emit({ kind: 'event', type: 'session.checks', sessionId: entry.info.id, checks: state });
+          if (entry.info.cwd !== cwd) continue;
+          this.#emit({
+            kind: 'event',
+            type: 'session.checks',
+            sessionId: entry.info.id,
+            checks: state,
+          });
         }
       },
     });
-    this.#checks.set(projectId, checks);
+    this.#checks.set(cwd, checks);
+    this.#checkProjects.set(cwd, projectId);
     void checks.refresh();
   }
 
@@ -296,7 +330,7 @@ export class SessionManager {
     this.#requireIdle(entry, memory, 'mandar outra mensagem');
     memory.busy = true;
     // Um turno novo muda os ficheiros: a ronda de verificações a meio deixa de valer.
-    this.#checks.get(entry.info.projectId)?.cancel();
+    this.#checks.get(entry.info.cwd)?.cancel();
     try {
       const turnId = crypto.randomUUID();
       const point = entry.adapter.rewindPoint?.();
@@ -321,6 +355,10 @@ export class SessionManager {
       }
       memory.context = undefined;
       if (point !== undefined) memory.points.set(sent, point);
+      if (memory.worktree && !memory.named) {
+        memory.named = true;
+        void this.#nameBranch(sessionId, text);
+      }
       return sent;
     } finally {
       memory.busy = false;
@@ -358,7 +396,7 @@ export class SessionManager {
   async undo(sessionId: string): Promise<Timeline> {
     this.#requireIdle(this.#get(sessionId), this.#memoryOf(sessionId), 'desfazer');
     const timeline = await this.#checkpoints(sessionId).undo();
-    this.#checks.get(this.#get(sessionId).info.projectId)?.reset();
+    this.#checks.get(this.#get(sessionId).info.cwd)?.reset();
     this.#emitTimeline(sessionId, timeline);
     return timeline;
   }
@@ -402,7 +440,7 @@ export class SessionManager {
     if (index === -1) throw new Error('Este turno já não está na conversa');
     // Os achados falavam de código que vai deixar de existir.
     memory.quality?.reset();
-    this.#checks.get(entry.info.projectId)?.reset();
+    this.#checks.get(entry.info.cwd)?.reset();
     const userTurn = memory.turns[index];
     if (options.files) {
       const checkpoints = this.#checkpoints(sessionId);
@@ -503,6 +541,7 @@ export class SessionManager {
     for (const m of memories) m.quality?.dispose();
     for (const c of this.#checks.values()) c.dispose();
     this.#checks.clear();
+    this.#checkProjects.clear();
     await Promise.all(memories.map((m) => m.checkpoints?.dispose()));
   }
 
@@ -544,6 +583,7 @@ export class SessionManager {
       this.#emitTimeline(sessionId);
       if (memory.quality?.state.enabled) void this.#review(sessionId, turnId);
       void this.#check(sessionId, turnId);
+      if (memory.worktree) void this.#emitWorkspace(sessionId);
     });
   }
 
@@ -573,7 +613,109 @@ export class SessionManager {
       ?.checkpoints?.timeline()
       .checkpoints.find((c) => c.turnId === turnId);
     if (!entry || !checkpoint || checkpoint.stats.files === 0) return;
-    await this.#checks.get(entry.info.projectId)?.run(turnId);
+    await this.#checks.get(entry.info.cwd)?.run(turnId);
+  }
+
+  /**
+   * Onde trabalha uma sessão nova: a primeira de um projeto na pasta dele; com outra já lá, numa
+   * worktree (se o projeto for git) ou na mesma pasta, marcada como partilhada.
+   */
+  async #placeFor(
+    projectId: string,
+    projectPath: string,
+  ): Promise<{ cwd: string; workspace: Workspace; worktree?: Worktree }> {
+    const key = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p);
+    const taken = [...this.#sessions.values()].some(
+      (e) => e.info.projectId === projectId && key(e.info.cwd) === key(projectPath),
+    );
+    if (!taken) return { cwd: projectPath, workspace: { kind: 'project' } };
+    const worktree = await this.#worktrees?.create(projectPath, projectId).catch((error) => {
+      console.error('[worktrees] não consegui criar a worktree:', error);
+      return null;
+    });
+    if (!worktree) return { cwd: projectPath, workspace: { kind: 'shared' } };
+    return {
+      cwd: worktree.cwd,
+      workspace: { kind: 'worktree', branch: worktree.branch, stats: NO_STATS },
+      worktree,
+    };
+  }
+
+  async #nameBranch(sessionId: string, text: string): Promise<void> {
+    const memory = this.#memory.get(sessionId);
+    if (!memory?.worktree || !this.#worktrees) return;
+    try {
+      memory.worktree = await this.#worktrees.rename(memory.worktree, text);
+      await this.#emitWorkspace(sessionId);
+    } catch (error) {
+      console.error('[worktrees] não consegui dar nome ao branch:', error);
+    }
+  }
+
+  async #emitWorkspace(sessionId: string): Promise<void> {
+    const entry = this.#sessions.get(sessionId);
+    const worktree = this.#memory.get(sessionId)?.worktree;
+    if (!entry || !worktree || !this.#worktrees) return;
+    const stats = await this.#worktrees.statsOrNone(worktree);
+    const workspace: Workspace = { kind: 'worktree', branch: worktree.branch, stats };
+    entry.info.workspace = workspace;
+    this.#emit({ kind: 'event', type: 'session.workspace', sessionId, workspace });
+  }
+
+  /** Traz o trabalho da worktree para o branch atual do projeto. */
+  async bring(sessionId: string): Promise<{ merged: boolean; conflicts: string[]; into: string }> {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    this.#requireIdle(entry, memory, 'trazer o trabalho');
+    if (!memory.worktree || !this.#worktrees)
+      throw new Error('Esta sessão trabalha na pasta do projeto');
+    const first = memory.turns.find((t) => t.role === 'user');
+    const title = (first ? textOf(first).split('\n')[0] : undefined)?.slice(0, 72) || 'sessão';
+    const { result, wt } = await this.#worktrees.bring(memory.worktree, `Solline: ${title}`);
+    memory.worktree = wt;
+    await this.#emitWorkspace(sessionId);
+    return result;
+  }
+
+  /**
+   * Fecha a sessão. Uma worktree com mudanças por trazer pede escolha primeiro: trazer, guardar
+   * o branch ou deitar fora. Sem mudanças (ou já trazida), a pasta e o branch saem.
+   */
+  async close(
+    sessionId: string,
+    choice?: 'bring' | 'keep' | 'discard',
+  ): Promise<{ closed: boolean; stats?: WorktreeStats; conflicts?: string[] }> {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    const worktree = memory.worktree;
+    if (worktree && this.#worktrees) {
+      const stats = await this.#worktrees.statsOrNone(worktree);
+      if (stats.files > 0) {
+        if (!choice) return { closed: false, stats };
+        if (choice === 'bring') {
+          const result = await this.bring(sessionId);
+          if (!result.merged) return { closed: false, conflicts: result.conflicts };
+        }
+      }
+    }
+    this.#sessions.delete(sessionId);
+    this.#memory.delete(sessionId);
+    await entry.adapter.close().catch(() => undefined);
+    memory.quality?.dispose();
+    await memory.checkpoints?.dispose();
+    const cwd = entry.info.cwd;
+    if (![...this.#sessions.values()].some((e) => e.info.cwd === cwd)) {
+      this.#checks.get(cwd)?.dispose();
+      this.#checks.delete(cwd);
+      this.#checkProjects.delete(cwd);
+    }
+    if (worktree && this.#worktrees) {
+      const current = memory.worktree ?? worktree;
+      await this.#worktrees.remove(current, choice !== 'keep').catch((error) => {
+        console.error('[worktrees] não consegui tirar a worktree:', error);
+      });
+    }
+    return { closed: true };
   }
 
   quality(sessionId: string): Quality {

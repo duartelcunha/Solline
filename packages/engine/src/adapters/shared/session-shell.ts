@@ -34,7 +34,10 @@ export function statusFor(outcome: BrokerOutcome): AskBlock['status'] {
 
 /** A resposta tem de caber no pedido: o bloco é a única verdade sobre o que aceita. */
 export function checkAnswer(block: AskBlock, answer: PermissionAnswer): void {
-  if (answer.decision === 'allow-always' && !(block.kind === 'permission' && block.canAlwaysAllow)) {
+  if (
+    answer.decision === 'allow-always' &&
+    !(block.kind === 'permission' && block.canAlwaysAllow)
+  ) {
     throw new Error('Este pedido não aceita "Permitir sempre"');
   }
   if (

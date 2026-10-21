@@ -25,7 +25,10 @@ const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g;
 /** As últimas linhas, sem cores nem linhas vazias no fim. */
 export function tailOf(output: string): string {
   const lines = output.replace(ANSI, '').replace(/\r\n?/g, '\n').trimEnd().split('\n');
-  const tail = lines.slice(-TAIL_LINES).join('\n').replace(/^\s*\n/, '');
+  const tail = lines
+    .slice(-TAIL_LINES)
+    .join('\n')
+    .replace(/^\s*\n/, '');
   return tail.length > TAIL_CHARS ? tail.slice(-TAIL_CHARS) : tail;
 }
 

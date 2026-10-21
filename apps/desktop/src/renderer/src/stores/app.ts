@@ -50,6 +50,8 @@ interface AppState {
   checkingAgents: boolean;
   /** Agentes com um pedido de login ainda sem resposta (o botão fica desligado). */
   loginRequests: string[];
+  /** Uma sessão que não fechou porque tem trabalho por trazer: o diálogo pergunta o que fazer. */
+  closing: { sessionId: string; files: number; additions: number; deletions: number } | null;
 }
 
 export const useApp = create<AppState>(() => ({
@@ -66,6 +68,7 @@ export const useApp = create<AppState>(() => ({
   agentsPanel: false,
   checkingAgents: false,
   loginRequests: [],
+  closing: null,
 }));
 
 const sessionStores = new Map<string, SessionStore>();
@@ -334,6 +337,70 @@ export const actions = {
     } catch (error) {
       setActionError(sessionId, error);
       return false;
+    }
+  },
+
+  /** Traz o trabalho da worktree da sessão para o projeto; com conflitos, guarda a lista. */
+  async bring(sessionId: string): Promise<void> {
+    const store = sessionStores.get(sessionId);
+    store?.setState({ actionError: null });
+    try {
+      const result = await request('session.bring', { sessionId });
+      store?.setState({
+        conflicts: result.merged ? null : { files: result.conflicts, into: result.into },
+      });
+    } catch (error) {
+      setActionError(sessionId, error);
+    }
+  },
+
+  /** Pede ao agente para resolver os conflitos do último "Trazer" no seu branch. */
+  async resolveConflicts(sessionId: string): Promise<void> {
+    const store = sessionStores.get(sessionId);
+    const conflicts = store?.getState().conflicts;
+    if (!conflicts) return;
+    const sent = await actions.send(
+      sessionId,
+      `Ao trazer o teu branch para ${conflicts.into} houve conflitos em: ${conflicts.files.join(', ')}. ` +
+        `Faz merge de ${conflicts.into} no teu branch, resolve os conflitos e conclui o merge.`,
+    );
+    if (sent) store?.setState({ conflicts: null });
+  },
+
+  /**
+   * Fecha uma sessão. Com trabalho por trazer e sem escolha, abre o diálogo em vez de fechar.
+   */
+  async closeSession(sessionId: string, worktree?: 'bring' | 'keep' | 'discard'): Promise<void> {
+    try {
+      const result = await request('session.close', {
+        sessionId,
+        ...(worktree ? { worktree } : {}),
+      });
+      if (!result.closed) {
+        if (result.conflicts) {
+          const into = 'o projeto';
+          sessionStores.get(sessionId)?.setState({ conflicts: { files: result.conflicts, into } });
+          useApp.setState({
+            closing: null,
+            notice: 'Há conflitos: pede ao agente para os resolver.',
+          });
+        } else if (result.stats) {
+          useApp.setState({ closing: { sessionId, ...result.stats } });
+        }
+        return;
+      }
+      sessionStores.delete(sessionId);
+      useApp.setState((s) => {
+        const sessionIds = s.sessionIds.filter((id) => id !== sessionId);
+        return {
+          sessionIds,
+          closing: null,
+          activeSessionId:
+            s.activeSessionId === sessionId ? (sessionIds[0] ?? null) : s.activeSessionId,
+        };
+      });
+    } catch (error) {
+      useApp.setState({ closing: null, notice: message(error) });
     }
   },
 

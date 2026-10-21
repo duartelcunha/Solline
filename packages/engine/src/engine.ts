@@ -19,6 +19,7 @@ import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
 import { SessionManager, type ChecksOptions } from './session-manager.ts';
 import { detectChecks } from './checks/detect.ts';
+import { WorktreeManager } from './worktrees/worktrees.ts';
 import { ENGINE_VERSION } from './version.ts';
 
 export interface EngineOptions {
@@ -43,6 +44,8 @@ export interface EngineOptions {
   reviewer?: Reviewer | false;
   /** As verificações do projeto no fim de cada turno (por omissão ligadas, menos isolado); false desliga. */
   checks?: ChecksOptions | false;
+  /** Worktrees para as sessões a mais de um projeto (por omissão na pasta de dados); false desliga. */
+  worktrees?: WorktreeManager | false;
   /** Para testes: troca onde ficam as variáveis escolhidas para cada agente. */
   settings?: AgentSettings;
   /** Para testes: o ambiente onde se procuram nomes de segredos. */
@@ -98,6 +101,13 @@ export class Engine {
               ? undefined
               : claudeReviewer({ claudeExecutable: options.claudeExecutable }))),
       // Nos testes isolados não se correm comandos do repositório da própria Solline.
+      worktrees:
+        options.worktrees === false
+          ? undefined
+          : (options.worktrees ??
+            (options.dataDir
+              ? new WorktreeManager({ root: path.join(options.dataDir, 'worktrees') })
+              : undefined)),
       checks:
         options.checks === false
           ? undefined
@@ -176,6 +186,8 @@ export class Engine {
       'projects.checksChanged': async (p) => (await s.setProjectChecks(p.projectId, p.checks), ok),
       'session.resume': (p) => s.resume(p.sessionId),
       'session.send': async (p) => ({ turnId: await s.send(p.sessionId, p.text) }),
+      'session.bring': (p) => s.bring(p.sessionId),
+      'session.close': (p) => s.close(p.sessionId, p.worktree),
       'session.interrupt': async (p) => (await s.interrupt(p.sessionId), ok),
       'session.setMode': async (p) => (await s.setMode(p.sessionId, p.mode), ok),
       'session.setModel': async (p) => (await s.setModel(p.sessionId, p.model), ok),

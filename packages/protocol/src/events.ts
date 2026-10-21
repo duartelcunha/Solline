@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentId, AskBlock, ConversationDelta, SessionState } from './conversation.ts';
+import { AgentId, AskBlock, ConversationDelta, SessionState, Workspace } from './conversation.ts';
 import { Checks } from './checks.ts';
 import { Quality } from './quality.ts';
 import { Timeline } from './review.ts';
@@ -66,6 +66,14 @@ export const SessionChecksEvent = z.object({
   checks: Checks,
 });
 
+/** Onde a sessão trabalha mudou: o branch ganhou nome, mudaram os +/− ou o trabalho foi trazido. */
+export const SessionWorkspaceEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.workspace'),
+  sessionId: z.string(),
+  workspace: Workspace,
+});
+
 export const EngineErrorEvent = z.object({
   kind: z.literal('event'),
   type: z.literal('engine.error'),
@@ -91,6 +99,7 @@ export const EngineEvent = z.discriminatedUnion('type', [
   SessionTimelineEvent,
   SessionQualityEvent,
   SessionChecksEvent,
+  SessionWorkspaceEvent,
   EngineErrorEvent,
 ]);
 export type EngineEvent = z.infer<typeof EngineEvent>;

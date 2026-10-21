@@ -1,5 +1,5 @@
 import { Logo } from '../../components/logo.tsx';
-import { FolderPlus, Folder, ShieldCheck, ShieldOff } from 'lucide-react';
+import { FolderPlus, Folder, ShieldCheck, ShieldOff, X } from 'lucide-react';
 import { APP_NAME } from '@solline/protocol/app';
 import type { Project, SessionState } from '@solline/protocol';
 import { actions, useApp, useSession } from '../../stores/app.ts';
@@ -19,7 +19,7 @@ function SessionRow({ id }: { id: string }) {
   const state = useSession(id, (s) => s.info.state);
   const active = useApp((s) => s.activeSessionId === id);
   return (
-    <li>
+    <li className="group relative">
       <button
         type="button"
         onClick={() => actions.selectSession(id)}
@@ -27,12 +27,22 @@ function SessionRow({ id }: { id: string }) {
         aria-label={`${title}, ${STATE_LABEL[state]}`}
         data-testid="session-row"
         data-state={state}
-        className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 pl-5 text-left text-[13px] transition-colors duration-150 active:bg-surface-hover ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
+        className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-7 pl-5 text-left text-[13px] transition-colors duration-150 active:bg-surface-hover ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
       >
         <span className="grid w-4 shrink-0 place-items-center">
           <SessionMark sessionId={id} />
         </span>
         <span className="min-w-0 flex-1 truncate">{title}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => void actions.closeSession(id)}
+        aria-label={`Fechar ${title}`}
+        title="Fechar sessão"
+        data-testid="session-close"
+        className={`absolute top-1/2 right-1 grid size-6 -translate-y-1/2 place-items-center rounded-md text-subtle hover:bg-surface-hover hover:text-fg ${reveal}`}
+      >
+        <X size={13} />
       </button>
     </li>
   );

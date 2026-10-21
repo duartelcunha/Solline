@@ -388,3 +388,17 @@
   vez.
 - **Ordem:** bots parados e ícone → avisos do Windows ("precisa de ti", "turno acabado", só sem
   foco) → verificações do projeto depois de cada turno → M3 (a mesa) → animação dos bots.
+
+## M3, fatia 1: uma worktree por sessão a mais (21/10/2026)
+
+- A primeira sessão ativa de um projeto trabalha na pasta; da segunda em diante (ao mesmo tempo)
+  cada uma ganha uma worktree em `<dados>/worktrees/<projeto>/<4 letras>` e o branch
+  `solline/<título>-<4 letras>` (nome dado na primeira mensagem). Sem git, partilham a pasta
+  e o cabeçalho diz "Mesma pasta"; a Solline nunca faz `git init`.
+- "Trazer" grava as mudanças da worktree num commit (com os hooks do projeto) e faz
+  `merge --no-ff` no branch atual do projeto. Com conflitos, o merge é desfeito no projeto e o
+  agente pode resolvê-los no seu branch. Só exige a sessão da worktree parada.
+- Fechar: sem mudanças por trazer, a worktree e o branch saem; com mudanças, pergunta.
+- Cada worktree tem um `.json` ao lado (branch, base, projeto) para as que ficam por trazer
+  depois de a app fechar aparecerem na mesa (fatia 2).
+- As verificações passam a ser por pasta de trabalho, não por projeto.

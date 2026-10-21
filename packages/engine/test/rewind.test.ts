@@ -11,6 +11,8 @@ import type {
   SessionTimelineEvent,
 } from '@solline/protocol';
 import type { ChecksOptions } from '../src/session-manager.ts';
+import { WorktreeManager } from '../src/worktrees/worktrees.ts';
+import { execFileSync } from 'node:child_process';
 import {
   ClaudeSdkAdapter,
   CodexAppServerAdapter,
@@ -115,7 +117,12 @@ let store: CheckpointStore;
 let manager: SessionManager;
 let events: EngineEvent[];
 
-function makeManager(native: boolean, reviewer?: Reviewer, checks?: ChecksOptions) {
+function makeManager(
+  native: boolean,
+  reviewer?: Reviewer,
+  checks?: ChecksOptions,
+  worktrees?: WorktreeManager,
+) {
   events = [];
   manager = new SessionManager({
     emit: (event) => events.push(event),
@@ -125,6 +132,7 @@ function makeManager(native: boolean, reviewer?: Reviewer, checks?: ChecksOption
     checkpoints: store,
     reviewer,
     checks,
+    worktrees,
   });
 }
 
@@ -529,5 +537,65 @@ describe('verificações do projeto no fim de cada turno', { timeout: 60_000 }, 
     await new Promise((r) => setTimeout(r, 200));
     expect(calls).toBe(1);
     await expect(manager.runChecks(id)).rejects.toThrow('confiança');
+  });
+});
+
+describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+
+  function gitProject() {
+    git(project, 'init', '--quiet', '-b', 'main');
+    git(project, 'config', 'user.email', 'teste@solline.local');
+    git(project, 'config', 'user.name', 'Teste');
+    git(project, 'config', 'core.autocrlf', 'false');
+    git(project, 'add', '-A');
+    git(project, 'commit', '--quiet', '-m', 'início');
+    return new WorktreeManager({ root: path.join(root, 'data', 'worktrees') });
+  }
+
+  it('a primeira sessão fica na pasta; a segunda trabalha na sua worktree e traz por merge', async () => {
+    makeManager(true, undefined, undefined, gitProject());
+    const first = await startSession();
+    const second = await startSession();
+    const infoOf = (id: string) =>
+      [...events].reverse().find((e) => e.type === 'session.workspace' && e.sessionId === id) as
+        { workspace: { kind: string; branch?: string; stats?: { files: number } } } | undefined;
+
+    await turn(second, 'escreve f.txt=da-worktree');
+    await waitFor(() => infoOf(second)?.workspace.stats?.files === 1, 10_000);
+    expect(infoOf(second)!.workspace.branch).toMatch(/^solline\/escreve-f-txt-da-/);
+    // O projeto continua como estava até se trazer.
+    expect(await read('f.txt')).toBe('v0\n');
+
+    const result = await manager.bring(second);
+    expect(result).toMatchObject({ merged: true, into: 'main' });
+    expect(await read('f.txt')).toBe('da-worktree' + String.fromCharCode(10));
+    expect(infoOf(first)).toBeUndefined();
+
+    expect(await manager.close(second)).toEqual({ closed: true });
+  });
+
+  it('fechar com mudanças por trazer pede escolha; deitar fora apaga o branch', async () => {
+    makeManager(true, undefined, undefined, gitProject());
+    await startSession();
+    const second = await startSession();
+    await turn(second, 'escreve g.txt=x');
+    expect(await manager.close(second)).toMatchObject({ closed: false, stats: { files: 1 } });
+    expect(await manager.close(second, 'discard')).toEqual({ closed: true });
+    expect(git(project, 'branch', '--list', 'solline/*')).toBe('');
+  });
+
+  it('sem git, a segunda sessão partilha a pasta', async () => {
+    makeManager(true, undefined, undefined, new WorktreeManager({ root: path.join(root, 'wt') }));
+    await startSession();
+    const { session } = await manager.create({
+      projectId: 'p',
+      agent: 'claude',
+      cwd: project,
+      trusted: true,
+    });
+    expect(session.workspace).toEqual({ kind: 'shared' });
+    expect(session.cwd).toBe(project);
   });
 });

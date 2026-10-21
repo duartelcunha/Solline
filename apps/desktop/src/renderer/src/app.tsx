@@ -8,6 +8,7 @@ import { NewSessionButton } from './features/agents/new-session-button.tsx';
 import { Conversation } from './features/conversation/conversation.tsx';
 import { QualityChip } from './features/quality/quality.tsx';
 import { ChecksRow } from './features/quality/checks.tsx';
+import { CloseDialog, WorkspaceChip } from './features/workspace/workspace.tsx';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
 import { Familiar, SessionBot } from './features/agents/bots.tsx';
@@ -121,7 +122,7 @@ function ReviewButton({ sessionId }: { sessionId: string }) {
       <FileDiff size={14} strokeWidth={1.75} />
       Rever
       {pending && count > 0 ? (
-        <span className="font-mono text-[11px] tabular-nums" data-testid="review-pending">
+        <span className="font-mono text-[11px] whitespace-nowrap tabular-nums" data-testid="review-pending">
           <span className="text-success">+{pending.additions}</span>{' '}
           <span className="text-danger">−{pending.deletions}</span>
         </span>
@@ -241,11 +242,13 @@ export function App() {
         }
       />
       <AgentsPanel />
+      <CloseDialog />
 
       <main className="flex min-w-0 flex-col">
         <header className="drag flex h-11 shrink-0 items-center gap-3 pr-[9.5rem] pl-5">
           {activeSessionId ? <SessionHeaderTitle sessionId={activeSessionId} /> : null}
           <div className="ml-auto flex items-center gap-1">
+            {activeSessionId ? <WorkspaceChip sessionId={activeSessionId} /> : null}
             {activeSessionId ? <ChecksRow sessionId={activeSessionId} /> : null}
             {activeSessionId ? <QualityChip sessionId={activeSessionId} /> : null}
             {activeSessionId ? <ReviewButton sessionId={activeSessionId} /> : null}

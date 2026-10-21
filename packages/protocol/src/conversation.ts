@@ -331,6 +331,25 @@ export const McpServerDescriptor = z.object({
 });
 export type McpServerDescriptor = z.infer<typeof McpServerDescriptor>;
 
+/** O que uma sessão mudou na sua worktree, face à base. */
+export const WorktreeStats = z.object({
+  files: z.number().int(),
+  additions: z.number().int(),
+  deletions: z.number().int(),
+});
+export type WorktreeStats = z.infer<typeof WorktreeStats>;
+
+/**
+ * Onde a sessão trabalha. project: na pasta do projeto · shared: na pasta do projeto, ao mesmo
+ * tempo que outra (projeto sem git) · worktree: numa worktree com branch próprio.
+ */
+export const Workspace = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('project') }),
+  z.object({ kind: z.literal('shared') }),
+  z.object({ kind: z.literal('worktree'), branch: z.string(), stats: WorktreeStats }),
+]);
+export type Workspace = z.infer<typeof Workspace>;
+
 export const SessionInfo = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -343,6 +362,7 @@ export const SessionInfo = z.object({
   agentSessionId: z.string().nullable(),
   /** Servidores MCP ligados a esta sessão. */
   mcpServers: z.array(z.string()).optional(),
+  workspace: Workspace.optional(),
 });
 export type SessionInfo = z.infer<typeof SessionInfo>;
 

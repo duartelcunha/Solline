@@ -7,6 +7,7 @@ import {
   McpServerDescriptor,
   PermissionAnswer,
   SessionInfo,
+  WorktreeStats,
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
 import { CheckList, CheckSpec, checksCommandSchemas } from './checks.ts';
@@ -133,6 +134,28 @@ export const commandSchemas = {
   'session.setEffort': {
     payload: SessionRef.extend({ effort: z.string().min(1) }).strict(),
     result: Empty,
+  },
+  /**
+   * Traz o trabalho da worktree da sessão para o branch atual do projeto (merge). Com
+   * conflitos, nada muda no projeto e vem a lista dos ficheiros.
+   */
+  'session.bring': {
+    payload: SessionRef,
+    result: z.object({ merged: z.boolean(), conflicts: z.array(z.string()), into: z.string() }),
+  },
+  /**
+   * Fecha a sessão. Numa worktree com mudanças por trazer, sem escolha não fecha e devolve os
+   * +/−: bring traz primeiro, keep guarda o branch, discard deita tudo fora.
+   */
+  'session.close': {
+    payload: SessionRef.extend({
+      worktree: z.enum(['bring', 'keep', 'discard']).optional(),
+    }).strict(),
+    result: z.object({
+      closed: z.boolean(),
+      stats: WorktreeStats.optional(),
+      conflicts: z.array(z.string()).optional(),
+    }),
   },
   'permission.answer': {
     payload: SessionRef.extend({ requestId: z.string().min(1), answer: PermissionAnswer }).strict(),
