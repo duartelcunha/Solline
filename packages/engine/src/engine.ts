@@ -16,6 +16,7 @@ import { CheckpointStore, type CheckpointStoreOptions } from './checkpoints/stor
 import { fileAgentSettings, memoryAgentSettings, type AgentSettings } from './agents/settings.ts';
 import { SECRET_NAME } from './env.ts';
 import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
+import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
 import { SessionManager } from './session-manager.ts';
 import { ENGINE_VERSION } from './version.ts';
 
@@ -37,6 +38,8 @@ export interface EngineOptions {
   mcp?: McpCatalog;
   /** Checkpoints por turno (por omissão na pasta de dados); false desliga-os. */
   checkpoints?: CheckpointStoreOptions | false;
+  /** A segunda opinião no fim de cada turno (por omissão um Claude só de leitura); false desliga. */
+  reviewer?: Reviewer | false;
   /** Para testes: troca onde ficam as variáveis escolhidas para cada agente. */
   settings?: AgentSettings;
   /** Para testes: o ambiente onde se procuram nomes de segredos. */
@@ -83,6 +86,14 @@ export class Engine {
       mcp,
       checkpoints: this.#checkpoints,
       keysFor: (agent) => settings.keys(agent),
+      // Nos testes isolados não se gasta a subscrição a rever turnos falsos.
+      reviewer:
+        options.reviewer === false
+          ? undefined
+          : (options.reviewer ??
+            (options.isolated
+              ? undefined
+              : claudeReviewer({ claudeExecutable: options.claudeExecutable }))),
     });
     this.logins = new LoginManager({
       onChange: (agent, error) =>
@@ -169,6 +180,10 @@ export class Engine {
       }),
       'session.rewind': (p) =>
         s.rewind(p.sessionId, p.turnId, { files: p.files, conversation: p.conversation }),
+      'quality.get': async (p) => s.quality(p.sessionId),
+      'quality.setEnabled': async (p) => s.setQualityEnabled(p.sessionId, p.enabled),
+      'quality.review': (p) => s.reviewNow(p.sessionId),
+      'quality.fix': async (p) => ({ turnId: await s.fix(p.sessionId, p.ids) }),
     };
   }
 

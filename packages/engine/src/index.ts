@@ -1,5 +1,16 @@
 export { Engine, type EngineOptions } from './engine.ts';
 export { SessionManager } from './session-manager.ts';
+export { CRAFT_RULES } from './quality/craft.ts';
+export {
+  claudeReviewer,
+  promptFor,
+  readOnly,
+  unifiedDiff,
+  type ReviewInput,
+  type ReviewedFinding,
+  type Reviewer,
+} from './quality/reviewer.ts';
+export { SessionQuality, fixMessage } from './quality/session-quality.ts';
 export { PermissionBroker, type BrokerOutcome } from './permission-broker.ts';
 export { ClaudeNormalizer } from './adapters/claude/normalizer.ts';
 export {

@@ -14,6 +14,7 @@ import {
   type ReviewComment,
   type SessionInfo,
   type SessionStartPayload,
+  type Quality,
   type Timeline,
   type Turn,
 } from '@solline/protocol';
@@ -21,6 +22,8 @@ import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/type
 import type { SessionCheckpoints } from './checkpoints/session-checkpoints.ts';
 import type { CheckpointStore } from './checkpoints/store.ts';
 import { commentsMessage, summaryOf, textOf } from './review.ts';
+import type { Reviewer } from './quality/reviewer.ts';
+import { NO_REVIEW, SessionQuality, fixMessage } from './quality/session-quality.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
@@ -70,6 +73,8 @@ interface Memory {
   busy: boolean;
   /** Resumo que segue com a próxima mensagem, depois de rebobinar numa sessão nova. */
   context: string | undefined;
+  /** A segunda opinião: um revisor lê o diff de cada turno (sem revisor, não existe). */
+  quality: SessionQuality | undefined;
 }
 
 const DISABLED_TIMELINE = (rewind: ConversationRewind): Timeline => ({
@@ -97,6 +102,7 @@ export class SessionManager {
   readonly #checkCwd: (cwd: string) => Promise<void>;
   readonly #store: CheckpointStore | undefined;
   readonly #keysFor: (agent: string) => Promise<readonly string[]>;
+  readonly #reviewer: Reviewer | undefined;
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
@@ -110,6 +116,8 @@ export class SessionManager {
     checkpoints?: CheckpointStore | undefined;
     /** As variáveis escolhidas no painel para os agentes com configurableKeys. */
     keysFor?: (agent: string) => Promise<readonly string[]>;
+    /** Quem dá a segunda opinião no fim de cada turno que mude ficheiros. */
+    reviewer?: Reviewer | undefined;
   }) {
     this.#emit = options.emit;
     this.#registry = options.registry;
@@ -117,6 +125,7 @@ export class SessionManager {
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
     this.#store = options.checkpoints;
     this.#keysFor = options.keysFor ?? (async () => []);
+    this.#reviewer = options.reviewer;
   }
 
   async create(payload: SessionStartPayload): Promise<SessionResult> {
@@ -161,6 +170,14 @@ export class SessionManager {
       openTurn: null,
       busy: false,
       context: undefined,
+      quality: this.#reviewer
+        ? new SessionQuality({
+            reviewer: this.#reviewer,
+            enabled: true,
+            emit: (quality) =>
+              this.#emit({ kind: 'event', type: 'session.quality', sessionId: info.id, quality }),
+          })
+        : undefined,
     };
     this.#memory.set(info.id, memory);
     let result: SessionResult;
@@ -407,6 +424,7 @@ export class SessionManager {
     this.#sessions.clear();
     this.#memory.clear();
     await Promise.all(entries.map((entry) => entry.adapter.close()));
+    for (const m of memories) m.quality?.dispose();
     await Promise.all(memories.map((m) => m.checkpoints?.dispose()));
   }
 
@@ -444,7 +462,59 @@ export class SessionManager {
     const turnId = memory?.openTurn;
     if (!memory?.checkpoints || !turnId) return;
     memory.openTurn = null;
-    void memory.checkpoints.endTurn(turnId).then(() => this.#emitTimeline(sessionId));
+    void memory.checkpoints.endTurn(turnId).then(() => {
+      this.#emitTimeline(sessionId);
+      if (memory.quality?.state.enabled) void this.#review(sessionId, turnId);
+    });
+  }
+
+  /** A segunda opinião sobre um turno, se ele mudou ficheiros. Uma falha fica no estado. */
+  async #review(sessionId: string, turnId: string): Promise<void> {
+    const entry = this.#sessions.get(sessionId);
+    const memory = this.#memory.get(sessionId);
+    const checkpoints = memory?.checkpoints;
+    if (!entry || !memory?.quality || !checkpoints?.available) return;
+    const checkpoint = checkpoints.timeline().checkpoints.find((c) => c.turnId === turnId);
+    if (!checkpoint || checkpoint.stats.files === 0) return;
+    const diff = await checkpoints.diff({ kind: 'turn', turnId }).catch(() => null);
+    if (!diff || diff.length === 0) return;
+    const turn = memory.turns.find((t) => t.id === turnId && t.role === 'user');
+    await memory.quality.review(turnId, {
+      cwd: entry.info.cwd,
+      diff,
+      request: turn ? textOf(turn) : '',
+      trusted: entry.trusted,
+    });
+  }
+
+  quality(sessionId: string): Quality {
+    this.#get(sessionId);
+    return this.#memoryOf(sessionId).quality?.state ?? { enabled: false, review: NO_REVIEW };
+  }
+
+  setQualityEnabled(sessionId: string, enabled: boolean): Quality {
+    this.#get(sessionId);
+    const quality = this.#memoryOf(sessionId).quality;
+    if (!quality) throw new Error('A segunda opinião não está disponível');
+    return quality.setEnabled(enabled);
+  }
+
+  /** Volta a rever o último turno com checkpoint, agora. */
+  async reviewNow(sessionId: string): Promise<Quality> {
+    this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    if (!memory.quality) throw new Error('A segunda opinião não está disponível');
+    const last = memory.checkpoints?.timeline().checkpoints.at(-1);
+    if (!last || last.state !== 'done') throw new Error('Ainda não há nenhum turno acabado');
+    await this.#review(sessionId, last.turnId);
+    return memory.quality.state;
+  }
+
+  /** Pede ao agente da sessão para corrigir os achados escolhidos. */
+  async fix(sessionId: string, ids: readonly string[]): Promise<string> {
+    const findings = this.#memoryOf(sessionId).quality?.pick(ids) ?? [];
+    if (findings.length === 0) throw new Error('Esses achados já não existem');
+    return this.send(sessionId, fixMessage(findings));
   }
 
   /** Mexer no disco ou na conversa só com o agente parado e nada a meio. */

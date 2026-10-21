@@ -6,6 +6,7 @@ import type {
   AgentCapabilities,
   ConversationDelta,
   EngineEvent,
+  SessionQualityEvent,
   SessionTimelineEvent,
 } from '@solline/protocol';
 import {
@@ -15,6 +16,7 @@ import {
   type AdapterSink,
   type AgentAdapter,
   type AgentStartOptions,
+  type Reviewer,
 } from '../src/index.ts';
 import { CheckpointStore } from '../src/checkpoints/store.ts';
 import { commentsMessage, summaryOf } from '../src/review.ts';
@@ -111,7 +113,7 @@ let store: CheckpointStore;
 let manager: SessionManager;
 let events: EngineEvent[];
 
-function makeManager(native: boolean) {
+function makeManager(native: boolean, reviewer?: Reviewer) {
   events = [];
   manager = new SessionManager({
     emit: (event) => events.push(event),
@@ -119,6 +121,7 @@ function makeManager(native: boolean) {
       claude: (options, sink) => new ScriptedAdapter(options, sink, native),
     }),
     checkpoints: store,
+    reviewer,
   });
 }
 
@@ -418,5 +421,59 @@ describe('pontos de rebobinar nos adaptadores', () => {
     expect(fork.params).toMatchObject({ threadId: 'thread-1', lastTurnId: 'turn-1' });
     expect(again.agentSessionId()).toBe('thread-1-fork');
     await again.close();
+  });
+});
+
+describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
+  const quality = (sessionId: string) =>
+    events
+      .filter(
+        (e): e is SessionQualityEvent => e.type === 'session.quality' && e.sessionId === sessionId,
+      )
+      .at(-1)?.quality;
+
+  it('revê o diff do turno que mudou ficheiros e o corrigir segue para o agente', async () => {
+    const seen: Parameters<Reviewer>[0][] = [];
+    makeManager(true, async (input) => {
+      seen.push(input);
+      return [
+        { path: 'f.txt', line: 1, severity: 'slop', title: 'Valor sem sentido', detail: 'Usa v2.' },
+      ];
+    });
+    const id = await startSession();
+    const t1 = await turn(id, 'escreve f.txt=v1');
+    await waitFor(() => quality(id)?.review.state === 'done', 10_000);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ request: 'escreve f.txt=v1', trusted: true, cwd: project });
+    expect(seen[0]!.diff.map((f) => f.path)).toEqual(['f.txt']);
+    const findings = quality(id)!.review.findings;
+    expect(findings).toEqual([expect.objectContaining({ id: `${t1}-1`, severity: 'slop' })]);
+
+    await manager.fix(id, [findings[0]!.id]);
+    expect(ScriptedAdapter.received.at(-1)!.text).toContain('f.txt:1: Valor sem sentido');
+  });
+
+  it('um turno sem ficheiros mudados não gasta o revisor; desligado também não', async () => {
+    let calls = 0;
+    makeManager(true, async () => {
+      calls++;
+      return [];
+    });
+    const id = await startSession();
+    await turn(id, 'só uma pergunta');
+    manager.setQualityEnabled(id, false);
+    await turn(id, 'escreve f.txt=v1');
+    await new Promise((r) => setTimeout(r, 200));
+    expect(calls).toBe(0);
+    expect(manager.quality(id).enabled).toBe(false);
+  });
+
+  it('uma falha do revisor fica no estado, sem partir a sessão', async () => {
+    makeManager(true, () => Promise.reject(new Error('sem rede')));
+    const id = await startSession();
+    await turn(id, 'escreve f.txt=v1');
+    await waitFor(() => quality(id)?.review.state === 'error', 10_000);
+    expect(quality(id)!.review.error).toBe('sem rede');
+    await turn(id, 'escreve f.txt=v2');
   });
 });

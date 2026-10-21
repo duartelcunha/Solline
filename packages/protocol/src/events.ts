@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentId, AskBlock, ConversationDelta, SessionState } from './conversation.ts';
+import { Quality } from './quality.ts';
 import { Timeline } from './review.ts';
 
 /**
@@ -48,6 +49,14 @@ export const SessionTimelineEvent = z.object({
   timeline: Timeline,
 });
 
+/** A segunda opinião de uma sessão mudou: começou a rever, acabou ou foi ligada/desligada. */
+export const SessionQualityEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.quality'),
+  sessionId: z.string(),
+  quality: Quality,
+});
+
 export const EngineErrorEvent = z.object({
   kind: z.literal('event'),
   type: z.literal('engine.error'),
@@ -71,6 +80,7 @@ export const EngineEvent = z.discriminatedUnion('type', [
   SessionStateEvent,
   PermissionRequestEvent,
   SessionTimelineEvent,
+  SessionQualityEvent,
   EngineErrorEvent,
 ]);
 export type EngineEvent = z.infer<typeof EngineEvent>;
@@ -78,4 +88,5 @@ export type SessionEvent = z.infer<typeof SessionEvent>;
 export type SessionStateEvent = z.infer<typeof SessionStateEvent>;
 export type PermissionRequestEvent = z.infer<typeof PermissionRequestEvent>;
 export type SessionTimelineEvent = z.infer<typeof SessionTimelineEvent>;
+export type SessionQualityEvent = z.infer<typeof SessionQualityEvent>;
 export type AgentsChangedEvent = z.infer<typeof AgentsChangedEvent>;

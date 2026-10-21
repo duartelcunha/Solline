@@ -8,6 +8,7 @@ import {
   PermissionAnswer,
   SessionInfo,
 } from './conversation.ts';
+import { qualityCommandSchemas } from './quality.ts';
 import { reviewCommandSchemas } from './review.ts';
 
 /**
@@ -142,6 +143,7 @@ export const commandSchemas = {
     result: z.object({ project: Project }),
   },
   ...reviewCommandSchemas,
+  ...qualityCommandSchemas,
 } as const;
 
 /**
