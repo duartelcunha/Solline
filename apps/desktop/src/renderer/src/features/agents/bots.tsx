@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { AgentDescriptor } from '@solline/protocol';
-import { Bot, type Hood, type Mood } from '@solline/ui/bot';
+import { Bot, HOODS, STATE_COLOURS, type Hood, type Mood } from '@solline/ui/bot';
 import { useApp, useSession } from '../../stores/app.ts';
 import { hoodOf, moodOf, nextMoodChange } from './bot-mood.ts';
 
@@ -49,6 +49,36 @@ export function SessionBot({
       title={NAMES[hood]}
       alive={alive}
     />
+  );
+}
+
+/**
+ * A marca de uma sessão na lista: só o capuz, sem cara. O bot inteiro fica no cabeçalho da
+ * sessão aberta; aqui basta a cor do agente e o estado (âmbar precisa de ti, vermelho caiu,
+ * a pulsar enquanto trabalha, apagado a dormir).
+ */
+export function SessionMark({ sessionId }: { sessionId: string }) {
+  const agent = useSession(sessionId, (s) => s.info.agent);
+  const transport = useApp((s) => s.agents.find((a) => a.id === agent)?.transport);
+  const mood = useSessionMood(sessionId);
+  const fill =
+    mood === 'needs-you'
+      ? STATE_COLOURS.attention
+      : mood === 'crashed'
+        ? STATE_COLOURS.danger
+        : HOODS[hoodOf(agent, transport)];
+  return (
+    <svg
+      aria-hidden
+      width="12"
+      height="8"
+      viewBox="0 0 12 8"
+      data-testid="session-mark"
+      data-mood={mood}
+      className={`shrink-0 transition-opacity duration-300 ${mood === 'working' ? 'dot-pulse' : ''} ${mood === 'sleeping' ? 'opacity-40' : ''}`}
+    >
+      <path d="M0 7.5a6 6 0 0 1 12 0z" fill={fill} style={{ transition: 'fill 200ms ease' }} />
+    </svg>
   );
 }
 

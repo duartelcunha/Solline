@@ -20,6 +20,10 @@ Direção "Meridiano": carvão e âmbar quente, Geist como voz única, cor só p
 Cada sessão é um bot: a cor do capuz diz o agente (mesma luminosidade e pouca saturação), a
 cara e a bainha dizem o estado.
 
+**Um bot no ecrã de cada vez:** o bot inteiro só aparece no cabeçalho da sessão aberta. A
+lista de sessões mostra só o capuz (cor do agente, âmbar se precisa de ti, vermelho se caiu,
+a pulsar enquanto trabalha) e o revisor usa ícones.
+
 | Agente | Capuz |
 |---|---|
 | Claude | barro, `oklch(0.7 0.09 45)` |

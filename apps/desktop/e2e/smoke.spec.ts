@@ -328,10 +328,13 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await page.getByTestId('new-session').click();
   await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
   await expect(page.getByTestId('session-row')).toHaveAttribute('data-state', 'idle');
-  // A sessão do Claude tem o bot cor de barro, à espera.
-  const bot = page.getByTestId('session-row').getByTestId('bot');
+  // Um só bot no ecrã: o da sessão aberta, no cabeçalho, cor de barro e à espera. A lista
+  // mostra só a marca do capuz.
+  await expect(page.getByTestId('bot')).toHaveCount(1);
+  const bot = page.locator('header').getByTestId('bot');
   await expect(bot).toHaveAttribute('data-hood', 'claude');
   await expect(bot).toHaveAttribute('data-mood', 'waiting');
+  await expect(page.getByTestId('session-mark')).toHaveAttribute('data-mood', 'waiting');
 
   // Modelo e effort pelos botões da barra.
   await page.getByTestId('pill-model').click();
