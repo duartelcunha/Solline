@@ -416,3 +416,15 @@
 - Fechar uma sessão espera por um "Trazer" a meio (antes lia o estado antigo e pedia escolha).
 - Calma passou a ser a quinta medida do Norte (`CLAUDE.md`); o ritmo concreto está em
   `docs/brand.md`.
+
+## Deslocar sem barras (21/10/2026)
+
+- Nenhuma barra de scroll na app; as bordas esbatem (`scroll-fade-y`) para dizer que há mais.
+- `packages/ui/src/scroll.ts`: `scrollToSmooth` (mola que muda de alvo sem perder velocidade),
+  `scrollIntoViewSmooth` e `useDragScroll` (arrastar numa zona vazia, com inércia e ponta
+  elástica; nunca sobre texto, controlos ou código; a mão só aparece a arrastar). A roda ou um
+  toque param a mola: o gesto do Duarte ganha sempre.
+- A conversa segue o fundo com a mola; se subiste para ler, não puxa e acende "↓ Novo". Um
+  pedido que precisa de ti vem sempre à vista. No rever, depois de aceitar ou rejeitar, desliza
+  para o hunk que ficou no lugar; na mesa, depois de responder, para o próximo que precisa de ti.
+- A navegação automática nunca troca de sessão nem de ecrã sozinha.

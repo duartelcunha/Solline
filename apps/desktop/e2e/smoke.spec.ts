@@ -380,6 +380,12 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   });
   await expect(page.getByTestId('assistant-text').last()).toBeVisible();
   await expect(page.getByTestId('session-cost')).toContainText(/US\$|\$/);
+  // Sem barras de scroll: a conversa desloca-se com a roda, o trackpad ou arrastando.
+  expect(
+    await page
+      .getByTestId('conversation')
+      .evaluate((el) => el.ownerDocument.defaultView?.getComputedStyle(el).scrollbarWidth),
+  ).toBe('none');
   // Abaixo de 50% o medidor de contexto não aparece (um turno curto fica longe disso).
   await expect(page.getByTestId('context-meter')).toHaveCount(0);
   // Sem foco, o turno acabado (e o pedido de permissão) dão aviso do Windows.

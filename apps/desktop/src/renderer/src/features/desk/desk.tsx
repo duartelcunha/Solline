@@ -10,6 +10,7 @@ import { GitBranch, GitMerge, Trash2 } from 'lucide-react';
 import type { Orphan } from '@solline/protocol';
 import { useReducedMotion } from '@solline/ui/react';
 import { shouldAnimate } from '@solline/ui/motion';
+import { scrollIntoViewSmooth, useDragScroll } from '@solline/ui/scroll';
 import { flushSync } from 'react-dom';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 import { SessionMark } from '../agents/bots.tsx';
@@ -29,6 +30,16 @@ function Delta({ additions, deletions }: { additions: number; deletions: number 
 
 const smallButton =
   'sl-press inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-[12px] font-medium disabled:opacity-50';
+
+/** Responde e desliza para o próximo cartão que precisa de ti, se houver. */
+async function answerAndMove(sessionId: string, id: string, decision: 'allow-once' | 'deny') {
+  await actions.answer(sessionId, id, { decision });
+  requestAnimationFrame(() => {
+    const desk = document.querySelector<HTMLElement>('[data-testid="desk"]');
+    const next = desk?.querySelector('[data-testid="desk-card"][data-state="needs-you"]');
+    if (desk && next) scrollIntoViewSmooth(desk, next, 'nearest', 16);
+  });
+}
 
 /** O pedido à espera, em pequeno: o título e Permitir / Negar; o resto abre a conversa. */
 function CompactAsk({ sessionId }: { sessionId: string }) {
@@ -56,7 +67,7 @@ function CompactAsk({ sessionId }: { sessionId: string }) {
       <span className="min-w-0 flex-1 truncate text-fg">{ask.title}</span>
       <button
         type="button"
-        onClick={() => void actions.answer(sessionId, ask.id, { decision: 'allow-once' })}
+        onClick={() => void answerAndMove(sessionId, ask.id, 'allow-once')}
         className={`${smallButton} bg-fg text-bg`}
         data-testid="card-allow"
       >
@@ -64,7 +75,7 @@ function CompactAsk({ sessionId }: { sessionId: string }) {
       </button>
       <button
         type="button"
-        onClick={() => void actions.answer(sessionId, ask.id, { decision: 'deny' })}
+        onClick={() => void answerAndMove(sessionId, ask.id, 'deny')}
         className={`${smallButton} border border-line hover:bg-surface-hover`}
         data-testid="card-deny"
       >
@@ -307,8 +318,14 @@ export function Desk() {
   );
   const order = [...sessions.map((s) => s.id), ...orphans.map((o) => o.id)].join(',');
   const grid = useFlip(order);
+  const area = useRef<HTMLElement>(null);
+  useDragScroll(area);
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto px-6 pt-2 pb-8" data-testid="desk">
+    <section
+      ref={area}
+      className="scroll-fade-y min-h-0 flex-1 overflow-y-auto px-6 pt-2 pb-8"
+      data-testid="desk"
+    >
       <div
         ref={grid}
         className="mx-auto grid max-w-[64rem] grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3"

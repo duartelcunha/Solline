@@ -148,6 +148,7 @@ export function FileDiffView({
                 key={hunk.id}
                 className={`group/hunk ${leaving === hunk.id ? 'sl-leave' : ''}`}
                 data-testid="diff-hunk"
+                data-hunk={hunk.id}
               >
                 <div className="flex items-center gap-2 bg-surface-sunken/60 py-1 pr-1.5 pl-3">
                   <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-subtle">

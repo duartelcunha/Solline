@@ -131,6 +131,7 @@ function Card({
     <section
       aria-label={label}
       data-testid={testId}
+      data-ask={id}
       style={morph}
       className="appear rounded-lg border border-accent/40 bg-surface p-4 shadow-raised ring-1 ring-accent/10"
     >

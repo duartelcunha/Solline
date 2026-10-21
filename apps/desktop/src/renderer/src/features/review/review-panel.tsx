@@ -19,6 +19,7 @@ import type {
   ReviewComment,
 } from '@solline/protocol';
 import { usePresence } from '@solline/ui/react';
+import { scrollIntoViewSmooth, useDragScroll } from '@solline/ui/scroll';
 import { MenuShell, triggerClass } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 import { FindingRow } from '../quality/quality.tsx';
@@ -54,6 +55,19 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   const busy = useSession(sessionId, (s) => s.info.state !== 'idle');
   const [scope, setScope] = useState<DiffScope>({ kind: 'review' });
   const [files, setFiles] = useState<FileDiff[] | null>(null);
+  const filesBox = useRef<HTMLDivElement>(null);
+  /** Depois de aceitar ou rejeitar, a vista desliza para o hunk que ficou nesse lugar. */
+  const nextHunk = useRef<number | null>(null);
+  useDragScroll(filesBox);
+  useEffect(() => {
+    const box = filesBox.current;
+    const index = nextHunk.current;
+    if (!box || index === null) return;
+    nextHunk.current = null;
+    const hunks = box.querySelectorAll('[data-testid="diff-hunk"]');
+    const target = hunks[Math.min(index, hunks.length - 1)];
+    if (target) scrollIntoViewSmooth(box, target, 'nearest', 16);
+  }, [files]);
   const [comments, setComments] = useState<Map<CommentKey, ReviewComment>>(new Map());
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
@@ -114,6 +128,13 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   async function act(action: ReviewAction, target: { path?: string; hunk?: Hunk } = {}) {
     const before = timeline?.pending.files ?? 0;
     rewardIfEmpty.current = before > 0;
+    if (target.hunk && filesBox.current) {
+      const hunks = Array.from(
+        filesBox.current.querySelectorAll<HTMLElement>('[data-testid="diff-hunk"]'),
+      );
+      const index = hunks.findIndex((h) => h.dataset.hunk === target.hunk?.id);
+      nextHunk.current = index >= 0 ? index : null;
+    }
     const ok = await actions.review(sessionId, action, {
       ...(target.path ? { path: target.path } : {}),
       ...(target.hunk ? { hunkId: target.hunk.id } : {}),
@@ -256,7 +277,11 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3" data-testid="review-files">
+      <div
+        ref={filesBox}
+        className="scroll-fade-y min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
+        data-testid="review-files"
+      >
         {elsewhere.length > 0 ? (
           <section className="overflow-hidden rounded-lg border border-line bg-surface">
             {elsewhere.map((f) => (

@@ -403,6 +403,29 @@ body {
 .scroll-fade {
   mask-image: linear-gradient(to bottom, transparent 0, black 16px);
 }
+/* Desce e sobe sem barras: as bordas esbatem para dizer que há mais. */
+.scroll-fade-y {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black 16px,
+    black calc(100% - 16px),
+    transparent 100%
+  );
+}
+
+/* Sem barras de scroll em lado nenhum: desloca-se com a roda, o trackpad ou arrastando. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+/* A mão só aparece enquanto arrastas (useDragScroll), nunca em repouso. */
+[data-dragging] {
+  cursor: grabbing;
+  user-select: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .appear,

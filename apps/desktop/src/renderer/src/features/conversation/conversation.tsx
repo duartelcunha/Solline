@@ -1,5 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { RotateCcw, WifiOff } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { ArrowDown, RotateCcw, WifiOff } from 'lucide-react';
+import {
+  isAutoScrolling,
+  scrollIntoViewSmooth,
+  scrollToSmooth,
+  useDragScroll,
+} from '@solline/ui/scroll';
 import type { Block, PermissionAnswer, ToolBlock, Turn } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
 import { actions, useSession } from '../../stores/app.ts';
@@ -130,6 +136,10 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   const [openToolId, setOpenToolId] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const placed = useRef(false);
+  // Subiste para ler: o que chegar depois não te puxa, só acende "Novo".
+  const [away, setAway] = useState<string | null>(null);
+  useDragScroll(scroller);
 
   const { tools, firstPendingId } = useMemo(() => {
     const tools = new Map<string, ToolBlock>();
@@ -144,11 +154,28 @@ export function Conversation({ sessionId }: { sessionId: string }) {
     return { tools, firstPendingId };
   }, [turns]);
 
-  // Fica colado ao fundo enquanto o Duarte não subir para ler.
+  // Segue o fundo com uma mola enquanto o Duarte não subir para ler; ao abrir, salta lá.
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+    if (!el || !pinned.current) return;
+    if (!placed.current) {
+      el.scrollTop = el.scrollHeight;
+      placed.current = true;
+    } else {
+      scrollToSmooth(el, el.scrollHeight);
+    }
   }, [turns]);
+
+  // Um pedido que precisa de ti vem sempre à vista, mesmo que tenhas subido.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !firstPendingId) return;
+    const card = el.querySelector(`[data-ask="${CSS.escape(firstPendingId)}"]`);
+    if (card) scrollIntoViewSmooth(el, card, 'nearest', 32);
+  }, [firstPendingId]);
+
+  const signature = `${turns.length}:${turns.at(-1)?.blocks.length ?? 0}`;
+  const hasNew = away !== null && away !== signature;
 
   const openTool = openToolId ? (tools.get(openToolId) ?? null) : null;
   // A linha do tempo marca o <html> com o turno de onde se voltaria: esse e os seguintes
@@ -164,7 +191,12 @@ export function Conversation({ sessionId }: { sessionId: string }) {
           ref={scroller}
           onScroll={(e) => {
             const el = e.currentTarget;
-            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+            // A mola é a app a seguir; só um gesto teu solta ou cola ao fundo.
+            if (isAutoScrolling(el)) return;
+            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+            pinned.current = atBottom;
+            if (atBottom && away !== null) setAway(null);
+            else if (!atBottom && away === null) setAway(signature);
           }}
           className="scroll-fade min-h-0 flex-1 overflow-y-auto"
           data-testid="conversation"
@@ -206,6 +238,23 @@ export function Conversation({ sessionId }: { sessionId: string }) {
             </div>
           )}
         </div>
+
+        {hasNew ? (
+          <button
+            type="button"
+            onClick={() => {
+              const el = scroller.current;
+              if (!el) return;
+              pinned.current = true;
+              setAway(null);
+              scrollToSmooth(el, el.scrollHeight);
+            }}
+            className="chip-in absolute bottom-3 left-1/2 inline-flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[12px] text-muted shadow-raised sl-press hover:text-fg"
+            data-testid="jump-new"
+          >
+            <ArrowDown size={13} /> Novo
+          </button>
+        ) : null}
 
         {error ? (
           <div className="mx-auto w-full max-w-3xl px-8 pb-2">
