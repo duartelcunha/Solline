@@ -33,6 +33,7 @@ import type {
   AgentStartResult,
   SendOptions,
 } from '../types.ts';
+import { CRAFT_RULES } from '../../quality/craft.ts';
 
 export interface ClaudeSdkOptions extends AgentStartOptions {
   claudeExecutable?: string | undefined;
@@ -452,7 +453,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       permissionMode: toPermissionModeOr(options.mode ?? 'default', 'default'),
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },
-      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: CRAFT_RULES },
       // Sem confiança, só as definições do utilizador: nada do .claude/ nem do CLAUDE.md da pasta.
       settingSources:
         options.loadSettings === false

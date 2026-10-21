@@ -35,6 +35,7 @@ import type { ThreadStartResponse } from './protocol/v2/ThreadStartResponse';
 import type { TurnStartParams } from './protocol/v2/TurnStartParams';
 import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
 import type { WindowsSandboxReadinessResponse } from './protocol/v2/WindowsSandboxReadinessResponse';
+import { CRAFT_RULES } from '../../quality/craft.ts';
 
 export type { CodexTransport } from './transport.ts';
 
@@ -240,6 +241,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
         ...(model ? { model } : {}),
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
+        developerInstructions: CRAFT_RULES,
         ...(config ? { config } : {}),
       };
       const fork = this.#options.fork ? parseCodexPoint(this.#options.fork) : null;
