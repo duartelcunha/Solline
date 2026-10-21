@@ -4,8 +4,8 @@ Direção "Meridiano": carvão e âmbar quente, Geist como voz única, cor só p
 
 ## Marca
 
-- **Solline Pin:** um meio sol atravessado pela linha do tempo, com a pega no corte. Fica
-  pequeno ao lado do wordmark (`apps/desktop/src/renderer/src/components/pin.tsx`).
+- **Marca:** um sol a nascer no horizonte com o reflexo em duas linhas, num quadrado de carvão
+  (igual nos dois temas). Fica ao lado do wordmark (`apps/desktop/src/renderer/src/components/logo.tsx`).
 - **O bot é o Pin de olhos abertos:** a linha do tempo é a bainha do capuz, o meio sol é o
   capuz, a abertura escura é outro meio sol e os olhos são meios sóis pequenos. Geometria em
   `packages/ui/src/bot/geometry.ts`, numa grelha de 256.

@@ -1,4 +1,4 @@
-import { Pin } from '../../components/pin.tsx';
+import { Logo } from '../../components/logo.tsx';
 import { FolderPlus, Folder, ShieldCheck, ShieldOff } from 'lucide-react';
 import { APP_NAME } from '@solline/protocol/app';
 import type { Project, SessionState } from '@solline/protocol';
@@ -112,7 +112,7 @@ export function Sidebar({
       aria-label="Projetos e sessões"
     >
       <div className="drag flex h-11 shrink-0 items-center gap-2 px-4">
-        <Pin size={20} className="text-accent" />
+        <Logo size={20} />
         <span className="text-[13px] font-semibold tracking-[-0.035em]">{APP_NAME}</span>
       </div>
 
