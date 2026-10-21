@@ -4,6 +4,7 @@ import {
   SessionQuality,
   claudeReviewer,
   fixMessage,
+  insideProject,
   promptFor,
   readOnly,
   unifiedDiff,
@@ -34,7 +35,8 @@ const DIFF: FileDiff[] = [
   },
 ];
 
-const input = { cwd: '/p', diff: DIFF, request: '', trusted: true };
+const input = { cwd: '/p', diff: DIFF, request: '' };
+const ready = () => Promise.resolve(input);
 
 function fakeQuery(output: unknown, seen?: (options: Record<string, unknown>) => void) {
   return ((args: { options: Record<string, unknown> }) => {
@@ -60,15 +62,17 @@ describe('revisor', () => {
     expect(await readOnly('Bash', {}, opts)).toMatchObject({ behavior: 'deny' });
   });
 
-  it('pede um JSON com esquema, sem definições num projeto sem confiança', async () => {
+  it('pede um JSON com esquema, só com as três ferramentas e sem definições nem MCP', async () => {
     let options: Record<string, unknown> = {};
     const finding = { path: 'a.ts', line: 1, severity: 'bug', title: 'x', detail: 'y' };
     const review = claudeReviewer({
       queryFn: fakeQuery({ findings: [finding] }, (o) => (options = o)),
     });
-    expect(await review({ ...input, trusted: false })).toEqual([finding]);
+    expect(await review(input)).toEqual([finding]);
     expect(options).toMatchObject({
       settingSources: [],
+      tools: ['Read', 'Grep', 'Glob'],
+      strictMcpConfig: true,
       allowedTools: ['Read', 'Grep', 'Glob'],
       outputFormat: { type: 'json_schema' },
       persistSession: false,
@@ -92,10 +96,12 @@ describe('estado da segunda opinião', () => {
       enabled: true,
       emit: (s) => states.push(s.review.state),
     });
-    const first = q.review('t1', input);
-    const second = q.review('t2', input);
-    releases[0]!([{ path: 'a.ts', line: 1, severity: 'bug', title: 'velho', detail: '' }]);
-    releases[1]!([]);
+    const first = q.review('t1', ready);
+    const second = q.review('t2', ready);
+    // O primeiro nem chega ao revisor: foi cancelado enquanto o diff chegava.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(releases).toHaveLength(1);
+    releases[0]!([]);
     await Promise.all([first, second]);
     expect(q.state.review).toMatchObject({ state: 'done', turnId: 't2', findings: [] });
     expect(states).toEqual(['running', 'running', 'done']);
@@ -123,5 +129,66 @@ describe('estado da segunda opinião', () => {
     expect(message).toContain('1. [risco] a.ts:3: Erro engolido');
     expect(message).toContain('   Mostra-o.');
     expect(message).toContain('2. [ruído] b.ts: Comentário a mais');
+  });
+
+  it('desligar a meio não deixa a revisão presa em "a rever"', async () => {
+    const reviewer: Reviewer = () => new Promise(() => undefined);
+    const q = new SessionQuality({ reviewer, enabled: true, emit: () => undefined });
+    void q.review('t1', ready);
+    await Promise.resolve();
+    q.setEnabled(false);
+    expect(q.state.review.state).toBe('idle');
+    q.setEnabled(true);
+    expect(q.state.review.state).toBe('idle');
+  });
+
+  it('uma falha a preparar o diff fica à vista como erro', async () => {
+    const q = new SessionQuality({
+      reviewer: async () => [],
+      enabled: true,
+      emit: () => undefined,
+    });
+    await q.review('t1', () => Promise.reject(new Error('git trancado')));
+    expect(q.state.review).toMatchObject({ state: 'error', error: 'git trancado' });
+  });
+
+  it('um turno novo cancela o anterior mesmo com o diff ainda a chegar', async () => {
+    let release: (value: typeof input) => void = () => undefined;
+    const slow = () => new Promise<typeof input>((resolve) => (release = resolve));
+    const calls: string[] = [];
+    const reviewer: Reviewer = async (i) => (calls.push(i.request), []);
+    const q = new SessionQuality({ reviewer, enabled: true, emit: () => undefined });
+    const old = q.review('t1', slow);
+    await q.review('t2', () => Promise.resolve({ ...input, request: 'novo' }));
+    release({ ...input, request: 'velho' });
+    await old;
+    expect(calls).toEqual(['novo']);
+    expect(q.state.review.turnId).toBe('t2');
+  });
+});
+
+describe('o revisor não sai da pasta do projeto', () => {
+  const root = process.platform === 'win32' ? 'C:\\p' : '/p';
+  const guard = insideProject(root);
+  const ask = (tool_name: string, tool_input: Record<string, unknown>) =>
+    guard(
+      { hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 't' } as never,
+      't',
+      { signal: new AbortController().signal },
+    );
+  const denied = (out: unknown) =>
+    (out as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput
+      ?.permissionDecision === 'deny';
+
+  it('lê dentro, recusa fora e recusa tudo o que não seja ler', async () => {
+    expect(denied(await ask('Read', { file_path: 'src/a.ts' }))).toBe(false);
+    expect(denied(await ask('Grep', { pattern: 'x' }))).toBe(false);
+    expect(denied(await ask('Read', { file_path: '../.ssh/id_rsa' }))).toBe(true);
+    expect(denied(await ask('Read', { file_path: '/etc/passwd' }))).toBe(true);
+    expect(denied(await ask('Glob', { pattern: '/Users/**' }))).toBe(true);
+    expect(denied(await ask('Bash', { command: 'rm -rf .' }))).toBe(true);
+    expect(denied(await ask('Edit', { file_path: 'a.ts' }))).toBe(true);
+    // A resposta em JSON passa por uma ferramenta do SDK: tem de passar.
+    expect(denied(await ask('StructuredOutput', { findings: [] }))).toBe(false);
   });
 });

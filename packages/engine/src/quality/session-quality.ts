@@ -29,12 +29,30 @@ export class SessionQuality {
   }
 
   setEnabled(enabled: boolean): Quality {
-    if (!enabled) this.#running?.abort();
-    this.#set({ ...this.#state, enabled });
+    if (enabled) {
+      this.#set({ ...this.#state, enabled });
+    } else {
+      // Uma revisão a meio deixa de valer: não fica "a rever" para sempre.
+      this.#running?.abort();
+      this.#set({ ...this.#state, enabled, review: NO_REVIEW });
+    }
     return this.#state;
   }
 
-  async review(turnId: string, input: Omit<ReviewInput, 'signal'>): Promise<void> {
+  /** Esquece o que foi revisto (o turno saiu da conversa ou os ficheiros voltaram atrás). */
+  reset(): void {
+    this.#running?.abort();
+    if (this.#state.review !== NO_REVIEW) this.#set({ ...this.#state, review: NO_REVIEW });
+  }
+
+  /**
+   * Revê um turno. A vaga fica reservada logo (um turno mais novo cancela este, mesmo que o
+   * diff ainda esteja a chegar); prepare devolve null quando não há nada para rever.
+   */
+  async review(
+    turnId: string,
+    prepare: () => Promise<Omit<ReviewInput, 'signal'> | null>,
+  ): Promise<void> {
     this.#running?.abort();
     const abort = new AbortController();
     this.#running = abort;
@@ -43,6 +61,12 @@ export class SessionQuality {
       review: { state: 'running', turnId, findings: [], error: null },
     });
     try {
+      const input = await prepare();
+      if (abort.signal.aborted) return;
+      if (!input) {
+        this.#set({ ...this.#state, review: NO_REVIEW });
+        return;
+      }
       const found = await this.#reviewer({ ...input, signal: abort.signal });
       if (abort.signal.aborted) return;
       const findings = found.map((f, i): Finding => ({ ...f, id: `${turnId}-${i + 1}` }));

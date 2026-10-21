@@ -327,6 +327,8 @@ export class SessionManager {
     const sessionId = entry.info.id;
     const index = memory.turns.findIndex((t) => t.id === turnId && t.role === 'user');
     if (index === -1) throw new Error('Este turno já não está na conversa');
+    // Os achados falavam de código que vai deixar de existir.
+    memory.quality?.reset();
     const userTurn = memory.turns[index];
     if (options.files) {
       const checkpoints = this.#checkpoints(sessionId);
@@ -476,14 +478,13 @@ export class SessionManager {
     if (!entry || !memory?.quality || !checkpoints?.available) return;
     const checkpoint = checkpoints.timeline().checkpoints.find((c) => c.turnId === turnId);
     if (!checkpoint || checkpoint.stats.files === 0) return;
-    const diff = await checkpoints.diff({ kind: 'turn', turnId }).catch(() => null);
-    if (!diff || diff.length === 0) return;
     const turn = memory.turns.find((t) => t.id === turnId && t.role === 'user');
-    await memory.quality.review(turnId, {
-      cwd: entry.info.cwd,
-      diff,
-      request: turn ? textOf(turn) : '',
-      trusted: entry.trusted,
+    // Uma falha do diff chega ao estado como erro: o revisor nunca parece ter aprovado.
+    await memory.quality.review(turnId, async () => {
+      const diff = await checkpoints.diff({ kind: 'turn', turnId });
+      return diff.length === 0
+        ? null
+        : { cwd: entry.info.cwd, diff, request: turn ? textOf(turn) : '' };
     });
   }
 
@@ -512,7 +513,8 @@ export class SessionManager {
     if (!memory.quality) throw new Error('A segunda opinião não está disponível');
     const last = memory.checkpoints?.timeline().checkpoints.at(-1);
     if (!last || last.state !== 'done') throw new Error('Ainda não há nenhum turno acabado');
-    await this.#review(sessionId, last.turnId);
+    // Não espera pelo fim (uma revisão leva segundos); o resultado chega por session.quality.
+    void this.#review(sessionId, last.turnId);
     return memory.quality.state;
   }
 

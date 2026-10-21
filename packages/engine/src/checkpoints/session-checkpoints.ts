@@ -545,17 +545,17 @@ export class SessionCheckpoints {
     const [all, patch] = await Promise.all([
       this.#diffEntries(from, to),
       this.#git.run(
-      [
-        'diff',
-        '--no-color',
-        '--no-renames',
-        '--no-ext-diff',
-        '--no-textconv',
-        '-U3',
-        '--src-prefix=a/',
-        '--dst-prefix=b/',
-        from,
-        to,
+        [
+          'diff',
+          '--no-color',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          '-U3',
+          '--src-prefix=a/',
+          '--dst-prefix=b/',
+          from,
+          to,
           ...(paths ? ['--', ...paths] : []),
         ],
         { bare: true },

@@ -444,7 +444,7 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
     const t1 = await turn(id, 'escreve f.txt=v1');
     await waitFor(() => quality(id)?.review.state === 'done', 10_000);
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ request: 'escreve f.txt=v1', trusted: true, cwd: project });
+    expect(seen[0]).toMatchObject({ request: 'escreve f.txt=v1', cwd: project });
     expect(seen[0]!.diff.map((f) => f.path)).toEqual(['f.txt']);
     const findings = quality(id)!.review.findings;
     expect(findings).toEqual([expect.objectContaining({ id: `${t1}-1`, severity: 'slop' })]);

@@ -1,4 +1,5 @@
-import type { CanUseTool, query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
+import path from 'node:path';
+import type { CanUseTool, HookCallback, query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { FindingSeverity, type FileDiff, type Finding } from '@solline/protocol';
 import { sanitizedEnv } from '../env.ts';
@@ -9,8 +10,6 @@ export interface ReviewInput {
   diff: readonly FileDiff[];
   /** O pedido do utilizador nesse turno (para o revisor saber o que se queria). */
   request: string;
-  /** Projeto de confiança: o revisor lê as regras do projeto (CLAUDE.md, .claude/). */
-  trusted: boolean;
   signal?: AbortSignal;
 }
 
@@ -21,6 +20,8 @@ export type Reviewer = (input: ReviewInput) => Promise<ReviewedFinding[]>;
 
 const MAX_DIFF_CHARS = 80_000;
 const READ_ONLY = new Set(['Read', 'Grep', 'Glob']);
+/** A ferramenta com que o SDK devolve o JSON do esquema: é a resposta, não mexe em nada. */
+const ANSWER = 'StructuredOutput';
 
 const RULES = `# You are the reviewer
 
@@ -33,6 +34,7 @@ Report only real problems, most severe first:
 
 Never report what a formatter fixes, personal taste, or praise. At most 8 findings; none is a fine answer.
 Each title is one short sentence (at most 12 words). Each detail says why and what to do, in at most 3 short sentences.
+Work out any example before writing it; never correct yourself mid-sentence.
 line is the line number in the new version of the file, or null for the whole file.
 Write titles and details in European Portuguese (pt-PT), whatever the language of the request.`;
 
@@ -107,10 +109,51 @@ export function promptFor(input: Pick<ReviewInput, 'diff' | 'request'>): string 
 /** Só leitura, sempre: qualquer outra ferramenta é recusada antes de correr. */
 export const readOnly: CanUseTool = (toolName, input) =>
   Promise.resolve(
-    READ_ONLY.has(toolName)
+    READ_ONLY.has(toolName) || toolName === ANSWER
       ? { behavior: 'allow', updatedInput: input }
       : { behavior: 'deny', message: 'O revisor só lê' },
   );
+
+/** O caminho que uma ferramenta de leitura vai abrir (relativo à pasta do projeto). */
+function targetOf(toolName: string, input: Record<string, unknown>): string | undefined {
+  const value = toolName === 'Read' ? input.file_path : input.path;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function inside(root: string, target: string): boolean {
+  const relative = path.relative(root, path.resolve(root, target));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/**
+ * Corre antes de cada ferramenta, mesmo das que o modo aprova sozinho: só leituras, e só
+ * dentro da pasta do projeto. Um diff com instruções escondidas não leva o revisor a ler
+ * ~/.ssh nem a correr comandos.
+ */
+export function insideProject(root: string): HookCallback {
+  return (hookInput) => {
+    const deny = (reason: string) =>
+      Promise.resolve({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse' as const,
+          permissionDecision: 'deny' as const,
+          permissionDecisionReason: reason,
+        },
+      });
+    if (hookInput.hook_event_name !== 'PreToolUse' || hookInput.tool_name === ANSWER) {
+      return Promise.resolve({});
+    }
+    if (!READ_ONLY.has(hookInput.tool_name)) return deny('O revisor só lê');
+    const input = (hookInput.tool_input ?? {}) as Record<string, unknown>;
+    const target = targetOf(hookInput.tool_name, input);
+    if (target !== undefined && !inside(root, target)) return deny('Só dentro do projeto');
+    const pattern = input.pattern;
+    if (hookInput.tool_name === 'Glob' && typeof pattern === 'string' && path.isAbsolute(pattern)) {
+      return deny('Só dentro do projeto');
+    }
+    return Promise.resolve({});
+  };
+}
 
 export function claudeReviewer(
   options: { claudeExecutable?: string | undefined; queryFn?: typeof sdkQuery } = {},
@@ -126,10 +169,13 @@ export function claudeReviewer(
         model: 'sonnet',
         effort: 'medium',
         permissionMode: 'default',
+        // Só existem estas três; nem servidores MCP nem definições (e hooks) de lado nenhum.
+        tools: [...READ_ONLY],
         allowedTools: [...READ_ONLY],
         canUseTool: readOnly,
-        // Sem hooks nem definições do utilizador; as regras do projeto só com confiança.
-        settingSources: input.trusted ? ['project'] : [],
+        hooks: { PreToolUse: [{ hooks: [insideProject(input.cwd)] }] },
+        strictMcpConfig: true,
+        settingSources: [],
         systemPrompt: { type: 'preset', preset: 'claude_code', append: RULES },
         outputFormat: { type: 'json_schema', schema: SCHEMA },
         maxTurns: 20,

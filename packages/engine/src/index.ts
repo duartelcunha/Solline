@@ -3,6 +3,7 @@ export { SessionManager } from './session-manager.ts';
 export { CRAFT_RULES } from './quality/craft.ts';
 export {
   claudeReviewer,
+  insideProject,
   promptFor,
   readOnly,
   unifiedDiff,

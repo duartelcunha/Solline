@@ -52,7 +52,6 @@ describe.skipIf(skip)('revisor (Claude real)', () => {
         cwd,
         diff,
         request: 'Escreve uma função que calcula a média.',
-        trusted: false,
       });
       console.info('[revisor]', JSON.stringify(findings));
       const bug = findings.find((f) => f.severity === 'bug');

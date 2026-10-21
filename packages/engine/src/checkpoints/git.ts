@@ -66,7 +66,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 
 const MISSING = 'Não encontrei o git: instala o Git para ter checkpoints';
 
-let resolved: string | null | undefined;
+let resolved: string | null = null;
 
 /**
  * O git do PATH como caminho absoluto, procurado só em pastas absolutas: nunca na pasta do
@@ -95,7 +95,7 @@ export function resolveGit(
 }
 
 function defaultGit(): string | null {
-  if (resolved === undefined) resolved = resolveGit();
+  if (!resolved) resolved = resolveGit();
   return resolved;
 }
 
