@@ -96,6 +96,8 @@ function SessionCard({ sessionId }: { sessionId: string }) {
   const checks = useSession(sessionId, (s) => s.checks);
   const error = useSession(sessionId, (s) => s.error);
   const queued = useSession(sessionId, (s) => s.queue?.items.length ?? 0);
+  const preparing = useSession(sessionId, (s) => s.info.setup?.state === 'running');
+  const port = useSession(sessionId, (s) => s.info.port);
   const project = useApp((s) => s.projects.find((p) => p.id === projectId)?.name);
   const needsYou = state === 'needs-you';
   const idle = state === 'idle';
@@ -155,7 +157,9 @@ function SessionCard({ sessionId }: { sessionId: string }) {
         <div className="min-h-[1.25rem] truncate text-[12px] text-muted" data-testid="card-action">
           {state === 'error'
             ? (error ?? 'Caiu')
-            : (action ?? (idle ? 'À espera da primeira mensagem' : ''))}
+            : preparing
+              ? 'A preparar a worktree…'
+              : (action ?? (idle ? 'À espera da primeira mensagem' : ''))}
         </div>
       )}
 
@@ -167,6 +171,7 @@ function SessionCard({ sessionId }: { sessionId: string }) {
             percent={usage.context.percent}
           />
         ) : null}
+        {port !== undefined ? <span className="tabular-nums text-subtle">:{port}</span> : null}
         {queued > 0 ? (
           <span className="tabular-nums" data-testid="card-queued">
             {queued} na fila

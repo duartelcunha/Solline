@@ -234,10 +234,22 @@ function ChecksEditor({
   const set = (i: number, patch: Partial<CheckSpec>) =>
     setDraft((d) => d.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const valid = draft.every((c) => c.command.trim() && c.label.trim());
+  // A preparação das worktrees novas: vazia e com os .env, vale a sugestão da Solline.
+  const [setupCommand, setSetupCommand] = useState(project?.setup?.command ?? '');
+  const [copyEnv, setCopyEnv] = useState(project?.setup?.copyEnv ?? true);
+  const setupChanged =
+    setupCommand.trim() !== (project?.setup?.command ?? '') ||
+    copyEnv !== (project?.setup?.copyEnv ?? true);
 
   const save = async (next: CheckSpec[] | null) => {
     setSaving(true);
-    const saved = await actions.setProjectChecks(projectId, next);
+    let saved = await actions.setProjectChecks(projectId, next);
+    if (saved && setupChanged) {
+      saved = await actions.setProjectSetup(projectId, {
+        command: setupCommand.trim(),
+        copyEnv,
+      });
+    }
     setSaving(false);
     if (saved) onClose();
   };
@@ -252,7 +264,7 @@ function ChecksEditor({
         >
           <div>
             <Dialog.Title className="text-[14px] font-semibold tracking-[-0.01em]">
-              Verificações
+              Verificações e preparação
             </Dialog.Title>
             <Dialog.Description className="text-[12px] text-muted">
               {project?.name ?? 'Projeto'} · no fim de cada turno que mude ficheiros
@@ -318,6 +330,42 @@ function ChecksEditor({
               + Comando
             </button>
           ) : null}
+          <section
+            className="flex flex-col gap-1.5 border-t border-line pt-3"
+            data-testid="setup-editor"
+          >
+            <span className="text-[12px] text-muted">Preparar cada worktree nova</span>
+            <input
+              value={setupCommand}
+              maxLength={300}
+              onChange={(e) => setSetupCommand(e.target.value)}
+              placeholder="Sugestão da Solline (instalar com o gestor do projeto)"
+              aria-label="Comando de preparação"
+              className={`${inputClass} w-full font-mono`}
+              data-testid="setup-command"
+            />
+            <label className="flex items-center gap-2 text-[12px] text-muted">
+              <input
+                type="checkbox"
+                checked={copyEnv}
+                onChange={(e) => setCopyEnv(e.target.checked)}
+                className="size-3.5 accent-[var(--sl-text)]"
+              />
+              Copiar os .env da raiz do projeto
+            </label>
+            {project?.setup ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() =>
+                  void actions.setProjectSetup(projectId, null).then((ok) => ok && onClose())
+                }
+                className="sl-press self-start rounded-control px-2 py-1 text-[12px] text-muted hover:bg-surface-hover hover:text-fg"
+              >
+                Repor a sugestão
+              </button>
+            ) : null}
+          </section>
           <div className="flex items-center gap-2">
             {!checks.detected ? (
               <button

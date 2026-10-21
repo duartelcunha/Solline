@@ -25,6 +25,21 @@ export const CheckList = z
     message: 'Verificações repetidas',
   });
 
+/**
+ * Preparar uma worktree nova: o comando (instalar dependências, por exemplo) e se copia os .env
+ * da raiz do projeto. Vazio: não prepara nada.
+ */
+export const SetupSpec = z.object({ command: z.string().max(300), copyEnv: z.boolean() }).strict();
+export type SetupSpec = z.infer<typeof SetupSpec>;
+
+/** A preparação de uma sessão: a correr, feita ou falhada (com o fim da saída). */
+export const SetupState = z.object({
+  state: z.enum(['running', 'done', 'failed']),
+  tail: z.string().nullable(),
+  durationMs: z.number().nullable(),
+});
+export type SetupState = z.infer<typeof SetupState>;
+
 /** pending: à espera de vez · passed · failed · timeout: passou o limite de 3 minutos. */
 export const CheckResult = z.object({
   id: z.string(),

@@ -219,6 +219,13 @@ export class WorktreeManager {
   }
 
   /** Tira a worktree; com deleteBranch, também o branch. */
+  /** Destes nomes (relativos a `dir`), os que o git do projeto versiona. */
+  async tracked(dir: string, names: readonly string[]): Promise<Set<string>> {
+    if (names.length === 0) return new Set();
+    const { out } = await this.#run(dir, ['ls-files', '--', ...names], true);
+    return new Set(out.split('\n').filter(Boolean));
+  }
+
   /** O branch já está todo no branch atual do projeto (nada se perde ao apagá-lo). */
   async merged(wt: Pick<Worktree, 'top' | 'branch'>): Promise<boolean> {
     const r = await this.#run(wt.top, ['merge-base', '--is-ancestor', wt.branch, 'HEAD'], true);

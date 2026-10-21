@@ -26,6 +26,7 @@ describe('resolveSessionStart', () => {
       cwd: project.path,
       trusted: false,
       checks: null,
+      setup: null,
     });
   });
 

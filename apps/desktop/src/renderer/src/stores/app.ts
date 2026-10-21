@@ -471,6 +471,38 @@ export const actions = {
     }
   },
 
+  async retrySetup(sessionId: string): Promise<void> {
+    await request('setup.retry', { sessionId }).catch((error: unknown) =>
+      setActionError(sessionId, error),
+    );
+  },
+
+  /** Manda ao agente a falha da preparação, para a resolver na worktree. */
+  async fixSetup(sessionId: string): Promise<void> {
+    const tail = sessionStores.get(sessionId)?.getState().info.setup?.tail ?? '';
+    await actions.send(
+      sessionId,
+      `A preparação desta worktree falhou. Resolve a causa e volta a correr o que faltar.\n\n\`\`\`\n${tail}\n\`\`\``,
+    );
+  },
+
+  /** Guarda como se preparam as worktrees do projeto (null: a sugestão). false se recusaste. */
+  async setProjectSetup(
+    projectId: string,
+    setup: { command: string; copyEnv: boolean } | null,
+  ): Promise<boolean> {
+    try {
+      const { project } = await request('projects.setSetup', { projectId, setup });
+      useApp.setState((s) => ({
+        projects: s.projects.map((p) => (p.id === project.id ? project : p)),
+      }));
+      return JSON.stringify(project.setup ?? null) === JSON.stringify(setup);
+    } catch (error) {
+      useApp.setState({ notice: message(error) });
+      return false;
+    }
+  },
+
   async unqueue(sessionId: string, id: string): Promise<void> {
     await request('session.unqueue', { sessionId, id }).catch((error: unknown) =>
       setActionError(sessionId, error),

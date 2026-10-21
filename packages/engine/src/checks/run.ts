@@ -16,7 +16,13 @@ export interface CommandOutcome {
 
 export type RunCommand = (
   command: string,
-  options: { cwd: string; signal: AbortSignal; timeoutMs?: number },
+  options: {
+    cwd: string;
+    signal: AbortSignal;
+    timeoutMs?: number;
+    /** Variáveis a juntar (as portas da sessão, por exemplo). */
+    env?: Record<string, string>;
+  },
 ) => Promise<CommandOutcome>;
 
 // eslint-disable-next-line no-control-regex
@@ -52,7 +58,10 @@ function killTree(pid: number): void {
  * Corre um comando do projeto na pasta, sem os segredos do ambiente da Solline. Rejeita se
  * for cancelado; passar o limite conta como timeout, não como falha do código.
  */
-export const runCommand: RunCommand = (command, { cwd, signal, timeoutMs = CHECK_TIMEOUT_MS }) =>
+export const runCommand: RunCommand = (
+  command,
+  { cwd, signal, timeoutMs = CHECK_TIMEOUT_MS, env: extra = {} },
+) =>
   new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new Error('cancelled'));
@@ -64,7 +73,7 @@ export const runCommand: RunCommand = (command, { cwd, signal, timeoutMs = CHECK
       shell: true,
       windowsHide: true,
       detached: process.platform !== 'win32',
-      env: { ...agentEnv({ base: 'no-secrets' }), FORCE_COLOR: '0', CI: '1' },
+      env: { ...agentEnv({ base: 'no-secrets' }), FORCE_COLOR: '0', CI: '1', ...extra },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';

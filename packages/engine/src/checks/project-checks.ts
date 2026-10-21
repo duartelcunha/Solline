@@ -11,6 +11,7 @@ export class ProjectChecks {
   readonly #run: RunCommand;
   readonly #detect: (cwd: string) => Promise<CheckSpec[]>;
   readonly #emit: (checks: Checks) => void;
+  readonly #env: Record<string, string>;
   #saved: CheckSpec[] | null;
   #state: Checks;
   #running: AbortController | null = null;
@@ -20,12 +21,15 @@ export class ProjectChecks {
     saved: CheckSpec[] | null;
     trusted: boolean;
     emit: (checks: Checks) => void;
+    /** Variáveis para os comandos (as portas da sessão). */
+    env?: Record<string, string>;
     run?: RunCommand;
     detect?: (cwd: string) => Promise<CheckSpec[]>;
   }) {
     this.#cwd = options.cwd;
     this.#saved = options.saved;
     this.#emit = options.emit;
+    this.#env = options.env ?? {};
     this.#run = options.run ?? runCommand;
     this.#detect = options.detect ?? detectChecks;
     this.#state = {
@@ -100,7 +104,11 @@ export class ProjectChecks {
       enabled.map(async (spec) => {
         let result: CheckResult;
         try {
-          const outcome = await this.#run(spec.command, { cwd: this.#cwd, signal: abort.signal });
+          const outcome = await this.#run(spec.command, {
+            cwd: this.#cwd,
+            signal: abort.signal,
+            env: this.#env,
+          });
           result = { id: spec.id, ...outcome };
         } catch {
           return; // Cancelada: a ronda nova (ou o reset) já tratou do estado.

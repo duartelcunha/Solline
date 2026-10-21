@@ -19,6 +19,7 @@ import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
 import { SessionManager, type ChecksOptions } from './session-manager.ts';
 import { detectChecks } from './checks/detect.ts';
+import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
 import { ENGINE_VERSION } from './version.ts';
 
@@ -183,6 +184,9 @@ export class Engine {
       'session.start': (p) => s.create(p),
       'projects.trustChanged': async (p) => (s.setProjectTrust(p.projectId, p.trusted), ok),
       'projects.detectChecks': async (p) => ({ checks: await detectChecks(p.cwd) }),
+      'projects.detectSetup': async (p) => ({ setup: await detectSetup(p.cwd) }),
+      'projects.setupChanged': async (p) => (s.setProjectSetup(p.projectId, p.setup), ok),
+      'setup.retry': async (p) => (await s.retrySetup(p.sessionId), ok),
       'projects.checksChanged': async (p) => (await s.setProjectChecks(p.projectId, p.checks), ok),
       'session.resume': (p) => s.resume(p.sessionId),
       'session.send': (p) => s.send(p.sessionId, p.text, p.how),

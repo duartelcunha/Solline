@@ -205,6 +205,21 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       await engine.request('projects.checksChanged', { projectId, checks });
       return { project: updated };
     }
+    case 'projects.setSetup': {
+      const { projectId, setup } = payload as CommandPayload<'projects.setSetup'>;
+      const project = await projects.get(projectId);
+      if (!project) throw new Error('Projeto desconhecido');
+      // Como nas verificações: só um comando novo (face ao que está em uso) pede confirmação.
+      const suggested = async () =>
+        (await engine.request('projects.detectSetup', { cwd: project.path })).setup;
+      const before = project.setup ?? (await suggested());
+      const after = setup ?? (await suggested());
+      const added = after.command.trim() && after.command !== before.command ? [after.command] : [];
+      if (added.length > 0 && !(await confirmChecks(project.name, added))) return { project };
+      const updated = await projects.setSetup(projectId, setup);
+      await engine.request('projects.setupChanged', { projectId, setup });
+      return { project: updated };
+    }
     case 'session.create': {
       // A interface pede pelo projeto; a pasta vem sempre do que está guardado aqui.
       const start = await resolveSessionStart(projects, SessionCreatePayload.parse(payload));

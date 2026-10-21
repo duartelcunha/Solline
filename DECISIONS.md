@@ -442,3 +442,14 @@
 - ACP: só fila.
 - Uma mensagem guiada fica na conversa "à espera" e passa a "lida" quando o agente a lê.
 
+
+## M3, fatia 4: preparar a worktree e portas (21/10/2026)
+
+- Cada sessão recebe 10 portas livres a partir de 41000 (`SOLLINE_PORT`, `SOLLINE_PORT_COUNT`), no
+  ambiente do agente, do script de preparação e das verificações; libertam-se ao fechar.
+- Uma worktree nova prepara-se por trás: copia os `.env*` não versionados da raiz (sem pisar nada)
+  e corre o comando do projeto (definições da Solline; sugestão: o `setup` do `conductor.json` ou
+  instalar com o gestor do lock). Só em projetos de confiança; um comando novo pede confirmação
+  nativa, como as verificações. Limite de 10 minutos.
+- Enquanto prepara, a sessão abre e o que escreves espera na fila (`SessionTurns.hold`); falhar não
+  bloqueia: vê-se o fim do erro com Repetir e Mandar ao agente.

@@ -24,6 +24,8 @@ export class SessionTurns {
   #items: Item[] = [];
   #paused = false;
   #busy = false;
+  /** A preparar a worktree: tudo o que escreves espera na fila. */
+  #held = false;
 
   constructor(options: {
     /** Abre um turno com esta mensagem (checkpoint, ponto de rebobinar, envio ao agente). */
@@ -56,7 +58,7 @@ export class SessionTurns {
    * aceitar; senão (ou se já for tarde) vai para o fim da fila. Nunca se perde.
    */
   async submit(text: string, how: How = 'queue'): Promise<Submitted> {
-    if (!this.busy && this.#items.length === 0) {
+    if (!this.busy && !this.#held && this.#items.length === 0) {
       return { turnId: await this.#exclusiveStart(text), how: 'sent' };
     }
     if (how === 'now' && this.#steer && this.#running()) {
@@ -96,12 +98,23 @@ export class SessionTurns {
    * "parada": devolve true para o SessionManager não anunciar o idle.
    */
   settled(): boolean {
-    if (this.#paused || this.#items.length === 0 || this.#busy) return false;
+    if (this.#held || this.#paused || this.#items.length === 0 || this.#busy) return false;
     const next = this.#items.shift();
     if (!next) return false;
     this.#changed();
     void this.#exclusiveStart(next.text).catch((error: unknown) => this.#failed(error));
     return true;
+  }
+
+  /** A worktree está a ser preparada: o que escreveres espera até release(). */
+  hold(): void {
+    this.#held = true;
+  }
+
+  release(): void {
+    if (!this.#held) return;
+    this.#held = false;
+    this.#drainIfIdle();
   }
 
   /** Interromper pausa a fila: nada segue sozinho até "Continuar". */
@@ -157,7 +170,7 @@ export class SessionTurns {
 
   /** Uma fila que chega com o agente parado (por exemplo depois de "Continuar") segue já. */
   #drainIfIdle(): void {
-    if (!this.busy && !this.#paused && this.#items.length > 0) this.settled();
+    if (!this.busy && !this.#held && !this.#paused && this.#items.length > 0) this.settled();
   }
 
   #changed(): void {

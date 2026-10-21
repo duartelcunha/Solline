@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
-import { Project, type CheckSpec } from '@solline/protocol';
+import { Project, type CheckSpec, type SetupSpec } from '@solline/protocol';
 
 /** v1 não tinha confiança: os projetos que já lá estavam ficam de confiança (como antes). */
 const ProjectsFileV1 = z.object({
@@ -93,6 +93,17 @@ export class ProjectStore {
     const current = projects.find((p) => p.id === id);
     if (!current) throw new Error('Projeto desconhecido');
     const project = { ...current, checks };
+    this.#cache = projects.map((p) => (p.id === id ? project : p));
+    await this.#save();
+    return project;
+  }
+
+  /** Guarda como se preparam as worktrees do projeto (null: a sugestão). */
+  async setSetup(id: string, setup: SetupSpec | null): Promise<Project> {
+    const projects = await this.list();
+    const current = projects.find((p) => p.id === id);
+    if (!current) throw new Error('Projeto desconhecido');
+    const project = { ...current, setup };
     this.#cache = projects.map((p) => (p.id === id ? project : p));
     await this.#save();
     return project;

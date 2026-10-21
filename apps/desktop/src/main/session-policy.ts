@@ -30,5 +30,6 @@ export async function resolveSessionStart(
     cwd: project.path,
     trusted: project.trusted,
     checks: project.checks ?? null,
+    setup: project.setup ?? null,
   };
 }

@@ -11,7 +11,7 @@ import {
   WorktreeStats,
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
-import { CheckList, CheckSpec, checksCommandSchemas } from './checks.ts';
+import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
 
 /**
@@ -52,6 +52,8 @@ export const Project = z.object({
   trusted: z.boolean(),
   /** As verificações guardadas; sem elas, valem as que a Solline encontra no package.json. */
   checks: CheckList.nullable().optional(),
+  /** Como preparar uma worktree nova; sem isto, vale a sugestão da Solline. */
+  setup: SetupSpec.nullable().optional(),
 });
 export type Project = z.infer<typeof Project>;
 
@@ -79,6 +81,7 @@ export const SessionStartPayload = SessionCreatePayload.extend({
   cwd: z.string().min(1),
   trusted: z.boolean(),
   checks: CheckList.nullable().optional(),
+  setup: SetupSpec.nullable().optional(),
 }).strict();
 export type SessionStartPayload = z.infer<typeof SessionStartPayload>;
 
@@ -217,6 +220,18 @@ export const commandSchemas = {
       .strict(),
     result: z.object({ project: Project }),
   },
+  /**
+   * Guarda como se preparam as worktrees do projeto (null: volta à sugestão). Um comando novo
+   * pede confirmação nativa; project volta igual se a recusares.
+   */
+  'projects.setSetup': {
+    payload: z
+      .object({ projectId: z.string().min(1).max(64), setup: SetupSpec.nullable() })
+      .strict(),
+    result: z.object({ project: Project }),
+  },
+  /** Volta a preparar a worktree da sessão (depois de uma falha). */
+  'setup.retry': { payload: SessionRef, result: Empty },
   ...reviewCommandSchemas,
   ...qualityCommandSchemas,
   ...checksCommandSchemas,
@@ -233,6 +248,7 @@ export const MAIN_COMMANDS = [
   'projects.add',
   'projects.setTrusted',
   'projects.setChecks',
+  'projects.setSetup',
   'session.create',
 ] as const satisfies CommandName[];
 export type MainCommandName = (typeof MAIN_COMMANDS)[number];
@@ -275,6 +291,18 @@ export const internalCommandSchemas = {
   'projects.detectChecks': {
     payload: z.object({ cwd: z.string().min(1) }).strict(),
     result: z.object({ checks: z.array(CheckSpec) }),
+  },
+  /** A sugestão de preparação para uma pasta (para comparar e para mostrar). */
+  'projects.detectSetup': {
+    payload: z.object({ cwd: z.string().min(1) }).strict(),
+    result: z.object({ setup: SetupSpec }),
+  },
+  /** A preparação de um projeto mudou (o main já pediu confirmação). */
+  'projects.setupChanged': {
+    payload: z
+      .object({ projectId: z.string().min(1).max(64), setup: SetupSpec.nullable() })
+      .strict(),
+    result: Empty,
   },
   /** As verificações de um projeto mudaram (o main já pediu confirmação). */
   'projects.checksChanged': {

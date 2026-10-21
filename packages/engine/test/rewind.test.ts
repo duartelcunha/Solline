@@ -179,7 +179,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await manager.disposeAll();
   await store.dispose();
-  await rm(root, { recursive: true, force: true });
+  // No Windows, um git a acabar ainda segura a pasta por instantes.
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 describe('rever e rebobinar no SessionManager', { timeout: 60_000 }, () => {
@@ -628,6 +629,53 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
     expect(await manager.bringOrphan(orphans[0]!.id)).toMatchObject({ merged: true });
     expect(await read('h.txt')).toBe('orfa' + String.fromCharCode(10));
     expect(await manager.orphans()).toEqual([]);
+  });
+
+  it('a worktree prepara-se com as portas da sessão; o que escreves espera e segue depois', async () => {
+    let finish: () => void = () => undefined;
+    const runs: { command: string; cwd: string; env: Record<string, string> | undefined }[] = [];
+    makeManager(
+      true,
+      undefined,
+      {
+        detect: async () => [],
+        run: (command, options) => {
+          runs.push({ command, cwd: options.cwd, env: options.env });
+          return new Promise((resolve) => {
+            finish = () => resolve({ state: 'passed', tail: null, durationMs: 1 });
+          });
+        },
+      },
+      gitProject(),
+    );
+    await writeFile(path.join(project, '.env'), 'SEGREDO=1\n');
+    await startSession();
+    const { session } = await manager.create({
+      projectId: 'p',
+      agent: 'claude',
+      cwd: project,
+      trusted: true,
+      setup: { command: 'prepara', copyEnv: true },
+    });
+    expect(session.port).toBeGreaterThanOrEqual(41_000);
+    expect(session.setup).toMatchObject({ state: 'running' });
+    await waitFor(() => runs.length === 1, 10_000);
+    expect(runs[0]).toMatchObject({
+      command: 'prepara',
+      cwd: session.cwd,
+      env: { SOLLINE_PORT: String(session.port), SOLLINE_WORKSPACE_PATH: session.cwd },
+    });
+    // O .env da raiz chegou à worktree antes do comando.
+    expect(await readFile(path.join(session.cwd, '.env'), 'utf8')).toBe('SEGREDO=1\n');
+
+    expect(await manager.send(session.id, 'olá')).toMatchObject({ how: 'queued' });
+    expect(ScriptedAdapter.received.map((r) => r.text)).not.toContain('olá');
+    finish();
+    await waitFor(() => ScriptedAdapter.received.some((r) => r.text === 'olá'), 10_000);
+    const setup = events
+      .filter((e) => e.type === 'session.setup' && e.sessionId === session.id)
+      .at(-1) as { setup: { state: string } } | undefined;
+    expect(setup?.setup.state).toBe('done');
   });
 
   it('sem git, a segunda sessão partilha a pasta', async () => {

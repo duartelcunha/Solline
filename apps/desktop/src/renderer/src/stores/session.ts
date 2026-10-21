@@ -112,6 +112,8 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       return { ...data, quality: event.quality };
     case 'session.checks':
       return { ...data, checks: event.checks };
+    case 'session.setup':
+      return { ...data, info: { ...data.info, setup: event.setup } };
     case 'session.queue':
       return { ...data, queue: event.queue };
     case 'session.workspace':

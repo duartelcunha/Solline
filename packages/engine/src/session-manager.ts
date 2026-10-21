@@ -18,6 +18,8 @@ import {
   type Checks,
   type Quality,
   type Orphan,
+  type SetupSpec,
+  type SetupState,
   type SessionQueue,
   type Workspace,
   type WorktreeStats,
@@ -34,6 +36,9 @@ import { ProjectChecks, checkFixMessage } from './checks/project-checks.ts';
 import type { RunCommand } from './checks/run.ts';
 import type { Worktree, WorktreeManager } from './worktrees/worktrees.ts';
 import { SessionTurns, type How, type Submitted } from './session-turns.ts';
+import { PortAllocator } from './workspace/ports.ts';
+import { SETUP_TIMEOUT_MS, copyEnvFiles, detectSetup, envFilesIn } from './workspace/setup.ts';
+import { runCommand } from './checks/run.ts';
 import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
@@ -99,6 +104,8 @@ interface Memory {
   named: boolean;
   /** Um "Trazer" a meio: fechar espera por ele. */
   bringing: Promise<unknown> | undefined;
+  /** A preparação da worktree a correr (fechar cancela-a). */
+  preparing: AbortController | undefined;
 }
 
 const DISABLED_TIMELINE = (rewind: ConversationRewind): Timeline => ({
@@ -135,6 +142,9 @@ export class SessionManager {
   readonly #worktrees: WorktreeManager | undefined;
   /** Pastas de projeto reservadas por uma sessão a arrancar (duas ao mesmo tempo não a partilham). */
   readonly #placing = new Set<string>();
+  readonly #ports = new PortAllocator();
+  /** Como se preparam as worktrees de cada projeto (null: a sugestão da Solline). */
+  readonly #setups = new Map<string, SetupSpec | null>();
 
   constructor(options: {
     emit: (event: EngineEvent) => void;
@@ -186,8 +196,14 @@ export class SessionManager {
       );
     }
     const place = await this.#placeFor(payload.projectId, payload.cwd);
+    if (payload.setup !== undefined) this.#setups.set(payload.projectId, payload.setup);
+    const sessionId = crypto.randomUUID();
+    const port = await this.#ports.reserve(sessionId).catch(() => undefined);
+    const prepares = Boolean(place.worktree && payload.trusted && this.#checksOptions);
     const info: SessionInfo = {
-      id: crypto.randomUUID(),
+      id: sessionId,
+      ...(port !== undefined ? { port } : {}),
+      ...(prepares ? { setup: { state: 'running' as const, tail: null, durationMs: null } } : {}),
       projectId: payload.projectId,
       agent: payload.agent,
       cwd: place.cwd,
@@ -221,6 +237,7 @@ export class SessionManager {
       worktree: place.worktree,
       named: false,
       bringing: undefined,
+      preparing: undefined,
     };
     this.#memory.set(info.id, memory);
     let result: SessionResult;
@@ -231,13 +248,18 @@ export class SessionManager {
       });
     } catch (error) {
       this.#memory.delete(info.id);
+      this.#ports.release(info.id);
       if (place.worktree)
         await this.#worktrees?.remove(place.worktree, 'always').catch(() => undefined);
       throw error;
     } finally {
       this.#placing.delete(place.key);
     }
-    this.#checksFor(info.projectId, info.cwd, payload.trusted, payload.checks ?? null);
+    this.#checksFor(info.projectId, info.cwd, payload.trusted, payload.checks ?? null, port);
+    if (prepares && place.worktree) {
+      memory.cycle.hold();
+      void this.#prepare(info.id, payload.cwd, place.worktree.cwd);
+    }
     // O primeiro checkpoint (o disco antes de tudo) faz-se por trás: a sessão já está pronta.
     const checkpoints = this.#store?.open(info.id, info.cwd, () => this.#rewindKind(info.id));
     memory.checkpoints = checkpoints;
@@ -297,12 +319,19 @@ export class SessionManager {
   }
 
   /** Abre (uma vez por pasta) as verificações e espalha cada mudança pelas sessões de lá. */
-  #checksFor(projectId: string, cwd: string, trusted: boolean, saved: CheckSpec[] | null): void {
+  #checksFor(
+    projectId: string,
+    cwd: string,
+    trusted: boolean,
+    saved: CheckSpec[] | null,
+    port?: number,
+  ): void {
     if (!this.#checksOptions || this.#checks.has(cwd)) return;
     const checks = new ProjectChecks({
       cwd,
       saved,
       trusted,
+      ...(port !== undefined ? { env: PortAllocator.env(port) } : {}),
       ...this.#checksOptions,
       emit: (state) => {
         for (const entry of this.#sessions.values()) {
@@ -800,6 +829,8 @@ export class SessionManager {
     }
     this.#sessions.delete(sessionId);
     this.#memory.delete(sessionId);
+    memory.preparing?.abort();
+    this.#ports.release(sessionId);
     await entry.adapter.close().catch(() => undefined);
     memory.quality?.dispose();
     await memory.checkpoints?.dispose();
@@ -880,6 +911,85 @@ export class SessionManager {
   #requireWorktrees(): WorktreeManager {
     if (!this.#worktrees) throw new Error('As worktrees estão desligadas');
     return this.#worktrees;
+  }
+
+  /**
+   * Prepara a worktree de uma sessão: copia os .env da raiz e corre o comando do projeto (ou a
+   * sugestão). O que escreveres entretanto espera na fila; uma falha não bloqueia a sessão.
+   */
+  async #prepare(sessionId: string, projectPath: string, worktreeCwd: string): Promise<void> {
+    const entry = this.#sessions.get(sessionId);
+    const memory = this.#memory.get(sessionId);
+    if (!entry || !memory) return;
+    memory.preparing?.abort();
+    const abort = new AbortController();
+    memory.preparing = abort;
+    const started = Date.now();
+    const report = (setup: SetupState) => {
+      entry.info.setup = setup;
+      this.#emit({ kind: 'event', type: 'session.setup', sessionId, setup });
+    };
+    report({ state: 'running', tail: null, durationMs: null });
+    try {
+      const spec = this.#setups.get(entry.info.projectId) ?? (await detectSetup(projectPath));
+      if (spec.copyEnv && this.#worktrees) {
+        const names = await envFilesIn(projectPath);
+        const tracked = await this.#worktrees.tracked(projectPath, names);
+        await copyEnvFiles(projectPath, worktreeCwd, tracked);
+      }
+      if (abort.signal.aborted) return;
+      let outcome: { state: 'passed' | 'failed' | 'timeout'; tail: string | null } = {
+        state: 'passed',
+        tail: null,
+      };
+      if (spec.command.trim()) {
+        const run = this.#checksOptions?.run ?? runCommand;
+        outcome = await run(spec.command, {
+          cwd: worktreeCwd,
+          signal: abort.signal,
+          timeoutMs: SETUP_TIMEOUT_MS,
+          env: {
+            ...(entry.info.port !== undefined ? PortAllocator.env(entry.info.port) : {}),
+            SOLLINE_ROOT_PATH: projectPath,
+            SOLLINE_WORKSPACE_PATH: worktreeCwd,
+          },
+        });
+      }
+      if (abort.signal.aborted) return;
+      report({
+        state: outcome.state === 'passed' ? 'done' : 'failed',
+        tail: outcome.tail,
+        durationMs: Date.now() - started,
+      });
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      report({
+        state: 'failed',
+        tail: error instanceof Error ? error.message : String(error),
+        durationMs: Date.now() - started,
+      });
+    } finally {
+      if (memory.preparing === abort) memory.preparing = undefined;
+      // Pronta ou não, a fila segue: uma falha vê-se e repete-se, não bloqueia.
+      if (!abort.signal.aborted) memory.cycle.release();
+    }
+  }
+
+  /** Volta a preparar a worktree da sessão. */
+  async retrySetup(sessionId: string): Promise<void> {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    if (!memory.worktree) throw new Error('Esta sessão trabalha na pasta do projeto');
+    if (!entry.trusted) throw new Error('Preparar só corre em projetos de confiança');
+    const project = memory.worktree;
+    const projectPath = resolve(project.top, relative(project.path, project.cwd));
+    memory.cycle.hold();
+    void this.#prepare(sessionId, projectPath, project.cwd);
+  }
+
+  /** A preparação de um projeto mudou no main (já com a tua confirmação); vale para as próximas. */
+  setProjectSetup(projectId: string, setup: SetupSpec | null): void {
+    this.#setups.set(projectId, setup);
   }
 
   quality(sessionId: string): Quality {
@@ -975,7 +1085,10 @@ export class SessionManager {
           keys: [...(definition.envPolicy.keys ?? []), ...(await this.#keysFor(definition.id))],
         }
       : definition.envPolicy;
-    const env = agentEnv(policy);
+    const env = {
+      ...agentEnv(policy),
+      ...(info.port !== undefined ? PortAllocator.env(info.port) : {}),
+    };
     const adapter = definition.create(
       {
         cwd: info.cwd,

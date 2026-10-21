@@ -39,6 +39,15 @@ test.beforeAll(async () => {
       },
     }),
   );
+  // A preparação de cada worktree nova vem do conductor.json: escreve a porta da sessão num ficheiro.
+  await writeFile(
+    join(project, 'conductor.json'),
+    JSON.stringify({
+      scripts: {
+        setup: `node -e "require('fs').writeFileSync('prepared.txt', process.env.SOLLINE_PORT)"`,
+      },
+    }),
+  );
   // O projeto é um repositório git: a segunda sessão ao mesmo tempo ganha a sua worktree.
   const git = (...args: string[]) => execFileSync('git', args, { cwd: project, windowsHide: true });
   git('init', '--quiet', '-b', 'main');
@@ -505,6 +514,10 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
   await expect(page.getByTestId('session-row')).toHaveCount(2, { timeout: 90_000 });
   await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
   const chip = page.getByTestId('workspace-chip');
+  // A worktree prepara-se por trás e a pastilha volta ao nome do branch quando acaba.
+  await expect(page.getByTestId('workspace-label')).not.toHaveText('A preparar', {
+    timeout: 60_000,
+  });
   await expect(chip).toHaveAttribute('data-branch', /^solline\/sessao-/);
 
   await page.getByTestId('pill-model').click();
@@ -555,6 +568,8 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
   await expect
     .poll(() => readFile(join(project, 'wt.txt'), 'utf8').catch(() => ''), { timeout: 30_000 })
     .toContain('hello');
+  // O script de preparação recebeu a porta da sessão (veio com o trabalho trazido).
+  expect(await readFile(join(project, 'prepared.txt'), 'utf8')).toMatch(/^4\d{4}$/);
 
   // Já trazida, fecha sem perguntar e a worktree sai.
   await chip.click();

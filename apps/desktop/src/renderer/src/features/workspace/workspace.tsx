@@ -1,6 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Folders, GitBranch, GitMerge, Sparkles, X } from 'lucide-react';
+import { Folders, GitBranch, GitMerge, RotateCw, Send, Sparkles, X } from 'lucide-react';
+import { IconSwap } from '@solline/ui/icon-swap';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 
@@ -20,6 +21,8 @@ function Delta({ additions, deletions }: { additions: number; deletions: number 
 export function WorkspaceChip({ sessionId }: { sessionId: string }) {
   const workspace = useSession(sessionId, (s) => s.info.workspace);
   const conflicts = useSession(sessionId, (s) => s.conflicts);
+  const setup = useSession(sessionId, (s) => s.info.setup);
+  const port = useSession(sessionId, (s) => s.info.port);
   const busy = useSession(sessionId, (s) => s.info.state !== 'idle' && s.info.state !== 'error');
 
   if (workspace?.kind === 'shared') {
@@ -51,11 +54,51 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
           data-branch={workspace.branch}
           className="no-drag sl-press inline-flex h-7 max-w-[13rem] items-center gap-1.5 rounded-control px-2 text-[12px] text-muted outline-none hover:bg-surface-hover hover:text-fg data-[state=open]:bg-surface-hover"
         >
-          <GitBranch size={14} strokeWidth={1.75} className="shrink-0" />
-          <span className="truncate">{name}</span>
+          <IconSwap swapKey={setup?.state ?? 'done'}>
+            {setup?.state === 'running' ? (
+              <span
+                aria-hidden
+                className="spinner block size-[12px] rounded-full border-[1.5px] border-current border-t-transparent text-subtle"
+              />
+            ) : setup?.state === 'failed' ? (
+              <svg aria-hidden width="11" height="11" viewBox="0 0 10 10" className="text-danger">
+                <path d="M3 0h4l3 3v4l-3 3H3L0 7V3z" fill="currentColor" />
+              </svg>
+            ) : (
+              <GitBranch size={14} strokeWidth={1.75} className="shrink-0" />
+            )}
+          </IconSwap>
+          <span className="truncate" data-testid="workspace-label">
+            {setup?.state === 'running' ? 'A preparar' : name}
+          </span>
         </Menu.Trigger>
       }
     >
+      {setup?.state === 'failed' ? (
+        <>
+          {setup.tail ? (
+            <pre
+              data-testid="setup-tail"
+              className="mx-1 mb-1 max-h-40 overflow-y-auto rounded-control bg-surface-sunken px-2.5 py-2 font-mono text-[11px] leading-snug [overflow-wrap:anywhere] whitespace-pre-wrap text-muted select-text"
+            >
+              {setup.tail}
+            </pre>
+          ) : null}
+          <ActionItem
+            title="Repetir a preparação"
+            icon={<RotateCw size={14} />}
+            onSelect={() => void actions.retrySetup(sessionId)}
+            testId="setup-retry"
+          />
+          <ActionItem
+            title="Mandar ao agente"
+            icon={<Send size={14} />}
+            disabled={busy}
+            onSelect={() => void actions.fixSetup(sessionId)}
+            testId="setup-fix"
+          />
+        </>
+      ) : null}
       {conflicts ? (
         <ActionItem
           title="Pedir ao agente para resolver"
@@ -78,6 +121,14 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
         onSelect={() => void actions.bring(sessionId)}
         testId="workspace-bring"
       />
+      {port !== undefined ? (
+        <div
+          className="px-2.5 py-1 text-[11.5px] text-subtle tabular-nums"
+          data-testid="session-port"
+        >
+          Portas {port}–{port + 9}
+        </div>
+      ) : null}
       <ActionItem
         title="Fechar sessão"
         icon={<X size={14} />}

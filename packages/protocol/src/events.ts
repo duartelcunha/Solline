@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AgentId, AskBlock, ConversationDelta, SessionState, Workspace } from './conversation.ts';
-import { Checks } from './checks.ts';
+import { Checks, SetupState } from './checks.ts';
 import { Quality } from './quality.ts';
 import { Timeline } from './review.ts';
 
@@ -87,6 +87,14 @@ export const SessionQueueEvent = z.object({
 });
 export type SessionQueue = z.infer<typeof SessionQueueEvent>['queue'];
 
+/** A preparação da worktree de uma sessão mudou (começou, acabou ou falhou). */
+export const SessionSetupEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.setup'),
+  sessionId: z.string(),
+  setup: SetupState,
+});
+
 export const EngineErrorEvent = z.object({
   kind: z.literal('event'),
   type: z.literal('engine.error'),
@@ -114,6 +122,7 @@ export const EngineEvent = z.discriminatedUnion('type', [
   SessionChecksEvent,
   SessionWorkspaceEvent,
   SessionQueueEvent,
+  SessionSetupEvent,
   EngineErrorEvent,
 ]);
 export type EngineEvent = z.infer<typeof EngineEvent>;
