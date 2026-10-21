@@ -17,6 +17,7 @@ import {
   type CheckSpec,
   type Checks,
   type Quality,
+  type Orphan,
   type Workspace,
   type WorktreeStats,
   type Timeline,
@@ -94,6 +95,8 @@ interface Memory {
   worktree: Worktree | undefined;
   /** O branch já tem o nome da primeira mensagem. */
   named: boolean;
+  /** Um "Trazer" a meio: fechar espera por ele. */
+  bringing: Promise<unknown> | undefined;
 }
 
 const DISABLED_TIMELINE = (rewind: ConversationRewind): Timeline => ({
@@ -213,6 +216,7 @@ export class SessionManager {
         : undefined,
       worktree: place.worktree,
       named: false,
+      bringing: undefined,
     };
     this.#memory.set(info.id, memory);
     this.#checksFor(info.projectId, info.cwd, payload.trusted, payload.checks ?? null);
@@ -669,6 +673,21 @@ export class SessionManager {
     this.#requireIdle(entry, memory, 'trazer o trabalho');
     if (!memory.worktree || !this.#worktrees)
       throw new Error('Esta sessão trabalha na pasta do projeto');
+    memory.busy = true;
+    const done = this.#bring(sessionId, memory).finally(() => {
+      memory.busy = false;
+      memory.bringing = undefined;
+    });
+    memory.bringing = done;
+    return done;
+  }
+
+  async #bring(
+    sessionId: string,
+    memory: Memory,
+  ): Promise<{ merged: boolean; conflicts: string[]; into: string }> {
+    if (!memory.worktree || !this.#worktrees)
+      throw new Error('Esta sessão trabalha na pasta do projeto');
     const first = memory.turns.find((t) => t.role === 'user');
     const title = (first ? textOf(first).split('\n')[0] : undefined)?.slice(0, 72) || 'sessão';
     const { result, wt } = await this.#worktrees.bring(memory.worktree, `Solline: ${title}`);
@@ -687,6 +706,7 @@ export class SessionManager {
   ): Promise<{ closed: boolean; stats?: WorktreeStats; conflicts?: string[] }> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
+    await memory.bringing?.catch(() => undefined);
     const worktree = memory.worktree;
     if (worktree && this.#worktrees) {
       const stats = await this.#worktrees.statsOrNone(worktree);
@@ -716,6 +736,52 @@ export class SessionManager {
       });
     }
     return { closed: true };
+  }
+
+  /** As worktrees no disco sem sessão aberta, com o que mudou em cada uma. */
+  async orphans(): Promise<Orphan[]> {
+    const worktrees = this.#worktrees;
+    if (!worktrees) return [];
+    const open = new Set(
+      [...this.#memory.values()].flatMap((m) => (m.worktree ? [m.worktree.path] : [])),
+    );
+    const found = await worktrees.orphans(open);
+    return Promise.all(
+      found.map(async (wt) => ({
+        id: `${wt.projectId}/${wt.suffix}`,
+        projectId: wt.projectId,
+        branch: wt.branch,
+        stats: await worktrees.statsOrNone(wt),
+      })),
+    );
+  }
+
+  async #orphan(id: string): Promise<Worktree> {
+    const open = new Set(
+      [...this.#memory.values()].flatMap((m) => (m.worktree ? [m.worktree.path] : [])),
+    );
+    const wt = (await this.#worktrees?.orphans(open))?.find(
+      (w) => `${w.projectId}/${w.suffix}` === id,
+    );
+    if (!wt) throw new Error('Essa worktree já não existe');
+    return wt;
+  }
+
+  async bringOrphan(id: string): Promise<{ merged: boolean; conflicts: string[]; into: string }> {
+    const worktrees = this.#requireWorktrees();
+    const wt = await this.#orphan(id);
+    const { result, wt: next } = await worktrees.bring(wt, `Solline: ${wt.branch}`);
+    if (result.merged) await worktrees.remove(next, true);
+    return result;
+  }
+
+  async discardOrphan(id: string): Promise<void> {
+    await this.#requireWorktrees().remove(await this.#orphan(id), true);
+  }
+
+  #requireWorktrees(): WorktreeManager {
+    if (!this.#worktrees) throw new Error('As worktrees estão desligadas');
+    return this.#worktrees;
   }
 
   quality(sessionId: string): Quality {

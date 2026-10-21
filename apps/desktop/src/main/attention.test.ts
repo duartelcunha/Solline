@@ -46,6 +46,33 @@ describe('avisos fora da app', () => {
     expect(t.observe(state('outra', 'needs-you'), false)).toBeNull();
   });
 
+  it('avisa quando cai e uma vez por ronda de verificações que falhe', () => {
+    const t = tracker();
+    expect(t.observe(state('s1', 'error'), false)).toMatchObject({ body: 'Caiu', urgent: false });
+    const checks = (turnId: string, lint: 'passed' | 'failed'): EngineEvent => ({
+      kind: 'event',
+      type: 'session.checks',
+      sessionId: 's1',
+      checks: {
+        trusted: true,
+        detected: true,
+        turnId,
+        specs: [
+          { id: 'typecheck', label: 'Tipos', command: 'x', enabled: true },
+          { id: 'lint', label: 'Lint', command: 'y', enabled: true },
+        ],
+        results: [
+          { id: 'typecheck', state: 'passed', tail: null, durationMs: 1 },
+          { id: 'lint', state: lint, tail: null, durationMs: 1 },
+        ],
+      },
+    });
+    expect(t.observe(checks('t1', 'passed'), false)).toBeNull();
+    expect(t.observe(checks('t1', 'failed'), false)).toMatchObject({ body: 'Lint falhou' });
+    expect(t.observe(checks('t1', 'failed'), false)).toBeNull();
+    expect(t.observe(checks('t2', 'failed'), true)).toBeNull();
+  });
+
   it('o nome do agente', () => {
     expect(agentLabel('codex')).toBe('Codex');
     expect(agentLabel('opencode')).toBe('Opencode');

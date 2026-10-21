@@ -9,6 +9,7 @@ import { Conversation } from './features/conversation/conversation.tsx';
 import { QualityChip } from './features/quality/quality.tsx';
 import { ChecksRow } from './features/quality/checks.tsx';
 import { CloseDialog, WorkspaceChip } from './features/workspace/workspace.tsx';
+import { Desk } from './features/desk/desk.tsx';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
 import { Familiar, SessionBot } from './features/agents/bots.tsx';
@@ -122,7 +123,10 @@ function ReviewButton({ sessionId }: { sessionId: string }) {
       <FileDiff size={14} strokeWidth={1.75} />
       Rever
       {pending && count > 0 ? (
-        <span className="font-mono text-[11px] whitespace-nowrap tabular-nums" data-testid="review-pending">
+        <span
+          className="font-mono text-[11px] whitespace-nowrap tabular-nums"
+          data-testid="review-pending"
+        >
           <span className="text-success">+{pending.additions}</span>{' '}
           <span className="text-danger">−{pending.deletions}</span>
         </span>
@@ -193,7 +197,8 @@ export function App() {
   const [theme, toggleTheme] = useTheme();
   const ping = usePing();
   const sessionIds = useApp((s) => s.sessionIds);
-  const activeSessionId = useApp((s) => s.activeSessionId);
+  const activeSessionId = useApp((s) => (s.view === 'session' ? s.activeSessionId : null));
+  const hasDesk = useApp((s) => s.sessionIds.length > 0 || s.orphans.length > 0);
   const notice = useApp((s) => s.notice);
 
   useEffect(() => {
@@ -282,6 +287,8 @@ export function App() {
             </div>
             <ReviewPanel key={`r-${activeSessionId}`} sessionId={activeSessionId} />
           </div>
+        ) : hasDesk ? (
+          <Desk />
         ) : (
           <Welcome />
         )}

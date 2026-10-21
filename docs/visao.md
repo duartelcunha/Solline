@@ -35,6 +35,10 @@ isso pode cruzá-los:
 O produto é para developers e builders que querem perceber o que se passa sem ler paredes de texto.
 Regras que valem para todos os marcos:
 
+- Calma acima de tudo: a Solline anda ao ritmo de quem pensa. Acompanha o que sai no mundo dos
+  agentes sem correr atrás de cada novidade, e nunca transmite a pressa da IA e do mundo IT a quem
+  a usa. O ritmo está em `docs/brand.md`.
+
 - Mostrar em vez de escrever. Agentes em paralelo aparecem como pistas lado a lado, o plano como um
   mapa de tarefas, o contexto e o custo como medidores, a linha do tempo de uma sessão como uma barra
   que se arrasta para rebobinar.

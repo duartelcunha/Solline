@@ -7,7 +7,7 @@ import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { useChangedSinceMount } from '../../lib/morph.ts';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 
-type Face = 'waiting' | CheckResult['state'];
+export type Face = 'waiting' | CheckResult['state'];
 
 const STATE_LABEL: Record<Face, string> = {
   waiting: 'por correr',
@@ -19,7 +19,7 @@ const STATE_LABEL: Record<Face, string> = {
 };
 
 /** A marca de cada estado: lê-se pela forma, não só pela cor. */
-function Mark({ face }: { face: Face }) {
+export function Mark({ face }: { face: Face }) {
   switch (face) {
     case 'running':
     case 'pending':

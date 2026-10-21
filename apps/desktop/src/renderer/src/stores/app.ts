@@ -8,6 +8,7 @@ import type {
   CommandPayload,
   CheckSpec,
   CommandResult,
+  Orphan,
   DiffScope,
   EngineEvent,
   FileDiff,
@@ -52,6 +53,10 @@ interface AppState {
   loginRequests: string[];
   /** Uma sessão que não fechou porque tem trabalho por trazer: o diálogo pergunta o que fazer. */
   closing: { sessionId: string; files: number; additions: number; deletions: number } | null;
+  /** A vista principal: a mesa com todas as sessões, ou a conversa da sessão ativa. */
+  view: 'desk' | 'session';
+  /** Worktrees que ficaram no disco sem sessão (por trazer). */
+  orphans: Orphan[];
 }
 
 export const useApp = create<AppState>(() => ({
@@ -69,6 +74,8 @@ export const useApp = create<AppState>(() => ({
   checkingAgents: false,
   loginRequests: [],
   closing: null,
+  view: 'desk',
+  orphans: [],
 }));
 
 const sessionStores = new Map<string, SessionStore>();
@@ -243,6 +250,7 @@ export const actions = {
       projects,
       activeProjectId: s.activeProjectId ?? projects[0]?.id ?? null,
     }));
+    void actions.refreshOrphans();
   },
 
   async addProject(): Promise<void> {
@@ -289,7 +297,46 @@ export const actions = {
     useApp.setState({
       activeSessionId: sessionId,
       activeProjectId: store?.getState().projectId ?? useApp.getState().activeProjectId,
+      view: 'session',
     });
+  },
+
+  /** Abre a mesa e volta a procurar as worktrees por trazer. */
+  openDesk(): void {
+    useApp.setState({ view: 'desk', reviewOpen: false });
+    void actions.refreshOrphans();
+  },
+
+  async refreshOrphans(): Promise<void> {
+    try {
+      const { orphans } = await request('worktrees.list', {});
+      useApp.setState({ orphans });
+    } catch {
+      // Sem worktrees (motor isolado ou sem pasta de dados): a mesa mostra só as sessões.
+    }
+  },
+
+  async bringOrphan(id: string): Promise<void> {
+    try {
+      const result = await request('worktrees.bring', { id });
+      useApp.setState({
+        notice: result.merged
+          ? null
+          : `Conflitos em ${result.conflicts.join(', ')}: abre uma sessão para os resolver.`,
+      });
+    } catch (error) {
+      useApp.setState({ notice: message(error) });
+    }
+    await actions.refreshOrphans();
+  },
+
+  async discardOrphan(id: string): Promise<void> {
+    try {
+      await request('worktrees.discard', { id });
+    } catch (error) {
+      useApp.setState({ notice: message(error) });
+    }
+    await actions.refreshOrphans();
   },
 
   async createSession(projectId: string, agent: AgentId = defaultAgent()): Promise<void> {
@@ -310,6 +357,7 @@ export const actions = {
       useApp.setState((s) => ({
         sessionIds: [session.id, ...s.sessionIds],
         activeSessionId: session.id,
+        view: 'session',
       }));
       // Um evento que chegue primeiro é mais recente: o pedido inicial não o pisa.
       void request('quality.get', { sessionId: session.id })
@@ -397,6 +445,7 @@ export const actions = {
           closing: null,
           activeSessionId:
             s.activeSessionId === sessionId ? (sessionIds[0] ?? null) : s.activeSessionId,
+          view: s.activeSessionId === sessionId ? 'desk' : s.view,
         };
       });
     } catch (error) {

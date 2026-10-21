@@ -8,7 +8,7 @@ A visão e os próximos marcos estão em `docs/visao.md`; o plano multi-agente (
 
 A Solline tem de ser melhor do que qualquer harness sozinho: tudo o que o Claude Code, o Codex, o
 Cursor, o Conductor e os outros fazem bem, feito melhor, mais o que só existe quando se juntam.
-Cada decisão mede-se em quatro coisas:
+Cada decisão mede-se em cinco coisas:
 
 1. **Ver:** percebe-se de relance, sem ler paredes de texto.
 2. **Trabalhar:** menos cliques e menos espera do que em qualquer outra ferramenta para o mesmo
@@ -17,6 +17,11 @@ Cada decisão mede-se em quatro coisas:
    só mais depressa.
 4. **Sinergia:** cada peça nova usa e reforça as outras (a worktree dá ao revisor e às verificações
    uma pasta limpa; o cartão da mesa mostra as verificações e o revisor; a fila usa os checkpoints).
+5. **Calma:** a Solline anda ao ritmo de quem pensa, não ao da máquina. Rápida a responder ao
+   teu clique, nunca a apressar-te: nada pisca, salta ou apita sem razão, os avisos esperam até
+   fazerem falta, não há contadores a correr nem "responde já". Devagar onde a pressa estraga
+   (trazer, rebobinar, apagar pedem um segundo de atenção), depressa onde só poupa tempo.
+   Acompanha o que sai no mundo dos agentes, mas só entra o que já provou valer, e entra bem feito.
 
 Antes de desenhar: que harness faz isto melhor hoje, e como o fazemos melhor e ligado ao resto?
 Sem resposta, não entra.

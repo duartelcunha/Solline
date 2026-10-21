@@ -1,8 +1,9 @@
 import type { EngineEvent, SessionInfo, SessionState } from '@solline/protocol';
 
 /**
- * Quando avisar fora da app: uma sessão que passa a precisar de ti ou acaba um turno, e só
- * com a janela sem foco (com foco, o bot já o mostra). Função pura; o main mostra o aviso
+ * Quando avisar fora da app, e só com a janela sem foco (com foco, o bot já o mostra): uma
+ * sessão que passa a precisar de ti, que acaba um turno, que cai, ou cujas verificações falham.
+ * Calma: um aviso por acontecimento, e só o "precisa de ti" faz piscar a barra de tarefas. Função pura; o main mostra o aviso
  * do Windows e faz piscar a barra de tarefas.
  */
 
@@ -10,6 +11,8 @@ export interface Tracked {
   agent: string;
   project: string;
   state: SessionState;
+  /** A última ronda de verificações que já deu aviso (uma vez por ronda). */
+  checksWarned: string | null;
 }
 
 export interface Attention {
@@ -31,11 +34,17 @@ export class AttentionTracker {
 
   /** Uma sessão nova (ou retomada), com o nome do projeto para o título do aviso. */
   track(session: Pick<SessionInfo, 'id' | 'agent' | 'state'>, project: string): void {
-    this.#sessions.set(session.id, { agent: session.agent, project, state: session.state });
+    this.#sessions.set(session.id, {
+      agent: session.agent,
+      project,
+      state: session.state,
+      checksWarned: null,
+    });
   }
 
   /** O aviso que este evento merece, ou null. Atualiza sempre o estado guardado. */
   observe(event: EngineEvent, focused: boolean): Attention | null {
+    if (event.type === 'session.checks') return this.#checks(event, focused);
     if (event.type !== 'session.state') return null;
     const session = this.#sessions.get(event.sessionId);
     if (!session) return null;
@@ -49,6 +58,29 @@ export class AttentionTracker {
     if (previous === 'running' && event.state === 'idle') {
       return { sessionId: event.sessionId, title, body: 'Turno acabado', urgent: false };
     }
+    if (event.state === 'error') {
+      return { sessionId: event.sessionId, title, body: 'Caiu', urgent: false };
+    }
     return null;
+  }
+
+  #checks(
+    event: Extract<EngineEvent, { type: 'session.checks' }>,
+    focused: boolean,
+  ): Attention | null {
+    const session = this.#sessions.get(event.sessionId);
+    const { checks } = event;
+    if (!session || !checks.turnId || checks.turnId === session.checksWarned) return null;
+    const failed = checks.results.filter((r) => r.state === 'failed' || r.state === 'timeout');
+    if (failed.length === 0) return null;
+    session.checksWarned = checks.turnId;
+    if (focused) return null;
+    const labels = failed.map((r) => checks.specs.find((s) => s.id === r.id)?.label ?? r.id);
+    return {
+      sessionId: event.sessionId,
+      title: `${agentLabel(session.agent)} · ${session.project}`,
+      body: `${labels.join(', ')} ${failed.length === 1 ? 'falhou' : 'falharam'}`,
+      urgent: false,
+    };
   }
 }

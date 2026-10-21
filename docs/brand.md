@@ -59,3 +59,15 @@ Cor e forma, para se ler sem distinguir cores: erro em octógono (vermelho), ris
 3. Uma ação por frase; os botões começam por verbo.
 4. Não personificar o sistema nem prometer certezas.
 5. Ser breve: o contexto está na linha do tempo, não no texto.
+6. Calma: nunca apressar. Sem pontos de exclamação, sem "agora!", sem urgência inventada; a única
+   urgência é a de um agente que está à espera de ti, e essa diz-se uma vez, em âmbar.
+
+## Ritmo
+
+A Solline é calma de propósito. Responde logo ao clique e depois sai do caminho:
+- O movimento assenta e para; nada fica a piscar ou a pulsar sem que algo esteja mesmo a acontecer.
+- Avisos do sistema só quando a janela não tem foco e só para o que pede uma decisão tua (precisa de
+  ti, caiu, verificações a falhar). Um turno acabado é uma notificação discreta, nunca um alarme.
+- As ações que não se desfazem num clique (trazer, rebobinar, deitar fora) pedem um segundo de
+  atenção; o resto é imediato.
+- Nada de contadores de tempo, rankings ou pressão para responder. O agente espera por ti.

@@ -402,3 +402,17 @@
 - Cada worktree tem um `.json` ao lado (branch, base, projeto) para as que ficam por trazer
   depois de a app fechar aparecerem na mesa (fatia 2).
 - As verificações passam a ser por pasta de trabalho, não por projeto.
+
+## M3, fatia 2: a mesa (21/10/2026)
+
+- A mesa é a vista de conjunto: um cartão por sessão, ordenados por urgência (precisa de ti →
+  a trabalhar → caiu → parada → por trazer) e, dentro de cada estado, pela ordem de chegada, para
+  os cartões não mudarem de lugar sem razão. Quando mudam, deslizam 250 ms (FLIP, só transform).
+- Um pedido de permissão responde-se no cartão (Permitir / Negar); planos e perguntas abrem a
+  conversa. O cartão não tem caixa de resposta.
+- As worktrees que ficaram por trazer quando a app fechou aparecem como cartões "por trazer".
+- Avisos do sistema também quando uma sessão cai e quando as verificações falham, uma vez por
+  ronda e só sem foco.
+- Fechar uma sessão espera por um "Trazer" a meio (antes lia o estado antigo e pedia escolha).
+- Calma passou a ser a quinta medida do Norte (`CLAUDE.md`); o ritmo concreto está em
+  `docs/brand.md`.

@@ -6,7 +6,7 @@ import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { morphName } from '../../lib/morph.ts';
 import { SettingsPills } from './pills.tsx';
 
-const money = new Intl.NumberFormat('pt-PT', {
+export const money = new Intl.NumberFormat('pt-PT', {
   style: 'currency',
   currency: 'USD',
   minimumFractionDigits: 2,
@@ -14,7 +14,15 @@ const money = new Intl.NumberFormat('pt-PT', {
 });
 const tokens = new Intl.NumberFormat('pt-PT', { notation: 'compact', maximumFractionDigits: 1 });
 
-function ContextMeter({ used, max, percent }: { used: number; max: number; percent: number }) {
+export function ContextMeter({
+  used,
+  max,
+  percent,
+}: {
+  used: number;
+  max: number;
+  percent: number;
+}) {
   const r = 6.5;
   const c = 2 * Math.PI * r;
   const p = Math.min(Math.max(percent, 0), 100);

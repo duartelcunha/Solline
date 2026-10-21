@@ -586,6 +586,24 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
     expect(git(project, 'branch', '--list', 'solline/*')).toBe('');
   });
 
+  it('a worktree que fica por trazer quando a app fecha aparece como órfã e traz-se', async () => {
+    const worktrees = gitProject();
+    makeManager(true, undefined, undefined, worktrees);
+    await startSession();
+    const second = await startSession();
+    await turn(second, 'escreve h.txt=orfa');
+    await manager.disposeAll();
+
+    makeManager(true, undefined, undefined, worktrees);
+    const orphans = await manager.orphans();
+    expect(orphans).toEqual([
+      expect.objectContaining({ projectId: 'p', stats: { files: 1, additions: 1, deletions: 0 } }),
+    ]);
+    expect(await manager.bringOrphan(orphans[0]!.id)).toMatchObject({ merged: true });
+    expect(await read('h.txt')).toBe('orfa' + String.fromCharCode(10));
+    expect(await manager.orphans()).toEqual([]);
+  });
+
   it('sem git, a segunda sessão partilha a pasta', async () => {
     makeManager(true, undefined, undefined, new WorktreeManager({ root: path.join(root, 'wt') }));
     await startSession();

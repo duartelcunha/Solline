@@ -506,12 +506,22 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
       'Create a file named wt.txt containing exactly the word hello. Reply with one short sentence.',
     );
   await page.getByTestId('send').click();
-  const card = page.getByTestId('permission-card');
-  await expect(card).toBeVisible({ timeout: 120_000 });
-  await card.getByRole('button', { name: /Permitir uma vez/ }).click();
+
+  // Na mesa, a sessão que pede permissão sobe para o topo e responde-se no cartão.
+  await page.getByTestId('open-desk').click();
+  await expect(page.getByTestId('desk-card')).toHaveCount(2);
+  const top = page.getByTestId('desk-card').first();
+  await expect(top).toHaveAttribute('data-state', 'needs-you', { timeout: 120_000 });
+  await expect(page.getByTestId('desk-waiting')).toHaveText('1');
+  await expect(top.getByTestId('card-ask')).toContainText('wt.txt');
+  await shot(page, 'desk-needs-you');
+  await top.getByTestId('card-allow').click();
+  await expect(page.locator('[data-testid="desk-card"][data-state="needs-you"]')).toHaveCount(0);
   await expect(page.getByTestId('session-row').first()).toHaveAttribute('data-state', 'idle', {
     timeout: 120_000,
   });
+  await shot(page, 'desk');
+  await page.getByTestId('session-row').first().click();
 
   // O branch ganhou o nome da mensagem; o ficheiro está só na worktree até se trazer.
   await expect(chip).toHaveAttribute('data-branch', /^solline\/create-a-file-named-/);

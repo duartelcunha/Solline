@@ -1,5 +1,6 @@
 import { Logo } from '../../components/logo.tsx';
-import { FolderPlus, Folder, ShieldCheck, ShieldOff, X } from 'lucide-react';
+import { FolderPlus, Folder, LayoutGrid, ShieldCheck, ShieldOff, X } from 'lucide-react';
+import { useNeedsYouCount } from '../desk/desk.tsx';
 import { APP_NAME } from '@solline/protocol/app';
 import type { Project, SessionState } from '@solline/protocol';
 import { actions, useApp, useSession } from '../../stores/app.ts';
@@ -17,7 +18,7 @@ const STATE_LABEL: Record<SessionState, string> = {
 function SessionRow({ id }: { id: string }) {
   const title = useSession(id, (s) => s.info.title);
   const state = useSession(id, (s) => s.info.state);
-  const active = useApp((s) => s.activeSessionId === id);
+  const active = useApp((s) => s.view === 'session' && s.activeSessionId === id);
   return (
     <li className="group relative">
       <button
@@ -127,6 +128,7 @@ export function Sidebar({
       </div>
 
       <div className="px-2 pt-1">
+        <DeskButton />
         <button
           type="button"
           onClick={() => void actions.addProject()}
@@ -161,5 +163,34 @@ export function Sidebar({
 
       <div className="border-t border-line px-4 py-3">{footer}</div>
     </aside>
+  );
+}
+
+/** A mesa: todas as sessões de uma vez. O número âmbar diz quantas precisam de ti. */
+function DeskButton() {
+  const open = useApp((s) => s.view === 'desk');
+  const waiting = useNeedsYouCount();
+  return (
+    <button
+      type="button"
+      onClick={() => actions.openDesk()}
+      aria-current={open ? 'page' : undefined}
+      data-testid="open-desk"
+      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors duration-150 active:bg-surface-sunken ${
+        open ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover hover:text-fg'
+      }`}
+    >
+      <LayoutGrid size={15} strokeWidth={1.75} />
+      Mesa
+      {waiting > 0 ? (
+        <span
+          className="ml-auto grid h-4.5 min-w-4.5 place-items-center rounded-full bg-accent px-1 text-[10.5px] font-semibold text-[#1b1916] tabular-nums"
+          aria-label={`${waiting} à tua espera`}
+          data-testid="desk-waiting"
+        >
+          {waiting}
+        </span>
+      ) : null}
+    </button>
   );
 }

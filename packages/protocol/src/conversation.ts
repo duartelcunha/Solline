@@ -350,6 +350,16 @@ export const Workspace = z.discriminatedUnion('kind', [
 ]);
 export type Workspace = z.infer<typeof Workspace>;
 
+/** Uma worktree que ficou no disco sem sessão aberta (a app fechou antes de a trazer). */
+export const Orphan = z.object({
+  /** projectId/sufixo: o motor resolve-o contra a lista, a interface nunca nomeia pastas. */
+  id: z.string(),
+  projectId: z.string(),
+  branch: z.string(),
+  stats: WorktreeStats,
+});
+export type Orphan = z.infer<typeof Orphan>;
+
 export const SessionInfo = z.object({
   id: z.string(),
   projectId: z.string(),

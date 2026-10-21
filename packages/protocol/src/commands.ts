@@ -6,6 +6,7 @@ import {
   EnvKeyName,
   McpServerDescriptor,
   PermissionAnswer,
+  Orphan,
   SessionInfo,
   WorktreeStats,
 } from './conversation.ts';
@@ -156,6 +157,18 @@ export const commandSchemas = {
       stats: WorktreeStats.optional(),
       conflicts: z.array(z.string()).optional(),
     }),
+  },
+  /** As worktrees no disco que nenhuma sessão aberta usa. */
+  'worktrees.list': { payload: Empty, result: z.object({ orphans: z.array(Orphan) }) },
+  /** Traz uma worktree órfã para o projeto (merge); com conflitos, nada muda. */
+  'worktrees.bring': {
+    payload: z.object({ id: z.string().min(1).max(128) }).strict(),
+    result: z.object({ merged: z.boolean(), conflicts: z.array(z.string()), into: z.string() }),
+  },
+  /** Deita fora uma worktree órfã e o seu branch. */
+  'worktrees.discard': {
+    payload: z.object({ id: z.string().min(1).max(128) }).strict(),
+    result: Empty,
   },
   'permission.answer': {
     payload: SessionRef.extend({ requestId: z.string().min(1), answer: PermissionAnswer }).strict(),
