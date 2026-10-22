@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { _electron as electron, test as base, expect, type Page } from '@playwright/test';
 
 type Qa = {
@@ -55,8 +55,37 @@ const test = base.extend<{ qa: Qa }>({
       });
     let app = await launch();
     const errors: string[] = [];
+    const processLog: { at: string; stream: string; text: string }[] = [];
+    const eventJournal: { generation: number; events: unknown[] }[] = [];
+    let generation = 0;
+    let flushEvents = () => Promise.resolve();
     const connect = async () => {
+      const child = app.process();
+      for (const [stream, source] of [
+        ['stdout', child.stdout],
+        ['stderr', child.stderr],
+      ] as const)
+        source?.on('data', (data: Buffer) =>
+          processLog.push({ at: new Date().toISOString(), stream, text: data.toString('utf8') }),
+        );
       const page = await app.firstWindow();
+      const journal = await page.evaluateHandle(() => {
+        const events: { at: number; event: unknown }[] = [];
+        const stop = window.solline.onEvent((event) =>
+          events.push({ at: performance.now(), event }),
+        );
+        return { events, stop };
+      });
+      const currentGeneration = generation++;
+      flushEvents = async () => {
+        flushEvents = () => Promise.resolve();
+        const events = await journal.evaluate((value) => {
+          value.stop();
+          return value.events;
+        });
+        eventJournal.push({ generation: currentGeneration, events });
+        await journal.dispose();
+      };
       page.on('pageerror', (e) => errors.push(e.message));
       page.on('console', (entry) => {
         if (entry.type() === 'error') errors.push(entry.text());
@@ -81,6 +110,7 @@ const test = base.extend<{ qa: Qa }>({
       let page = await connect();
       await page.getByTestId('add-project').click();
       const restart = async () => {
+        await flushEvents();
         await app.context().tracing.stop({ path: info.outputPath('before-restart.zip') });
         await info.attach('before-restart', {
           path: info.outputPath('before-restart.zip'),
@@ -105,20 +135,113 @@ const test = base.extend<{ qa: Qa }>({
       ).toEqual({ node: 'undefined', qa: false });
       expect(errors).toEqual([]);
     } finally {
-      const page = app.windows()[0];
-      if (page && !page.isClosed())
-        await info.attach('electron', { body: await page.screenshot(), contentType: 'image/png' });
-      await app.context().tracing.stop({ path: info.outputPath('electron-trace.zip') });
-      await info.attach('electron-trace', {
-        path: info.outputPath('electron-trace.zip'),
-        contentType: 'application/zip',
-      });
-      await app.close();
-      // Delete only this fixture's mkdtemp directory, never a project supplied by the user.
-      await removeFixture(root);
+      const evidenceErrors: string[] = [];
+      const capture = async (name: string, collect: () => Promise<void>) => {
+        try {
+          await collect();
+        } catch (error) {
+          evidenceErrors.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
+      try {
+        await capture('engine-events', async () => {
+          await flushEvents();
+          await info.attach('engine-events', {
+            body: JSON.stringify(
+              {
+                limitation:
+                  'Passive engine events after connection. Invoke requests/responses are not observable through public Electron listeners.',
+                connections: eventJournal,
+              },
+              null,
+              2,
+            ),
+            contentType: 'application/json',
+          });
+        });
+        await capture('main-utility-output', async () => {
+          await info.attach('main-utility-output', {
+            body: JSON.stringify(processLog, null, 2),
+            contentType: 'application/json',
+          });
+        });
+        await capture('git-before-teardown', async () => {
+          const snapshot = await gitSnapshot(root, project);
+          await info.attach('git-before-teardown', {
+            body: JSON.stringify(snapshot, null, 2),
+            contentType: 'application/json',
+          });
+        });
+        await capture('electron', async () => {
+          const page = app.windows()[0];
+          if (page && !page.isClosed())
+            await info.attach('electron', {
+              body: await page.screenshot(),
+              contentType: 'image/png',
+            });
+        });
+        await capture('electron-trace', async () => {
+          await app.context().tracing.stop({ path: info.outputPath('electron-trace.zip') });
+          await info.attach('electron-trace', {
+            path: info.outputPath('electron-trace.zip'),
+            contentType: 'application/zip',
+          });
+        });
+        if (evidenceErrors.length)
+          await info.attach('evidence-failures', {
+            body: JSON.stringify(evidenceErrors),
+            contentType: 'application/json',
+          });
+        expect(evidenceErrors, 'Required QA evidence collection').toEqual([]);
+      } finally {
+        try {
+          await app.close();
+        } finally {
+          // Delete only this fixture's mkdtemp directory, never a user project.
+          await removeFixture(root);
+        }
+      }
     }
   },
 });
+
+async function gitSnapshot(root: string, project: string) {
+  const read = (cwd: string, args: string[]) => {
+    return execFileSync('git', ['--no-optional-locks', ...args], {
+      cwd,
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+  };
+  const worktrees = read(project, ['worktree', 'list', '--porcelain']);
+  const paths = worktrees
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice(9));
+  const files = await Promise.all(
+    paths.map(async (path) => {
+      if (!resolve(path).startsWith(resolve(root) + sep))
+        throw new Error('Snapshot path escaped fixture');
+      return {
+        path,
+        status: read(path, ['status', '--porcelain']),
+        notes: await readFile(join(path, 'notes.txt'), 'utf8').catch(() => null),
+        prepared: await readFile(join(path, 'prepared.txt'), 'utf8').catch(() => null),
+      };
+    }),
+  );
+  return {
+    worktrees,
+    branches: read(project, [
+      'for-each-ref',
+      '--format=%(refname:short) %(objectname)',
+      'refs/heads',
+    ]),
+    log: read(project, ['log', '--all', '--oneline', '--stat', '-8']),
+    files,
+  };
+}
 
 async function newSession(page: Page) {
   await page.getByTestId('new-session').click();
@@ -185,6 +308,33 @@ async function openWorktree(qa: Qa, failFirst = false) {
 async function closeWorktree(page: Page) {
   await page.getByTestId('workspace-chip').click();
   await page.getByTestId('workspace-close').click();
+}
+
+function branchesForWorktree(qa: Qa, path: string) {
+  // The title-based branch name changes asynchronously; the worktree suffix never does.
+  const suffix = basename(path);
+  expect(suffix).toMatch(/^[a-z0-9]{4}$/);
+  return qa
+    .git('branch', '--format=%(refname:short)')
+    .split('\n')
+    .filter((branch) => branch.startsWith('solline/') && branch.endsWith(`-${suffix}`));
+}
+
+function branchFile(qa: Qa, branch: string, file: string) {
+  return execFileSync('git', ['show', `${branch}:${file}`], {
+    cwd: qa.project,
+    windowsHide: true,
+    encoding: 'utf8',
+  });
+}
+
+function expectKeptWorktree(qa: Qa, path: string, prepared: string) {
+  const branches = branchesForWorktree(qa, path);
+  expect(branches).toHaveLength(1);
+  const branch = branches[0];
+  if (!branch) throw new Error('Missing retained worktree branch');
+  expect(branchFile(qa, branch, 'notes.txt')).toBe('Alteração revista.\n');
+  expect(branchFile(qa, branch, 'prepared.txt')).toBe(prepared);
 }
 
 for (const decision of ['deny', 'allow'] as const) {
@@ -260,6 +410,7 @@ for (const choice of ['keep', 'discard', 'bring'] as const) {
   test(`setup real + fechar worktree: ${choice}`, async ({ qa }, info) => {
     const { page, project, git } = qa;
     const path = await openWorktree(qa);
+    const prepared = await readFile(join(path, 'prepared.txt'), 'utf8');
     await send(page);
     await answer(page, 'allow');
     await expect.poll(() => readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
@@ -268,6 +419,7 @@ for (const choice of ['keep', 'discard', 'bring'] as const) {
     if (!branch) throw new Error('Missing worktree branch');
     const before = {
       branch,
+      worktreeSuffix: basename(path),
       project: await readFile(join(project, 'notes.txt'), 'utf8'),
       worktree: await readFile(join(path, 'notes.txt'), 'utf8'),
       status: git('-C', path, 'status', '--porcelain'),
@@ -286,6 +438,11 @@ for (const choice of ['keep', 'discard', 'bring'] as const) {
           before,
           after: {
             branches,
+            retained: branchesForWorktree(qa, path).map((ref) => ({
+              branch: ref,
+              notes: branchFile(qa, ref, 'notes.txt'),
+              prepared: branchFile(qa, ref, 'prepared.txt'),
+            })),
             project: await readFile(join(project, 'notes.txt'), 'utf8'),
             head: git('show', 'HEAD:notes.txt'),
             log: git('log', '--all', '--oneline', '--stat', '-5'),
@@ -297,20 +454,21 @@ for (const choice of ['keep', 'discard', 'bring'] as const) {
       ),
       contentType: 'application/json',
     });
-    expect(branches.includes(branch)).toBe(choice === 'keep');
+    if (choice === 'keep') expectKeptWorktree(qa, path, prepared);
+    else expect(branchesForWorktree(qa, path)).toEqual([]);
     expect(await readFile(join(project, 'notes.txt'), 'utf8')).toBe(
       choice === 'bring' ? 'Alteração revista.\n' : 'Original.\n',
     );
-    if (choice === 'keep') expect(git('show', `${branch}:notes.txt`)).toBe('Alteração revista.');
     if (choice === 'bring')
-      expect(await readFile(join(project, 'prepared.txt'), 'utf8')).toMatch(/^4\d{4}$/);
+      expect(await readFile(join(project, 'prepared.txt'), 'utf8')).toBe(prepared);
     else expect(existsSync(join(project, 'prepared.txt'))).toBe(false);
   });
 }
 
 test('fechar com fila preserva autorização através do diálogo da worktree', async ({ qa }) => {
-  const { page, git } = qa;
+  const { page } = qa;
   const path = await openWorktree(qa);
+  const prepared = await readFile(join(path, 'prepared.txt'), 'utf8');
   await send(page);
   await answer(page, 'allow');
   await send(page, 'Segundo turno, espera pela permissão.');
@@ -319,8 +477,6 @@ test('fechar com fila preserva autorização através do diálogo da worktree', 
   await expect(page.getByTestId('queued')).toHaveCount(1);
   await page.getByTestId('interrupt').click();
   await expect(page.getByTestId('queue-resume')).toBeVisible();
-  const branch = await page.getByTestId('workspace-chip').getAttribute('data-branch');
-  if (!branch) throw new Error('Missing branch');
   await closeWorktree(page);
   await expect(page.getByTestId('close-queue-dialog')).toBeVisible();
   await page.getByTestId('close-drop-queue').click();
@@ -329,7 +485,7 @@ test('fechar com fila preserva autorização através do diálogo da worktree', 
   await expect(page.getByTestId('close-queue-dialog')).toBeHidden();
   await expect(page.getByTestId('session-row')).toHaveCount(1);
   await expect.poll(() => existsSync(path)).toBe(false);
-  expect(git('show', `${branch}:notes.txt`)).toBe('Alteração revista.');
+  expectKeptWorktree(qa, path, prepared);
 });
 
 for (const scenario of ['empate', 'falha'] as const) {
@@ -424,6 +580,7 @@ test('preparação falha uma vez e repetir corre o comando real', async ({ qa })
 test('conflito ao trazer preserva projeto e branch recuperável', async ({ qa }) => {
   const { page, project, git } = qa;
   const path = await openWorktree(qa);
+  const prepared = await readFile(join(path, 'prepared.txt'), 'utf8');
   await send(page);
   await answer(page, 'allow');
   await expect.poll(() => readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
@@ -431,8 +588,6 @@ test('conflito ao trazer preserva projeto e branch recuperável', async ({ qa })
   git('add', 'notes.txt');
   git('commit', '-qm', 'Independent local edit');
   const before = git('rev-parse', 'HEAD');
-  const branch = await page.getByTestId('workspace-chip').getAttribute('data-branch');
-  if (!branch) throw new Error('Missing branch');
   await page.getByTestId('workspace-chip').click();
   await expect(page.getByTestId('workspace-bring')).toBeEnabled();
   await page.getByTestId('workspace-bring').click();
@@ -449,17 +604,16 @@ test('conflito ao trazer preserva projeto e branch recuperável', async ({ qa })
   await closeWorktree(page);
   await page.getByTestId('close-keep').click();
   await expect(page.getByTestId('session-row')).toHaveCount(1);
-  expect(git('show', `${branch}:notes.txt`)).toBe('Alteração revista.');
+  expectKeptWorktree(qa, path, prepared);
 });
 
 for (const choice of ['bring', 'discard'] as const) {
   test(`reiniciar recupera worktree órfã: ${choice}`, async ({ qa }) => {
     const path = await openWorktree(qa);
+    const prepared = await readFile(join(path, 'prepared.txt'), 'utf8');
     await send(qa.page);
     await answer(qa.page, 'allow');
     await expect.poll(() => readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
-    const branch = await qa.page.getByTestId('workspace-chip').getAttribute('data-branch');
-    if (!branch) throw new Error('Missing branch');
     const page = await qa.restart();
     await page.getByTestId('open-desk').click();
     await expect(page.getByTestId('orphan-card')).toHaveCount(1);
@@ -474,10 +628,13 @@ for (const choice of ['bring', 'discard'] as const) {
     }
     await expect(page.getByTestId('orphan-card')).toHaveCount(0);
     await expect.poll(() => existsSync(path)).toBe(false);
-    expect(qa.git('branch', '--format=%(refname:short)').split('\n')).not.toContain(branch);
+    expect(branchesForWorktree(qa, path)).toEqual([]);
     expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe(
       choice === 'bring' ? 'Alteração revista.\n' : 'Original.\n',
     );
+    if (choice === 'bring')
+      expect(await readFile(join(qa.project, 'prepared.txt'), 'utf8')).toBe(prepared);
+    else expect(existsSync(join(qa.project, 'prepared.txt'))).toBe(false);
   });
 }
 

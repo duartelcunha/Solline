@@ -104,6 +104,8 @@ interface Memory {
   worktree: Worktree | undefined;
   /** O branch já tem o nome da primeira mensagem. */
   named: boolean;
+  /** A mudança de nome e metadados termina antes de trazer ou remover a worktree. */
+  naming: Promise<void> | undefined;
   /** Um "Trazer" a meio: fechar espera por ele. */
   bringing: Promise<unknown> | undefined;
   /** A fechar: "Trazer" recusa. */
@@ -245,6 +247,7 @@ export class SessionManager {
         : undefined,
       worktree: place.worktree,
       named: false,
+      naming: undefined,
       bringing: undefined,
       preparing: undefined,
       closing: false,
@@ -410,7 +413,7 @@ export class SessionManager {
       if (point !== undefined) memory.points.set(sent, point);
       if (memory.worktree && !memory.named) {
         memory.named = true;
-        void this.#nameBranch(sessionId, text);
+        memory.naming = this.#nameBranch(sessionId, text);
       }
       return sent;
     }
@@ -834,6 +837,7 @@ export class SessionManager {
     sessionId: string,
     memory: Memory,
   ): Promise<{ merged: boolean; conflicts: string[]; into: string }> {
+    await memory.naming;
     if (!memory.worktree || !this.#worktrees)
       throw new Error('Esta sessão trabalha na pasta do projeto');
     const first = memory.turns.find((t) => t.role === 'user');
@@ -884,6 +888,7 @@ export class SessionManager {
     into?: string;
   }> {
     await memory.bringing?.catch(() => undefined);
+    await memory.naming;
     const worktree = memory.worktree;
     if (worktree && this.#worktrees) {
       // Uma contagem que falha conta como "há mudanças": pergunta em vez de apagar.

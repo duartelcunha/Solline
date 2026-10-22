@@ -15,6 +15,7 @@ O contrato público do protocolo mantém-se. Radix, fontes locais, CSS/WAAPI e S
 - View Transitions interrompidas tratam o `AbortError` esperado de `ready`, sem esconder outros erros.
 - Empates mostram duas pistas equivalentes; uma pista terminada não continua com “A pensar…”. Uma falha do motor não oferece “Retomar”, que só se aplica ao agente com o motor disponível.
 - **Correção de preservação no motor:** duas contagens Git concorrentes partilhavam um índice temporário. Uma podia repor o índice da outra, reportar zero alterações e permitir remover trabalho ainda não trazido. Cada contagem usa agora um índice próprio com limpeza em `finally`. O teste com Git real força exatamente esse interleaving: falhou antes da correção e passou depois. Não remover essa regressão nem substituir a asserção de ficheiro final por uma mensagem da UI.
+- Renomear o branch após a primeira mensagem termina antes de trazer ou fechar a worktree. O teste `worktree-rename-lifecycle.test.ts` retém a entrega do resultado de um rename Git real: antes, descartar deixava a ref nova e trazer tentava a ref antiga; depois, ambos aguardam e usam a identidade correta. Prova red/green em `qa-evidence/rename-race/`. Os testes Electron identificam branches pelo sufixo estável da worktree, não por um rótulo da UI capturado antes da renomeação.
 
 ## Repetir a validação
 

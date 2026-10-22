@@ -1,5 +1,5 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import config from '../electron-builder.config.mjs';
@@ -57,7 +57,7 @@ if (process.argv[2]) {
   const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
   let packagedFiles = 0;
   for (const entry of entries.filter((entry) => /^out\/.*\.(?:js|css|html|woff2)$/.test(entry))) {
-    const bytes = extractFile(archive, entry);
+    const bytes = extractFile(archive, normalize(entry));
     assert.equal(hash(bytes), hash(await readFile(entry)), `Packaged resource differs: ${entry}`);
     packagedFiles++;
   }
