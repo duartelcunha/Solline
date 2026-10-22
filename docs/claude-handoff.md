@@ -11,6 +11,7 @@ O contrato público do protocolo mantém-se. Radix, fontes locais, CSS/WAAPI e S
 - Rascunhos e envios pendentes pertencem à sessão. Falhas tardias preservam o texto enviado e o texto entretanto escrito; fecho durante envio fica bloqueado.
 - O consentimento de descartar fila mantém-se durante a decisão de worktree. Drafts de fila/rewind são consumidos atomicamente, incluindo StrictMode.
 - Respostas a permissões/perguntas bloqueiam cliques repetidos, permitem retry e limpam erros antigos. O atalho de orientação respeita capacidades do agente.
+- Perguntas usam ponto/visto além da cor; grupos de seleção simples têm foco único, setas, Home/End. A navegação ativa tem um marcador físico, e a segunda opinião sem achados tem um visto distinto do estado inativo.
 - Revisão e painel de agentes recebem/devolvem foco; Escape e navegação de cartões por teclado têm cobertura.
 - View Transitions interrompidas tratam o `AbortError` esperado de `ready`, sem esconder outros erros.
 - Empates mostram duas pistas equivalentes; uma pista terminada não continua com “A pensar…”. Uma falha do motor não oferece “Retomar”, que só se aplica ao agente com o motor disponível.

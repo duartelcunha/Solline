@@ -102,6 +102,8 @@ test('mesa: Espaço abre a sessão e coloca o foco na conversa', async ({ page }
   await page.getByTestId('composer-input').fill('Rascunho da sessão A.');
   await page.getByTestId('new-session').click();
   await page.getByTestId('open-desk').click();
+  await expect(page.getByTestId('open-desk')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('open-desk').locator('span[aria-hidden].absolute')).toBeVisible();
   const card = page.locator('[data-testid="desk-card"][data-session="session-1"]');
   await card.focus();
   await expect(card).toBeFocused();
@@ -110,6 +112,11 @@ test('mesa: Espaço abre a sessão e coloca o foco na conversa', async ({ page }
   await expect(page.getByTestId('composer-input')).toHaveValue('Rascunho da sessão A.');
   await expect(page.getByTestId('composer-input')).toBeFocused();
   await expect(page.getByTestId('session-row').last()).toHaveAttribute('aria-current', 'page');
+  await expect(
+    page.getByTestId('session-row').last().locator('span[aria-hidden].absolute'),
+  ).toBeVisible();
+  await expect(page.getByTestId('open-desk').locator('span[aria-hidden].absolute')).toHaveCount(0);
+  await capture(page, info, 'session-current-marker');
 });
 
 test('eventos e permissão em segundo plano não roubam seleção, texto ou foco', async ({ page }) => {
@@ -180,7 +187,33 @@ test('várias perguntas exigem todas as respostas e preservam a seleção múlti
   await open(page, 'multi-question');
   const send = page.getByRole('button', { name: 'Responder', exact: true });
   await expect(send).toBeDisabled();
-  await page.getByRole('radio', { name: 'Por projeto', exact: true }).click();
+  const radios = page.getByRole('radiogroup', { name: 'Como agrupar?', exact: true });
+  const byProject = radios.getByRole('radio', { name: 'Por projeto', exact: true });
+  const byActivity = radios.getByRole('radio', { name: 'Por atividade', exact: true });
+  await expect(byProject).toHaveAttribute('tabindex', '0');
+  await expect(byActivity).toHaveAttribute('tabindex', '-1');
+  await byProject.focus();
+  await byProject.press('End');
+  await expect(byActivity).toBeFocused();
+  await expect(byActivity).toHaveAttribute('aria-checked', 'true');
+  await byActivity.press('Home');
+  await expect(byProject).toBeFocused();
+  await byProject.press('ArrowLeft');
+  await expect(byActivity).toBeFocused();
+  await byActivity.press('ArrowRight');
+  await expect(byProject).toBeFocused();
+  await expect(byProject).toHaveAttribute('tabindex', '0');
+  await expect(byActivity).toHaveAttribute('tabindex', '-1');
+  await expect(
+    page
+      .getByRole('radio', { name: 'Por projeto', exact: true })
+      .getByTestId('question-option-mark'),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole('radio', { name: 'Por atividade', exact: true })
+      .getByTestId('question-option-mark'),
+  ).toHaveCount(0);
   await expect(send).toBeDisabled();
   await page.getByRole('checkbox', { name: 'Teclado', exact: true }).click();
   await page.getByRole('checkbox', { name: 'Contraste', exact: true }).click();
@@ -190,6 +223,18 @@ test('várias perguntas exigem todas as respostas e preservam a seleção múlti
     'aria-checked',
     'false',
   );
+  for (const label of ['Teclado', 'Contraste']) {
+    const mark = page
+      .getByRole('checkbox', { name: label, exact: true })
+      .getByTestId('question-option-mark');
+    await expect(mark).toBeVisible();
+    await expect(mark.locator('path')).toHaveCount(1);
+  }
+  await expect(
+    page
+      .getByRole('checkbox', { name: 'Movimento', exact: true })
+      .getByTestId('question-option-mark'),
+  ).toHaveCount(0);
   await capture(page, info, 'multiple-questions');
   await send.click();
   await expect(page.getByTestId('ask-resolved')).toContainText('Por projeto · Teclado, Contraste');
@@ -201,6 +246,73 @@ test('várias perguntas exigem todas as respostas e preservam a seleção múlti
         decision: 'answer',
         answers: { 'Como agrupar?': 'Por projeto', 'O que verificar?': 'Teclado, Contraste' },
       },
+    },
+  ]);
+});
+
+test('perguntas com texto longo conservam indicador, teclado e resposta a 760px', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 760, height: 520 });
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await open(page, 'multi-question');
+  const question =
+    'Que verificações devem acompanhar a alteração da navegação entre os vários projetos?';
+  const label =
+    'Verificar a navegação por teclado em todas as sessões e confirmar que nenhuma atualização em segundo plano rouba a seleção';
+  await page.evaluate(
+    ({ question, label }) =>
+      window.qa.emit({
+        kind: 'event',
+        type: 'session.event',
+        sessionId: 'session-1',
+        delta: {
+          type: 'block.upsert',
+          turnId: 'answer-1',
+          block: {
+            kind: 'question',
+            id: 'ask-1',
+            status: 'pending',
+            questions: [
+              {
+                header: 'Verificações',
+                question,
+                multiSelect: true,
+                options: [
+                  {
+                    label,
+                    description:
+                      'Inclui abrir, fechar e regressar às sessões, conservar o texto escrito e manter a posição de leitura da conversa.',
+                  },
+                  {
+                    label: 'Rever mais tarde',
+                    description: 'Conservar o trabalho para a próxima sessão.',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+    { question, label },
+  );
+  const choice = page.getByRole('checkbox').first();
+  await choice.focus();
+  await choice.press('Space');
+  await expect(choice).toHaveAttribute('aria-checked', 'true');
+  await expect(choice.getByTestId('question-option-mark')).toBeVisible();
+  await expect(choice).toHaveAccessibleName(new RegExp(label));
+  const bounds = await choice.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(760);
+  await capture(page, info, 'question-long-selected-dark-760');
+  await page.getByRole('button', { name: 'Responder', exact: true }).click();
+  await expect(page.getByTestId('ask-resolved')).toHaveAttribute('data-status', 'allowed');
+  expect(await commands(page, 'permission.answer')).toEqual([
+    {
+      sessionId: 'session-1',
+      requestId: 'ask-1',
+      answer: { decision: 'answer', answers: { [question]: label } },
     },
   ]);
 });
@@ -295,6 +407,9 @@ test('erro do revisor é legível e repetir recupera o estado', async ({ page },
   await page.getByTestId('quality-chip').click();
   await page.getByTestId('quality-again').click();
   await expect(page.getByTestId('quality-chip')).toHaveAttribute('data-quality', 'clean');
+  await expect(page.getByTestId('quality-chip').locator('svg.lucide-check')).toBeVisible();
+  await page.clock.runFor(250);
+  await capture(page, info, 'quality-clean-marker');
   expect(await commands(page, 'quality.review')).toEqual([{ sessionId: 'session-1' }]);
 });
 

@@ -338,10 +338,14 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
     <Card id={block.id} label={`Pergunta do ${agentLabel}`} testId="question-card">
       <div className="space-y-4">
         {block.questions.map((q) => (
-          <fieldset key={q.question}>
+          <fieldset
+            key={q.question}
+            role={q.multiSelect ? 'group' : 'radiogroup'}
+            aria-label={q.question}
+          >
             <legend className="mb-2 text-[13.5px] font-semibold">{q.question}</legend>
             <div className="grid gap-1.5">
-              {q.options.map((option) => {
+              {q.options.map((option, optionIndex) => {
                 const on = (picked[q.question] ?? []).includes(option.label);
                 return (
                   <button
@@ -349,13 +353,66 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
                     type="button"
                     role={q.multiSelect ? 'checkbox' : 'radio'}
                     aria-checked={on}
+                    tabIndex={
+                      q.multiSelect || on || (!picked[q.question]?.length && optionIndex === 0)
+                        ? 0
+                        : -1
+                    }
                     onClick={() => toggle(q.question, option.label, q.multiSelect)}
-                    className={`rounded-md border px-3 py-2 text-left transition-[background-color,border-color] duration-150 ${on ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface-hover active:bg-surface-sunken'}`}
+                    onKeyDown={(event) => {
+                      if (
+                        q.multiSelect ||
+                        ![
+                          'ArrowLeft',
+                          'ArrowRight',
+                          'ArrowUp',
+                          'ArrowDown',
+                          'Home',
+                          'End',
+                        ].includes(event.key)
+                      )
+                        return;
+                      event.preventDefault();
+                      const next =
+                        event.key === 'Home'
+                          ? 0
+                          : event.key === 'End'
+                            ? q.options.length - 1
+                            : (optionIndex +
+                                (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1) +
+                                q.options.length) %
+                              q.options.length;
+                      const option = q.options[next];
+                      if (!option) return;
+                      toggle(q.question, option.label, false);
+                      event.currentTarget.parentElement
+                        ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+                        .item(next)
+                        ?.focus();
+                    }}
+                    className={`flex items-start gap-2.5 rounded-md border px-3 py-2 text-left transition-[background-color,border-color] duration-150 ${on ? 'border-accent bg-accent-soft' : 'border-line hover:bg-surface-hover active:bg-surface-sunken'}`}
                   >
-                    <div className="text-[13px] font-medium">{option.label}</div>
-                    {option.description ? (
-                      <div className="text-[12px] text-muted">{option.description}</div>
-                    ) : null}
+                    <span
+                      aria-hidden
+                      className={`mt-0.5 grid size-4 shrink-0 place-items-center border ${q.multiSelect ? 'rounded-[3px]' : 'rounded-full'} ${on ? 'border-fg text-fg' : 'border-muted text-muted'}`}
+                    >
+                      {on ? (
+                        q.multiSelect ? (
+                          <Check size={12} strokeWidth={3} data-testid="question-option-mark" />
+                        ) : (
+                          <span
+                            className="size-1.5 rounded-full bg-current"
+                            data-testid="question-option-mark"
+                          />
+                        )
+                      ) : null}
+                    </span>
+                    <span className="min-w-0 flex-1 break-words">
+                      <span className="block text-[13px] font-medium">{option.label}</span>
+                      {option.description ? (
+                        <span className="block text-[12px] text-muted">{option.description}</span>
+                      ) : null}
+                    </span>
                   </button>
                 );
               })}

@@ -29,8 +29,14 @@ function SessionRow({ id }: { id: string }) {
         aria-label={`${title}, ${STATE_LABEL[state]}`}
         data-testid="session-row"
         data-state={state}
-        className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-7 pl-5 text-left text-[13px] transition-colors duration-150 active:bg-surface-hover ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
+        className={`relative flex w-full items-center gap-2 rounded-md py-1.5 pr-7 pl-5 text-left text-[13px] transition-colors duration-150 active:bg-surface-hover ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
       >
+        {active ? (
+          <span
+            aria-hidden
+            className="absolute top-1/2 left-1 h-4 w-0.5 -translate-y-1/2 rounded-full bg-current"
+          />
+        ) : null}
         <span className="grid w-4 shrink-0 place-items-center">
           <SessionMark sessionId={id} />
         </span>
@@ -186,10 +192,16 @@ function DeskButton() {
       onClick={() => actions.openDesk()}
       aria-current={open ? 'page' : undefined}
       data-testid="open-desk"
-      className={`flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-[13px] transition-colors duration-150 active:bg-surface-sunken ${
+      className={`relative flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-[13px] transition-colors duration-150 active:bg-surface-sunken ${
         open ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover hover:text-fg'
       }`}
     >
+      {open ? (
+        <span
+          aria-hidden
+          className="absolute top-1/2 left-1 h-4 w-0.5 -translate-y-1/2 rounded-full bg-current"
+        />
+      ) : null}
       <LayoutGrid size={15} strokeWidth={1.75} />
       Mesa
       {waiting > 0 ? (
