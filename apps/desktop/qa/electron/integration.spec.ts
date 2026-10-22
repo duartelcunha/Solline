@@ -847,6 +847,9 @@ test('conflito ao trazer preserva projeto e branch recuperável', async ({ qa })
 
 for (const choice of ['bring', 'discard'] as const) {
   test(`reiniciar restaura sessão e preserva worktree: ${choice}`, async ({ qa }) => {
+    // This composite scenario includes native setup, durable restart and merge/cleanup.
+    // Keep each result assertion's deadline; budget the complete native workflow separately.
+    test.setTimeout(120_000);
     const path = await openWorktree(qa);
     const prepared = await readFile(join(path, 'prepared.txt'), 'utf8');
     await send(qa.page);
@@ -885,14 +888,25 @@ for (const choice of ['bring', 'discard'] as const) {
     await expect(page.getByTestId('user-turn')).toHaveCount(1);
     await closeWorktree(page);
     await page.getByTestId(`close-${choice}`).click();
+    if (choice === 'bring') {
+      await expect
+        .poll(() => readFile(join(qa.project, 'notes.txt'), 'utf8'))
+        .toBe('Alteração revista.\n');
+      expect(await readFile(join(qa.project, 'prepared.txt'), 'utf8')).toBe(prepared);
+    }
     try {
       await expect(page.getByTestId('session-row')).toHaveCount(1);
     } catch (error) {
       await test.info().attach('close-diagnostic', {
         body: JSON.stringify(
           {
-            snapshot: await page.evaluate(() => window.solline.request('engine.snapshot', {})),
-            ui: await page.locator('body').innerText(),
+            snapshot: await page
+              .evaluate(() => window.solline.request('engine.snapshot', {}))
+              .catch((failure: unknown) => ({ diagnosticError: String(failure) })),
+            ui: await page
+              .locator('body')
+              .innerText()
+              .catch(() => 'Contexto já fechado.'),
           },
           null,
           2,
