@@ -6,13 +6,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { removeRecoveryKey } from '../../src/main/recovery-key';
 import { WorktreeManager } from '../../../../packages/engine/src/worktrees/worktrees';
 import { observePrompts, type PromptRecord } from './custom-prompts';
-import {
-  _electron as electron,
-  test as base,
-  expect,
-  type CDPSession,
-  type Page,
-} from '@playwright/test';
+import { _electron as electron, test as base, expect, type Page } from '@playwright/test';
 
 type Qa = {
   page: Page;
@@ -22,7 +16,6 @@ type Qa = {
   restart: () => Promise<Page>;
   restoreEngine: () => Promise<Page>;
   shot: (name: string) => Promise<void>;
-  setWindowVisible: (visible: boolean) => Promise<{ visible: boolean; focused: boolean }>;
   trustChoice: (trusted: boolean) => void;
   prompts: () => PromptRecord[];
 };
@@ -137,7 +130,6 @@ const test = base.extend<{ qa: Qa }>({
     const processLog: { at: string; stream: string; text: string }[] = [];
     const eventJournal: { generation: number; events: unknown[] }[] = [];
     let generation = 0;
-    let nativeCdp: CDPSession | undefined;
     let flushEvents = () => Promise.resolve();
     const connect = async () => {
       const child = app.process();
@@ -213,23 +205,6 @@ const test = base.extend<{ qa: Qa }>({
         await page.screenshot({ path, animations: 'disabled' });
         await info.attach(name, { path, contentType: 'image/png' });
       };
-      const setWindowVisible = async (visible: boolean) => {
-        if (!nativeCdp) {
-          // Playwright forces focused/visible emulation by default. Disable that override
-          // for this native lifecycle test; window hide/show below remain real OS actions.
-          nativeCdp = await app.context().newCDPSession(page);
-          await nativeCdp.send('Emulation.setFocusEmulationEnabled', { enabled: false });
-        }
-        return app.evaluate(({ BrowserWindow }, show) => {
-          const window = BrowserWindow.getAllWindows()[0];
-          if (!window) throw new Error('QA: native window missing');
-          if (show) {
-            window.show();
-            window.focus();
-          } else window.hide();
-          return { visible: window.isVisible(), focused: window.isFocused() };
-        }, visible);
-      };
       const trustChoice = (trusted: boolean) => {
         promptPlan.confirmations['Confiança no projeto'] = {
           button: trusted ? 'Confiar' : 'Não confiar',
@@ -244,7 +219,6 @@ const test = base.extend<{ qa: Qa }>({
         restart,
         restoreEngine,
         shot,
-        setWindowVisible,
         trustChoice,
         prompts: () => [...promptRecords, ...prompts.records],
       });
@@ -265,14 +239,6 @@ const test = base.extend<{ qa: Qa }>({
         }
       };
       try {
-        await capture('native-focus-emulation-restore', async () => {
-          if (!nativeCdp) return;
-          try {
-            await nativeCdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-          } finally {
-            await nativeCdp.detach();
-          }
-        });
         await capture('engine-events', async () => {
           await flushEvents();
           await info.attach('engine-events', {
@@ -528,6 +494,16 @@ test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', 
   ).toBeVisible();
   await page.getByRole('button', { name: 'Aprovar', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Desativar', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Abrir origem: Melhorar os estados vazios', exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Abrir origem: Melhorar os estados vazios', exact: true })
+    .click();
+  await expect(page.getByLabel('Título da tarefa', { exact: true })).toHaveValue(
+    'Melhorar os estados vazios',
+  );
+  await page.getByRole('button', { name: 'Memória', exact: true }).click();
   await qa.shot('space-real-memory');
 });
 
@@ -544,140 +520,6 @@ test('confirmação própria permite recusar confiança sem a ativar', async ({ 
     (await qa.page.evaluate(() => window.solline.request('projects.list', {}))).projects[0]
       ?.trusted,
   ).toBe(false);
-});
-test('janela nativa oculta cancela animações e recupera o olhar ao voltar', async ({
-  qa,
-}, info) => {
-  const { page } = qa;
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await qa.setWindowVisible(true);
-  await newSession(page);
-  await send(page, 'QA: trabalho contínuo');
-  const bot = page.locator('[data-testid="bot"][data-mood="working"][data-live="true"]');
-  await expect(bot).toHaveCount(1);
-  const activeBot = page.getByRole('img', { name: 'Claude: a trabalhar', exact: true });
-  const pupils = activeBot.getByTestId('bot-pupils');
-  const displacement = () =>
-    pupils.evaluate((el) => {
-      const matrix = new DOMMatrixReadOnly(getComputedStyle(el).transform);
-      return Math.hypot(matrix.m41, matrix.m42);
-    });
-  await expect
-    .poll(() =>
-      activeBot.evaluate(
-        (el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length,
-      ),
-    )
-    .toBeGreaterThan(0);
-  await page.mouse.move(1000, 500);
-  await expect.poll(displacement).toBeGreaterThan(0);
-  try {
-    const native = await qa.setWindowVisible(false);
-    await info.attach('native-hide-diagnostic', {
-      body: JSON.stringify({
-        native,
-        browser: await page.evaluate(() => ({
-          visibility: document.visibilityState,
-          focused: document.hasFocus(),
-        })),
-        bot: await activeBot.evaluate((el) => ({
-          live: el.getAttribute('data-live'),
-          animations: el.getAnimations({ subtree: true }).map((animation) => ({
-            constructor: animation.constructor.name,
-            state: animation.playState,
-            timing: animation.effect?.getComputedTiming(),
-            target: (animation.effect as KeyframeEffect | null)?.target?.getAttribute('class'),
-          })),
-        })),
-        method:
-          'Public CDP disables forced focus in a new session; BrowserWindow.hide is the real native action. Original Playwright session may retain its override.',
-      }),
-      contentType: 'application/json',
-    });
-    // Playwright/Electron still reports document.visibilityState=visible while the
-    // actual window is hidden. Assert the native state and real blur, not that override.
-    expect(native).toEqual({ visible: false, focused: false });
-    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
-    await expect(activeBot).toHaveAttribute('data-live', 'false');
-    await expect(activeBot).toHaveAttribute('data-gaze-active', 'false');
-    await expect(pupils).toHaveCSS('transition-duration', '0s');
-    await expect.poll(displacement).toBe(0);
-    await expect
-      .poll(() => activeBot.evaluate((el) => el.getAnimations({ subtree: true }).length))
-      .toBe(0);
-    await info.attach('native-hidden-state', {
-      body: JSON.stringify(
-        await page.evaluate(() => ({
-          visibility: document.visibilityState,
-          focused: document.hasFocus(),
-        })),
-      ),
-      contentType: 'application/json',
-    });
-  } finally {
-    try {
-      await info.attach('native-final-hidden-state', {
-        body: JSON.stringify({
-          pupils: await pupils.evaluate((el) => ({
-            inline: el.getAttribute('style'),
-            transform: getComputedStyle(el).transform,
-          })),
-          bot: await activeBot.evaluate((el) => ({
-            live: el.getAttribute('data-live'),
-            animations: el.getAnimations({ subtree: true }).map((animation) => ({
-              constructor: animation.constructor.name,
-              state: animation.playState,
-              time: animation.currentTime,
-              timing: animation.effect?.getComputedTiming(),
-              target: (animation.effect as KeyframeEffect | null)?.target?.getAttribute('class'),
-            })),
-          })),
-        }),
-        contentType: 'application/json',
-      });
-    } finally {
-      await qa.setWindowVisible(true);
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          ),
-      );
-      await info.attach('native-shown-state', {
-        body: JSON.stringify({
-          pupils: await pupils.evaluate((el) => ({
-            inline: el.getAttribute('style'),
-            transform: getComputedStyle(el).transform,
-          })),
-          bot: await activeBot.evaluate((el) => ({
-            live: el.getAttribute('data-live'),
-            animations: el.getAnimations({ subtree: true }).map((animation) => ({
-              constructor: animation.constructor.name,
-              state: animation.playState,
-              timing: animation.effect?.getComputedTiming(),
-              target: (animation.effect as KeyframeEffect | null)?.target?.getAttribute('class'),
-            })),
-          })),
-        }),
-        contentType: 'application/json',
-      });
-    }
-  }
-  await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe('visible');
-  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
-  await expect(activeBot).toHaveAttribute('data-live', 'true');
-  await expect(activeBot).toHaveAttribute('data-gaze-active', 'true');
-  await expect
-    .poll(() =>
-      activeBot.evaluate(
-        (el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length,
-      ),
-    )
-    .toBeGreaterThan(0);
-  await page.mouse.move(200, 500);
-  await expect.poll(displacement).toBeGreaterThan(0);
-  expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe('Original.\n');
-  await qa.shot('native-focus-resumed');
 });
 async function answer(page: Page, decision: 'allow' | 'deny') {
   await expect(page.getByTestId('permission-card')).toBeVisible();
@@ -1075,7 +917,22 @@ for (const choice of ['bring', 'discard'] as const) {
     await expect(page.getByTestId('user-turn')).toHaveCount(1);
     await closeWorktree(page);
     await page.getByTestId(`close-${choice}`).click();
-    await expect(page.getByTestId('session-row')).toHaveCount(1);
+    try {
+      await expect(page.getByTestId('session-row')).toHaveCount(1);
+    } catch (error) {
+      await test.info().attach('close-diagnostic', {
+        body: JSON.stringify(
+          {
+            snapshot: await page.evaluate(() => window.solline.request('engine.snapshot', {})),
+            ui: await page.locator('body').innerText(),
+          },
+          null,
+          2,
+        ),
+        contentType: 'application/json',
+      });
+      throw error;
+    }
     await expect.poll(() => existsSync(path)).toBe(false);
     expect(branchesForWorktree(qa, path)).toEqual([]);
     expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe(

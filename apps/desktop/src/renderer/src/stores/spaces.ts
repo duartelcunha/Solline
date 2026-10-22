@@ -11,10 +11,12 @@ export const useSpaces = create<{
   data: SpacesState;
   error: string | null;
   selectedTaskId: string | null;
+  panel: 'tasks' | 'memory';
 }>(() => ({
   data: emptySpaces(),
   error: null,
   selectedTaskId: null,
+  panel: 'tasks',
 }));
 export function receiveSpaces(data: SpacesState): void {
   useSpaces.setState((current) => (data.revision >= current.data.revision ? { data } : {}));

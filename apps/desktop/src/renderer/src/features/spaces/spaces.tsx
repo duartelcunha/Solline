@@ -17,6 +17,7 @@ import { TaskDetails } from './task-details.tsx';
 import { SpaceSettingsPanel } from './space-settings.tsx';
 import { SpaceMemories } from './space-memories.tsx';
 import './spaces.css';
+import { sourceLabel } from './source-label.ts';
 
 export const control = 'space-control';
 const STATUS = {
@@ -37,7 +38,8 @@ export function Spaces() {
   const [saving, setSaving] = useState(false);
   const selected = useSpaces((s) => s.selectedTaskId);
   const setSelected = (selectedTaskId: string | null) => useSpaces.setState({ selectedTaskId });
-  const [panel, setPanel] = useState<'tasks' | 'memory'>('tasks');
+  const panel = useSpaces((s) => s.panel);
+  const setPanel = (panel: 'tasks' | 'memory') => useSpaces.setState({ panel });
   const tasks = data.tasks.filter((t) => t.projectId === projectId);
   const task = tasks.find((t) => t.id === selected);
   const insights = data.insights.filter(
@@ -193,7 +195,7 @@ export function Spaces() {
                                   {data.tasks.find((t) => t.id === source.slice(5))?.title}
                                 </button>
                               ) : (
-                                source
+                                sourceLabel(source, data.tasks, projects)
                               )}
                               {insight.evidence?.find((e) => e.id === source) ? (
                                 <details>

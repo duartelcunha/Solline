@@ -2,8 +2,12 @@ import { useState } from 'react';
 import { Brain, Check, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { SpaceMemory } from '@solline/protocol';
 import { quietSpace, spaceRequest, useSpaces } from '../../stores/spaces.ts';
+import { actions, sessionStore, useApp } from '../../stores/app.ts';
+import { sourceLabel } from './source-label.ts';
 
 export function SpaceMemories({ projectId }: { projectId: string | null }) {
+  const tasks = useSpaces((s) => s.data.tasks);
+  const projects = useApp((s) => s.projects);
   const memories = useSpaces((s) => s.data.memories).filter((m) => m.projectId === projectId);
   const [editing, setEditing] = useState<SpaceMemory | 'new' | null>(null);
   const [text, setText] = useState('');
@@ -88,7 +92,33 @@ export function SpaceMemories({ projectId }: { projectId: string | null }) {
               <div className="min-w-0 flex-1">
                 <p className="whitespace-pre-wrap text-[13px]">{m.text}</p>
                 <p className="mt-2 text-[11px] text-muted">
-                  {m.source} ·{' '}
+                  {m.sourceId?.startsWith('task:') &&
+                  tasks.some((t) => t.id === m.sourceId?.slice(5)) ? (
+                    <button
+                      type="button"
+                      className="underline underline-offset-2"
+                      aria-label={`Abrir origem: ${sourceLabel(m.sourceId, tasks, projects)}`}
+                      onClick={() => {
+                        const task = tasks.find((t) => t.id === m.sourceId?.slice(5));
+                        if (task) {
+                          useSpaces.setState({ selectedTaskId: task.id });
+                          actions.openSpace(task.projectId);
+                        }
+                      }}
+                    >
+                      {sourceLabel(m.sourceId, tasks, projects)}
+                    </button>
+                  ) : m.sourceId ? (
+                    sourceLabel(
+                      m.sourceId,
+                      tasks,
+                      projects,
+                      (id) => sessionStore(id)?.getState().info.title,
+                    )
+                  ) : (
+                    m.source
+                  )}{' '}
+                  ·{' '}
                   {m.state === 'pending'
                     ? 'Por aprovar'
                     : m.state === 'disabled'

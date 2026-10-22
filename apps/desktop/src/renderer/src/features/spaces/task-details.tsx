@@ -271,7 +271,8 @@ export function TaskDetails({ task }: { task: SpaceTask }) {
               {a.changes ? (
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <span className="font-mono text-[11px] text-muted">
-                    {a.changes.files} ficheiros · +{a.changes.additions} −{a.changes.deletions}
+                    {a.changes.files} {a.changes.files === 1 ? 'ficheiro' : 'ficheiros'} · +
+                    {a.changes.additions} −{a.changes.deletions}
                   </span>
                   {a.sessionId && sessionIds.includes(a.sessionId) ? (
                     <button
