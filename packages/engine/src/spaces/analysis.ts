@@ -121,8 +121,15 @@ export class SpaceAnalysis {
     if (
       fingerprint === state.analysis.fingerprint &&
       Object.entries(files).every(([id, hash]) => state.analysis.files[id] === hash)
-    )
+    ) {
+      if (proactive || state.analysis.state === 'paused')
+        manager.changeAnalysis((s) => {
+          s.analysis.state = 'idle';
+          s.analysis.error = null;
+          if (proactive) s.analysis.lastAt = now;
+        });
       return manager.snapshot();
+    }
     let remaining = 100_000;
     const sources = [
       ...history,
@@ -136,7 +143,20 @@ export class SpaceAnalysis {
       return [s];
     });
     // Removed files are represented by their absence; no model call is needed without evidence.
-    if (!sources.length) return manager.snapshot();
+    if (!sources.length) {
+      manager.changeAnalysis((s) => {
+        s.analysis = {
+          state: 'idle',
+          error: null,
+          lastAt: now,
+          fingerprint,
+          files: Object.fromEntries(
+            Object.entries(state.analysis.files).filter(([id, hash]) => files[id] === hash),
+          ),
+        };
+      });
+      return manager.snapshot();
+    }
     const sourceMap = new Map(sources.map((s) => [s.id, s]));
     const valid = (projectId: string | null, ids: string[]) =>
       (projectId === null || authorized.has(projectId)) &&

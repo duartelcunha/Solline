@@ -162,6 +162,12 @@ it('faz análises incrementais, respeita o dia e não repete sugestões dispensa
   expect(manager.snapshot().insights).toHaveLength(1);
   await analysis.analyze(false);
   expect(calls).toBe(2);
+  now += 86_400_000;
+  await analysis.analyze(true);
+  expect(manager.snapshot().analysis.lastAt).toBe(now);
+  await writeFile(path.join(root, 'main.ts'), 'export const n = 3;');
+  await analysis.analyze(true);
+  expect(calls).toBe(2);
 });
 
 for (const mode of ['approval', 'automatic'] as const)
