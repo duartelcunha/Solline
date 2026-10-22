@@ -163,3 +163,97 @@ it('faz análises incrementais, respeita o dia e não repete sugestões dispensa
   await analysis.analyze(false);
   expect(calls).toBe(2);
 });
+
+for (const mode of ['approval', 'automatic'] as const)
+  it(`memórias em ${mode} mantêm âmbito, fonte e eliminação`, async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'solline-learning-'));
+    roots.push(root);
+    const code = path.join(root, 'main.ts');
+    await writeFile(code, 'export const n = 1;');
+    const manager = new SpaceManager({
+      save: () => {},
+      create: async () => 's',
+      send: async () => ({ turnId: 't', how: 'sent' }),
+      projectOf: () => 'p',
+    });
+    manager.syncProjects([{ id: 'p', path: root, name: 'P', trusted: true, addedAt: 0 }], root);
+    manager.configure({
+      analysisMode: 'manual',
+      learningMode: mode,
+      projectIds: ['p'],
+      agent: 'claude',
+      model: '',
+    });
+    const analysis = new SpaceAnalysis({
+      manager,
+      idle: () => true,
+      history: () => [],
+      run: async () => ({
+        insights: [
+          {
+            projectId: 'foreign',
+            title: 'Não autorizado',
+            detail: 'Não entra.',
+            sources: ['p:main.ts'],
+          },
+        ],
+        memories: [
+          { projectId: 'p', text: 'Uma lição do projeto.', sources: ['p:main.ts'] },
+          { projectId: null, text: 'Não promover sozinho.', sources: ['p:main.ts'] },
+          { projectId: 'p', text: 'Sem fonte válida.', sources: ['inexistente'] },
+        ],
+      }),
+    });
+    await analysis.analyze(false);
+    expect(manager.snapshot().insights).toEqual([]);
+    const memories = manager.snapshot().memories;
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.state).toBe(mode === 'approval' ? 'pending' : 'active');
+    if (!memories[0]) throw new Error('Sem memória');
+    manager.deleteMemory(memories[0].id);
+    await writeFile(code, 'export const n = 2;');
+    await analysis.analyze(false);
+    expect(manager.snapshot().memories).toEqual([]);
+  });
+
+it('uma falha de leitura suspende a proatividade até uma decisão explícita', async () => {
+  let reads = 0;
+  const manager = new SpaceManager({
+    save: () => {},
+    create: async () => 's',
+    send: async () => ({ turnId: 't', how: 'sent' }),
+    projectOf: () => 'p',
+  });
+  manager.syncProjects(
+    [
+      {
+        id: 'p',
+        path: path.join(tmpdir(), crypto.randomUUID()),
+        name: 'P',
+        trusted: true,
+        addedAt: 0,
+      },
+    ],
+    tmpdir(),
+  );
+  manager.configure({
+    analysisMode: 'proactive',
+    learningMode: 'approval',
+    projectIds: ['p'],
+    agent: 'claude',
+    model: '',
+  });
+  const analysis = new SpaceAnalysis({
+    manager,
+    idle: () => true,
+    history: () => [],
+    run: async () => {
+      reads++;
+      return { insights: [], memories: [] };
+    },
+  });
+  await analysis.analyze(true);
+  expect(manager.snapshot().analysis.state).toBe('paused');
+  await analysis.analyze(true);
+  expect(reads).toBe(0);
+});
