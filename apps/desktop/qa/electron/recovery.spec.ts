@@ -99,6 +99,9 @@ const test = base.extend<{ qa: Fixture }>({
       const launched = app;
       const nativePid = await launched.evaluate(() => process.pid);
       try {
+        // Vault startup spawns short-lived helpers before the main window exists.
+        const readyPage = await launched.firstWindow();
+        await expect(readyPage.getByTestId('ping-reply')).toBeAttached({ timeout: 20_000 });
         owners.set(
           launched,
           await OwnedProcessTree.create(nativePid, async () => {
@@ -504,10 +507,6 @@ base(
     };
     try {
       const nativePid = required(child.pid, 'native child PID');
-      owner = await OwnedProcessTree.create(nativePid, () => {
-        if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
-          throw new Error('Original native child exited during capture');
-      });
       await expect.poll(() => endpoint).not.toBe('');
       await expect.poll(() => inspectorEndpoint).not.toBe('');
       inspector = new WebSocket(inspectorEndpoint);
@@ -524,6 +523,10 @@ base(
       );
       page.on('pageerror', (error) => errors.push(error.message));
       await expect(page.getByTestId('ping-reply')).toBeAttached({ timeout: 20_000 });
+      owner = await OwnedProcessTree.create(nativePid, () => {
+        if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
+          throw new Error('Original native child exited during capture');
+      });
       await page.getByTestId('add-project').click();
       const promptPage = async () => {
         await expect

@@ -137,10 +137,6 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
   })()`);
   try {
     const nativePid = required(child.pid, 'native child PID');
-    owner = await OwnedProcessTree.create(nativePid, () => {
-      if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
-        throw new Error('Original native child exited during capture');
-    });
     await expect.poll(() => endpoint).not.toBe('');
     await expect.poll(() => inspectorEndpoint).not.toBe('');
     inspector = new WebSocket(inspectorEndpoint);
@@ -162,6 +158,10 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
       if (entry.type() === 'error') errors.push(entry.text());
     });
     await expect(page.getByTestId('ping-reply')).toBeAttached();
+    owner = await OwnedProcessTree.create(nativePid, () => {
+      if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
+        throw new Error('Original native child exited during capture');
+    });
     const nativeId = await mainEvaluate(`(() => {
       const { BrowserWindow } = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron');
       return BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/index.html'))?.id;

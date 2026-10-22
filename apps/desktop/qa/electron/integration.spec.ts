@@ -85,6 +85,10 @@ const test = base.extend<{ qa: Qa }>({
     const captureOwner = async () => {
       const launched = app;
       try {
+        // Main creates its window only after vault startup settles. Capture the
+        // ready application, not transient PowerShell/compiler startup children.
+        const readyPage = await launched.firstWindow();
+        await expect(readyPage.getByTestId('ping-reply')).toBeAttached();
         nativePid = await launched.evaluate(() => process.pid);
         const expected = nativePid;
         owner = await OwnedProcessTree.create(expected, async () => {
