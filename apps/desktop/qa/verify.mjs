@@ -95,6 +95,8 @@ try {
       ['../../node_modules/typescript/bin/tsc', '--noEmit'],
       join(root, 'packages', name),
     );
+    // Protocol has no standalone test script; its schemas are exercised by engine/bridge tests.
+    if (name === 'protocol') continue;
     await run(
       `unit-${name}`,
       ['../../node_modules/vitest/vitest.mjs', 'run', '--maxWorkers=1'],

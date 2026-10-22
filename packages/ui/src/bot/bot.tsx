@@ -78,7 +78,7 @@ export function Bot({
     animation.current?.cancel();
     if (live && previous.current !== mood) {
       animation.current =
-        eyes.current?.animate([{ opacity: 0.35 }, { opacity: 1 }], {
+        eyes.current?.animate([{ transform: 'scaleY(.92)' }, { transform: 'scaleY(1)' }], {
           duration: 180,
           easing: 'ease-out',
         }) ?? null;

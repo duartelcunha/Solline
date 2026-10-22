@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import * as childProcess from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,11 +15,11 @@ const gates = vi.hoisted(() => ({
   releaseSecond: () => {},
 }));
 vi.mock('node:child_process', async (importOriginal) => {
-  const original = await importOriginal<typeof import('node:child_process')>();
+  const original = await importOriginal<typeof childProcess>();
   const execFile = (
     file: string,
     args: readonly string[],
-    options: import('node:child_process').ExecFileOptions,
+    options: childProcess.ExecFileOptions,
     callback: Callback,
   ) => {
     if (!gates.active || !options.env?.GIT_INDEX_FILE)
@@ -69,7 +69,7 @@ it(
       throw new Error('Invalid cleanup path');
     const project = path.join(root, 'project');
     const git = (...args: string[]) =>
-      execFileSync('git', args, { cwd: project, windowsHide: true });
+      childProcess.execFileSync('git', args, { cwd: project, windowsHide: true });
     try {
       await mkdir(project);
       git('init', '-q');
