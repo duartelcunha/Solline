@@ -6,6 +6,13 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { removeRecoveryKey } from '../../src/main/recovery-key';
 import { WorktreeManager } from '../../../../packages/engine/src/worktrees/worktrees';
 import { observePrompts, type PromptRecord } from './custom-prompts';
+import {
+  OwnedProcessTree,
+  ProcessCaptureError,
+  cleanupOwnedFixture,
+  stopOwnedProcesses,
+  windowsBackend,
+} from './owned-process';
 import { _electron as electron, test as base, expect, type Page } from '@playwright/test';
 
 type Qa = {
@@ -15,6 +22,7 @@ type Qa = {
   git: (...args: string[]) => string;
   restart: () => Promise<Page>;
   restoreEngine: () => Promise<Page>;
+  terminateEngine: (pid: number) => Promise<void>;
   shot: (name: string) => Promise<void>;
   trustChoice: (trusted: boolean) => void;
   prompts: () => PromptRecord[];
@@ -34,22 +42,6 @@ function alive(pid: number): boolean {
     throw error;
   }
 }
-// Playwright's Windows loader ChildProcess is not the native Electron PID.
-// Bind forced cleanup to the OS process start identity to reject PID reuse.
-function nativeIdentity(pid: number): string {
-  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid owned native PID');
-  return execFileSync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction Stop | ForEach-Object { $_.CreationDate.ToUniversalTime().Ticks.ToString() }`,
-    ],
-    { windowsHide: true, encoding: 'utf8', timeout: 10_000 },
-  ).trim();
-}
-
 const test = base.extend<{ qa: Qa }>({
   qa: async ({ browserName }, use, info) => {
     expect(browserName).toBe('chromium');
@@ -86,8 +78,49 @@ const test = base.extend<{ qa: Qa }>({
         } as Record<string, string>,
       });
     let app = await launch();
-    let nativePid = await app.evaluate(() => process.pid);
-    const ownedProcesses = [{ pid: nativePid, identity: nativeIdentity(nativePid) }];
+    let nativePid: number;
+    let owner: OwnedProcessTree;
+    const owners: OwnedProcessTree[] = [];
+    let captureFailure: unknown;
+    const captureOwner = async () => {
+      const launched = app;
+      try {
+        nativePid = await launched.evaluate(() => process.pid);
+        const expected = nativePid;
+        owner = await OwnedProcessTree.create(expected, async () => {
+          if ((await launched.evaluate(() => process.pid)) !== expected)
+            throw new Error('Original Electron process changed during capture');
+        });
+        owners.push(owner);
+      } catch (error) {
+        captureFailure = error;
+        try {
+          await info.attach('process-capture-failure', {
+            body: JSON.stringify({
+              root,
+              project,
+              error: String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+              capture: error instanceof ProcessCaptureError ? error.capture : undefined,
+            }),
+            contentType: 'application/json',
+          });
+        } catch (attachmentError) {
+          throw new AggregateError([error, attachmentError], 'Capture and evidence failed', {
+            cause: attachmentError,
+          });
+        }
+        throw error;
+      }
+    };
+    const recordCleanup = async (report: OwnedProcessTree['report']) => {
+      await info.attach('owned-process-cleanup', {
+        body: JSON.stringify(report),
+        contentType: 'application/json',
+      });
+    };
+    // Capture failure preserves the fixture, with the original diagnostic attached.
+    await captureOwner();
     const promptRecords: PromptRecord[] = [];
     const promptFailures: string[] = [];
     const promptPlan = {
@@ -106,6 +139,8 @@ const test = base.extend<{ qa: Qa }>({
       promptFailures.push(...prompts.failures);
     };
     const safeClose = async () => {
+      if (captureFailure) throw captureFailure;
+      await owner.refresh();
       const main = app
         .windows()
         .find((page) => new URL(page.url()).pathname.endsWith('/index.html'));
@@ -179,10 +214,16 @@ const test = base.extend<{ qa: Qa }>({
           contentType: 'application/zip',
         });
         await safeClose();
+        await stopOwnedProcesses([owner], recordCleanup);
         await collectPrompts();
-        app = await launch();
-        nativePid = await app.evaluate(() => process.pid);
-        ownedProcesses.push({ pid: nativePid, identity: nativeIdentity(nativePid) });
+        try {
+          app = await launch();
+        } catch (error) {
+          // A rejected launch may have started a process before losing its connection.
+          captureFailure = error;
+          throw error;
+        }
+        await captureOwner();
         prompts = observePrompts(app, promptPlan);
         page = await connect();
         return page;
@@ -218,6 +259,19 @@ const test = base.extend<{ qa: Qa }>({
         git,
         restart,
         restoreEngine,
+        terminateEngine: async (pid) => {
+          await owner.refresh();
+          const identity = owner.report.survivors.find((item) => item.pid === pid);
+          if (!identity || pid === nativePid)
+            throw new Error('Fault injection requires a captured live child process');
+          const result = await windowsBackend.terminate([identity]);
+          await info.attach('engine-fault-termination', {
+            body: JSON.stringify(result),
+            contentType: 'application/json',
+          });
+          expect(result.exitCode, result.stderr).toBe(0);
+          expect(result.exited).toContainEqual(identity);
+        },
         shot,
         trustChoice,
         prompts: () => [...promptRecords, ...prompts.records],
@@ -300,21 +354,16 @@ const test = base.extend<{ qa: Qa }>({
         try {
           await safeClose();
         } finally {
-          // Failure cleanup owns only PIDs captured at this fixture's launches.
-          // Verify exit BEFORE removing the key or files. Keep safeClose failures visible.
-          for (const { pid, identity } of ownedProcesses)
-            if (identity && alive(pid) && nativeIdentity(pid) === identity) {
-              execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
-                windowsHide: true,
-                stdio: 'pipe',
-              });
-              await expect.poll(() => alive(pid), { timeout: 10_000 }).toBe(false);
-            }
-          try {
-            await removeRecoveryKey(join(root, 'data'));
-          } finally {
-            await removeFixture(root);
-          }
+          await cleanupOwnedFixture(
+            async () => {
+              if (captureFailure) throw captureFailure;
+              await stopOwnedProcesses(owners, recordCleanup);
+              if (evidenceErrors.length)
+                throw new Error('Required QA evidence failed; preserve fixture and credentials');
+            },
+            () => removeRecoveryKey(join(root, 'data')),
+            () => removeFixture(root),
+          );
         }
       }
     }
@@ -1073,7 +1122,7 @@ test('morte real do utility process preserva conversa e bloqueia envio', async (
   // This PID came from the guarded fixture's engine, never a machine-wide process search.
   expect(ping.pid).toBeGreaterThan(0);
   expect(ping.pid).not.toBe(process.pid);
-  process.kill(ping.pid);
+  await qa.terminateEngine(ping.pid);
   await expect(page.getByTestId('session-error')).toContainText('O motor parou');
   await qa.shot('engine-process-failed');
   await expect(page.getByTestId('user-turn')).toContainText('Atualiza as notas.');
