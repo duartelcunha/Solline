@@ -403,22 +403,27 @@ export class SessionManager {
    * Antes de a mensagem seguir, o disco fica guardado (o checkpoint deste turno) e o ponto
    * de rebobinar do agente também. Se o checkpoint falhar, a mensagem segue na mesma.
    */
-  async send(sessionId: string, text: string, how: How = 'queue'): Promise<Submitted> {
+  async send(
+    sessionId: string,
+    text: string,
+    how: How = 'queue',
+    submissionId?: string,
+  ): Promise<Submitted> {
     this.#get(sessionId);
     if (this.#recoveryViews.get(sessionId)?.interrupted)
       throw new Error('Retoma a sessão recuperada antes de enviar.');
-    return this.#memoryOf(sessionId).cycle.submit(text, how);
+    return this.#memoryOf(sessionId).cycle.submit(text, how, submissionId);
   }
 
   /** Abre um turno: checkpoint do disco, ponto de rebobinar e a mensagem para o agente. */
-  async #startTurn(sessionId: string, text: string): Promise<string> {
+  async #startTurn(sessionId: string, text: string, submissionId?: string): Promise<string> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
     const completed = this.#beforeEffect('session.turn', sessionId, text);
     // Um turno novo muda os ficheiros: a ronda de verificações a meio deixa de valer.
     this.#checks.get(entry.info.cwd)?.cancel();
     {
-      const turnId = crypto.randomUUID();
+      const turnId = submissionId ?? crypto.randomUUID();
       const point = entry.adapter.rewindPoint?.();
       const checkpoints = memory.checkpoints;
       if (checkpoints) {
@@ -453,7 +458,7 @@ export class SessionManager {
   /** O dono do turno de uma sessão, ligado ao adaptador e ao evento da fila. */
   #turnsFor(info: () => SessionInfo): SessionTurns {
     return new SessionTurns({
-      start: (text) => this.#startTurn(info().id, text),
+      start: (text, turnId) => this.#startTurn(info().id, text, turnId),
       steer: (text, id) => {
         const adapter = this.#sessions.get(info().id)?.adapter;
         return adapter?.steer ? adapter.steer(text, id) : Promise.resolve('too-late' as const);

@@ -1,5 +1,6 @@
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { mkdir } from 'node:fs/promises';
 import {
   BrowserWindow,
   Menu,
@@ -96,6 +97,13 @@ function notify(notice: Attention): void {
   attentionWindow?.show(notice);
 }
 const projects = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
+const generalCwd = join(app.getPath('userData'), 'general-workspace');
+const policyProjects = {
+  get: async (id: string) =>
+    id === '__general__'
+      ? { id, name: 'Geral', path: generalCwd, trusted: false, addedAt: 0 }
+      : projects.get(id),
+};
 
 const TRUST_DETAIL =
   'Num projeto de confiança, os agentes leem as definições, hooks, servidores MCP e instruções ' +
@@ -152,6 +160,37 @@ async function confirmDiscard(): Promise<boolean> {
 
 async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
   switch (command) {
+    case 'spaces.delegate': {
+      const input = payload as CommandPayload<'spaces.delegate'>;
+      const task = (await engine.request('spaces.snapshot', {})).tasks.find(
+        (t) => t.id === input.id,
+      );
+      if (!task) throw new Error('Tarefa desconhecida.');
+      if (input.target.kind === 'existing') {
+        await reconcilePolicy(engine, policyProjects, 'session.send', {
+          sessionId: input.target.sessionId,
+          text: input.text,
+        });
+        return engine.request('spaces.dispatch', input);
+      }
+      const start = await resolveSessionStart(policyProjects, {
+        projectId: task.projectId ?? '__general__',
+        agent: input.target.agent,
+        ...(input.target.model ? { model: input.target.model } : {}),
+      });
+      const result = await engine.request('spaces.dispatch', { ...input, start });
+      const id = result.attempts.at(-1)?.sessionId;
+      const session =
+        id &&
+        (await engine.request('engine.snapshot', {})).sessions.find((s) => s.session.id === id)
+          ?.session;
+      if (session)
+        attention.track(
+          session,
+          task.projectId ? ((await projects.get(task.projectId))?.name ?? 'Projeto') : 'Geral',
+        );
+      return result;
+    }
     case 'agents.login': {
       const { agent } = payload as CommandPayload<'agents.login'>;
       // O motor pede, o main decide: só se abre o browser no sítio de login do agente.
@@ -379,14 +418,18 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
     return { ok: false, error: { message: 'O fecho é coordenado pela janela' } };
   const payload = (raw as { payload?: unknown }).payload ?? {};
   try {
+    if (command.startsWith('spaces.')) {
+      await mkdir(generalCwd, { recursive: true });
+      await engine.request('spaces.syncProjects', { projects: await projects.list(), generalCwd });
+    }
     if (isMainCommand(command)) {
       const input = commandSchemas[command].payload.parse(payload);
       if (command === 'session.close' || command === 'worktrees.discard')
-        await reconcilePolicy(engine, projects, command, input);
+        await reconcilePolicy(engine, policyProjects, command, input);
       const result = commandSchemas[command].result.parse(await handleMain(command, input));
       return { ok: true, result };
     }
-    await reconcilePolicy(engine, projects, command, payload);
+    await reconcilePolicy(engine, policyProjects, command, payload);
     return { ok: true, result: await engine.request(command, payload) };
   } catch (error) {
     return {

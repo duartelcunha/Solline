@@ -5,6 +5,7 @@ import { setImmediate } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   EngineSnapshot,
+  SpacesState,
   RecoveryOperationDetails,
   type AgentCapabilities,
   type EngineEvent,
@@ -143,6 +144,93 @@ afterEach(async () => {
 });
 
 describe('durable engine recovery', () => {
+  it('guarda o resultado e a conversa da tarefa mesmo depois de fechar a sessão', async () => {
+    const f = fixture();
+    const { engine } = f.open();
+    await request(engine, 'spaces.syncProjects', {
+      projects: [{ id: 'project', path: f.project, name: 'Projeto', trusted: true, addedAt: 0 }],
+      generalCwd: f.project,
+    });
+    const task = (await request(engine, 'spaces.taskCreate', {
+      projectId: 'project',
+      title: 'Conservar o resultado',
+      description: '',
+    })) as { id: string };
+    await request(engine, 'spaces.dispatch', {
+      id: task.id,
+      requestId: crypto.randomUUID(),
+      target: { kind: 'new', agent: 'scripted' },
+      text: 'Conservar o resultado',
+      memoryIds: [],
+      start: { projectId: 'project', cwd: f.project, trusted: true, agent: 'scripted' },
+    });
+    const sink = f.controls.sinks[0];
+    if (!sink) throw new Error('Sem agente');
+    sink.delta({
+      type: 'turn.start',
+      turn: {
+        id: 'answer',
+        role: 'assistant',
+        blocks: [
+          {
+            kind: 'text',
+            id: 'answer-text',
+            text: 'A navegação ficou pronta.',
+            parentToolId: null,
+          },
+        ],
+      },
+    });
+    sink.delta({ type: 'turn.end', turnId: 'answer', outcome: 'done' });
+    sink.state('idle');
+    const before = SpacesState.parse(await request(engine, 'spaces.snapshot'));
+    expect(before.tasks[0]?.status).toBe('review');
+    const sessionId = before.tasks[0]?.attempts[0]?.sessionId;
+    await request(engine, 'session.closeNow', { sessionId });
+    const after = SpacesState.parse(await request(engine, 'spaces.snapshot'));
+    expect(after.tasks[0]?.attempts[0]?.result).toBe('A navegação ficou pronta.');
+    expect(after.tasks[0]?.attempts[0]?.conversation?.map((t) => t.role)).toEqual([
+      'user',
+      'assistant',
+    ]);
+  });
+  it('preserva tarefas, memórias e delegações sem repetir envios ao reiniciar', async () => {
+    const f = fixture();
+    const { engine } = f.open();
+    await request(engine, 'spaces.syncProjects', {
+      projects: [{ id: 'project', path: f.project, name: 'Projeto', trusted: true, addedAt: 0 }],
+      generalCwd: f.project,
+    });
+    const task = (await request(engine, 'spaces.taskCreate', {
+      projectId: 'project',
+      title: 'Uma tarefa durável',
+      description: 'Preservar o contexto.',
+    })) as { id: string };
+    await request(engine, 'spaces.memorySave', {
+      projectId: 'project',
+      text: 'Preferir respostas curtas.',
+      source: 'Duarte',
+      state: 'active',
+    });
+    const payload = {
+      id: task.id,
+      requestId: crypto.randomUUID(),
+      target: { kind: 'new', agent: 'scripted' },
+      text: 'Uma tarefa durável',
+      memoryIds: [],
+      start: { projectId: 'project', cwd: f.project, trusted: true, agent: 'scripted' },
+    };
+    await request(engine, 'spaces.dispatch', payload);
+    await expect(request(engine, 'spaces.dispatch', payload)).rejects.toThrow('já foi recebida');
+    expect(f.controls.sends).toEqual(['Uma tarefa durável']);
+    await engine.dispose();
+    const restored = f.open().engine;
+    const snapshot = EngineSnapshot.parse(await request(restored, 'engine.snapshot'));
+    expect(snapshot.spaces?.tasks[0]?.title).toBe('Uma tarefa durável');
+    expect(snapshot.spaces?.tasks[0]?.attempts[0]?.state).toBe('unknown');
+    expect(snapshot.spaces?.memories[0]?.text).toBe('Preferir respostas curtas.');
+    expect(f.controls.sends).toEqual(['Uma tarefa durável']);
+  });
   it('restores interrupted races without automatically ranking or creating lanes', () => {
     const refused = async (): Promise<never> => {
       throw new Error('must not run on restore');
