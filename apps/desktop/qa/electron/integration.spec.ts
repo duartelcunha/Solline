@@ -462,6 +462,9 @@ test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', 
   ).toBeVisible();
   await page.getByRole('button', { name: 'Aprovar', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Desativar', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Abrir origem: Melhorar os estados vazios', exact: true }),
+  ).toBeVisible();
   await qa.shot('space-real-memory');
 });
 

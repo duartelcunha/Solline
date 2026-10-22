@@ -17,6 +17,7 @@ import { TaskDetails } from './task-details.tsx';
 import { SpaceSettingsPanel } from './space-settings.tsx';
 import { SpaceMemories } from './space-memories.tsx';
 import './spaces.css';
+import { sourceLabel } from './source-label.ts';
 
 export const control = 'space-control';
 const STATUS = {
@@ -193,7 +194,7 @@ export function Spaces() {
                                   {data.tasks.find((t) => t.id === source.slice(5))?.title}
                                 </button>
                               ) : (
-                                source
+                                sourceLabel(source, data.tasks, projects)
                               )}
                               {insight.evidence?.find((e) => e.id === source) ? (
                                 <details>
