@@ -28,6 +28,7 @@ export function replay(records: readonly RecoveryRecord[], initial: RecoveryStat
     const { event } = record;
     state.snapshot.sequence = event.sequence ?? state.snapshot.sequence;
     state.snapshot.epoch = event.epoch ?? state.snapshot.epoch;
+    if (event.type === 'spaces.changed') state.snapshot.spaces = structuredClone(event.spaces);
     if (event.type === 'race.state') {
       state.snapshot.races = state.snapshot.races.filter((race) => race.id !== event.race.id);
       state.snapshot.races.push(event.race);
