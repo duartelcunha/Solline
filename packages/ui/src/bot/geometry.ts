@@ -79,40 +79,59 @@ function eyes(mood: Mood): EyePath[] {
       paint: 'stroke',
       layer: 'lid',
     }));
-  const wide = mood === 'needs-you';
+  const curious = mood === 'needs-you';
   const reading = mood === 'reading';
-  const whites: EyePath[] = xs.map((x) => ({
-    d: ellipse(x, 112, wide ? 20 : 18, reading ? 15 : 25),
+  const surprised = mood === 'crashed';
+  const centres = curious || surprised ? [99, 157] : xs;
+  const whites: EyePath[] = centres.map((x, i) => ({
+    d: ellipse(
+      x,
+      curious ? 105 + i * 9 : surprised ? 109 + i * 4 : 112,
+      curious ? 24 - i * 5 : surprised ? 24 - i * 2 : 18,
+      curious ? 31 - i * 9 : surprised ? 28 - i * 4 : reading ? 15 : 25,
+    ),
     paint: 'fill',
   }));
-  const pupils: EyePath[] = xs.map((x, i) => ({
-    d: ellipse(x, mood === 'crashed' ? 119 - i * 4 : 113, wide ? 9 : 10, reading ? 8 : 14),
+  const pupils: EyePath[] = centres.map((x, i) => ({
+    d: ellipse(
+      x,
+      curious ? 105 + i * 9 : surprised ? 115 + i * 2 : 113,
+      curious ? 9 - i : surprised ? 8 : 10,
+      curious ? 14 - i * 3 : surprised || reading ? 8 : 14,
+    ),
     paint: 'fill',
     layer: 'pupil',
   }));
-  const worry: EyePath[] =
-    mood === 'crashed'
-      ? [
-          {
-            d: 'M88 87L111 93M145 93L168 87M117 153Q128 145 139 153',
-            paint: 'stroke',
-            layer: 'lid',
-          },
-        ]
-      : [];
-  return [...whites, ...pupils, ...worry];
+  // A soft "oh" signals a problem without an angry brow. Attention is a curious,
+  // asymmetric glance, without a smile: eye shape and posture survive reduced motion.
+  const expression: EyePath[] = surprised
+    ? [
+        {
+          d: ellipse(128, 157, 9, 11),
+          paint: 'stroke',
+          layer: 'lid',
+        },
+      ]
+    : [];
+  return [...whites, ...pupils, ...expression];
 }
 export function botFrame(mood: Mood, hood: Hood = 'solline'): BotFrame {
   const posture =
     mood === 'sleeping'
       ? 'rotate(-7deg) scale(1.03, .94)'
       : mood === 'needs-you'
-        ? 'translateY(-3px) scale(.97, 1.04)'
+        ? 'rotate(7deg) translateY(-3px) scale(.97, 1.04)'
         : mood === 'crashed'
-          ? 'scale(1.03, .94)'
+          ? 'rotate(-5deg) scale(1.03, .94)'
           : 'scale(1)';
   const svgPosture =
-    mood === 'sleeping' ? 'rotate(-7 128 164)' : mood === 'needs-you' ? 'translate(0 -3)' : '';
+    mood === 'sleeping'
+      ? 'rotate(-7 128 164)'
+      : mood === 'needs-you'
+        ? 'rotate(7 128 164) translate(0 -3)'
+        : mood === 'crashed'
+          ? 'rotate(-5 128 164)'
+          : '';
   return {
     hood: SHAPES[hood],
     hoodTransform: svgPosture,

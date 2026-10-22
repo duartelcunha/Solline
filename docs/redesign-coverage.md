@@ -29,6 +29,8 @@ O estado final de cada gate fica no índice local `apps/desktop/qa-evidence/deli
 | READ-01 | Ler acima + pedido novo                       | Preservar scroll/foco/seleção; “Precisa de ti” salta explicitamente      | `recovery-window.spec.ts`, `scroll.test.ts`                              |
 | VIS-01  | Temas / hover / foco / zoom / opaco           | Tokens neutros, sinais +/- persistentes, contraste composto              | Matriz visual/usabilidade, canário de sinal                              |
 | MOT-01  | Ponteiro / blur / cancelamento / desmontar    | Sem gaze reduzido/coarse; sem listener, timer ou frame abandonado        | Gaze/motion unit, clips, canário de listener, benchmark                  |
+| VIS-02  | Espera / atenção / erro em tamanho pequeno    | Expressões distintas e amigáveis, sem sobrancelhas zangadas; rótulos complementares | Galeria real 24/40/48/96 px, claro/escuro, revisão ótica                |
+| EVT-01  | Evento de corrida antes de resposta de criação | A resposta atrasada nunca apaga erro/permissão já observado             | Regressão determinística do store e corridas reais Electron             |
 
 O índice final deve ligar estes IDs às provas atuais e conservar as lacunas externas: SDK/login real, DPI nativo, instalação endurecida e falha física de armazenamento.
 

@@ -16,7 +16,7 @@ import { IconSwap } from '@solline/ui/icon-swap';
 import { shouldAnimate } from '@solline/ui/motion';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
-import { Familiar, SessionBot } from './features/agents/bots.tsx';
+import { Familiar, SessionBot, SessionMark } from './features/agents/bots.tsx';
 import { Bot } from '@solline/ui/bot';
 import { Sidebar } from './features/sidebar/sidebar.tsx';
 import { usePresence } from '@solline/ui/react';
@@ -130,7 +130,7 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
           {title}
         </h1>
         <span className="session-state-chip" data-state={state}>
-          <span aria-hidden className="size-1 rounded-full bg-current" />
+          <SessionMark sessionId={sessionId} size={12} />
           {label}
         </span>
       </div>

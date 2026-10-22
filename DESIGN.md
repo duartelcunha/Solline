@@ -22,6 +22,8 @@ Barras de scroll finas continuam visíveis e arrastáveis. Transparência reduzi
 
 SVG original, recortes distintos e olhos grandes. Ocre para Solline/familiar, coral para Claude, azul para Codex, mauve para revisor, pêssego para ACP e violeta para outros. A silhueta continua a identificar o agente sem cor. Não copiar figuras das referências.
 
+Expressões amigáveis, nunca zangadas: erro usa olhos redondos assimétricos, boca de surpresa e uma ligeira inclinação; atenção é curiosa, com um olho mais aberto e a cabeça inclinada, sem sorriso. Espera conserva os olhos ovais tranquilos. A diferença deve continuar visível em tamanho pequeno, à distância e sem movimento; nenhuma sobrancelha inclinada para dentro. Na lista e no cabeçalho, sinais de estado distintos reforçam a expressão sem depender apenas da cor.
+
 Gaze limitado à órbita, sem render React por frame. Listener partilhado; suspensão em movimento reduzido, ausência de foco, invisibilidade ou estados que não acompanham o cursor. Espera, trabalho, atenção, conclusão, erro, sono e leitura devem ser legíveis sem animação. A família mantém coerência a 24/40 px e na entrada ampliada. Os rótulos complementam as expressões pequenas.
 
 Movimento curto, localizado, interrompível e subordinado à leitura. Nenhum gesto celebratório sobrevive a uma transição para erro; voltar à janela não repete eventos antigos. Não animar o texto em streaming nem deslocar a leitura para mostrar um pedido sem ação explícita.

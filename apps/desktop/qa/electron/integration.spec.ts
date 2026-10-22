@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { removeRecoveryKey } from '../../src/main/recovery-key';
+import { WorktreeManager } from '../../../../packages/engine/src/worktrees/worktrees';
 import { observePrompts, type PromptRecord } from './custom-prompts';
 import {
   _electron as electron,
@@ -16,8 +17,10 @@ import {
 type Qa = {
   page: Page;
   project: string;
+  worktreeRoot: string;
   git: (...args: string[]) => string;
   restart: () => Promise<Page>;
+  restoreEngine: () => Promise<Page>;
   shot: (name: string) => Promise<void>;
   setWindowVisible: (visible: boolean) => Promise<{ visible: boolean; focused: boolean }>;
   trustChoice: (trusted: boolean) => void;
@@ -29,6 +32,31 @@ async function removeFixture(root: string) {
   }
   await rm(root, { recursive: true, force: true });
 }
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+// Playwright's Windows loader ChildProcess is not the native Electron PID.
+// Bind forced cleanup to the OS process start identity to reject PID reuse.
+function nativeIdentity(pid: number): string {
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid owned native PID');
+  return execFileSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction Stop | ForEach-Object { $_.CreationDate.ToUniversalTime().Ticks.ToString() }`,
+    ],
+    { windowsHide: true, encoding: 'utf8', timeout: 10_000 },
+  ).trim();
+}
+
 const test = base.extend<{ qa: Qa }>({
   qa: async ({ browserName }, use, info) => {
     expect(browserName).toBe('chromium');
@@ -65,6 +93,8 @@ const test = base.extend<{ qa: Qa }>({
         } as Record<string, string>,
       });
     let app = await launch();
+    let nativePid = await app.evaluate(() => process.pid);
+    const ownedProcesses = [{ pid: nativePid, identity: nativeIdentity(nativePid) }];
     const promptRecords: PromptRecord[] = [];
     const promptFailures: string[] = [];
     const promptPlan = {
@@ -94,6 +124,13 @@ const test = base.extend<{ qa: Qa }>({
       const recovery = app.windows().find((page) => page.url().endsWith('/recovery.html'));
       if (!recovery) throw new Error('Recovery window missing');
       await recovery.getByRole('button', { name: 'Fechar com segurança' }).click();
+      // A rejected safe close must fail, never leave app.close waiting indefinitely.
+      await expect
+        .poll(() => alive(nativePid), {
+          timeout: 10_000,
+          message: 'Confirmed safe close must exit the owned native process',
+        })
+        .toBe(false);
       await app.close();
     };
     const errors: string[] = [];
@@ -152,7 +189,22 @@ const test = base.extend<{ qa: Qa }>({
         await safeClose();
         await collectPrompts();
         app = await launch();
+        nativePid = await app.evaluate(() => process.pid);
+        ownedProcesses.push({ pid: nativePid, identity: nativeIdentity(nativePid) });
         prompts = observePrompts(app, promptPlan);
+        page = await connect();
+        return page;
+      };
+      const restoreEngine = async () => {
+        await flushEvents();
+        const trace = info.outputPath('before-engine-restore.zip');
+        await app.context().tracing.stop({ path: trace });
+        await info.attach('before-engine-restore', { path: trace, contentType: 'application/zip' });
+        const recovery = app.windows().find((window) => window.url().endsWith('/recovery.html'));
+        if (!recovery) throw new Error('Independent engine recovery window missing');
+        const loaded = page.waitForEvent('domcontentloaded');
+        await recovery.getByRole('button', { name: 'Restaurar interface', exact: true }).click();
+        await loaded;
         page = await connect();
         return page;
       };
@@ -187,8 +239,10 @@ const test = base.extend<{ qa: Qa }>({
       await use({
         page,
         project,
+        worktreeRoot: join(root, 'data', 'worktrees'),
         git,
         restart,
+        restoreEngine,
         shot,
         setWindowVisible,
         trustChoice,
@@ -280,9 +334,21 @@ const test = base.extend<{ qa: Qa }>({
         try {
           await safeClose();
         } finally {
-          await removeRecoveryKey(join(root, 'data'));
-          // Delete only this fixture's mkdtemp directory, never a user project.
-          await removeFixture(root);
+          // Failure cleanup owns only PIDs captured at this fixture's launches.
+          // Verify exit BEFORE removing the key or files. Keep safeClose failures visible.
+          for (const { pid, identity } of ownedProcesses)
+            if (identity && alive(pid) && nativeIdentity(pid) === identity) {
+              execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+                windowsHide: true,
+                stdio: 'pipe',
+              });
+              await expect.poll(() => alive(pid), { timeout: 10_000 }).toBe(false);
+            }
+          try {
+            await removeRecoveryKey(join(root, 'data'));
+          } finally {
+            await removeFixture(root);
+          }
         }
       }
     }
@@ -325,6 +391,36 @@ async function gitSnapshot(root: string, project: string) {
     log: read(project, ['log', '--all', '--oneline', '--stat', '-8']),
     files,
   };
+}
+
+// An idle provider event precedes asynchronous checkpoint settlement. Capture the
+// completed durable history as the restart oracle, never that transient projection.
+async function settledSnapshot(page: Page) {
+  let snapshot = await page.evaluate(() => window.solline.request('engine.snapshot', {}));
+  await expect
+    .poll(
+      async () => {
+        snapshot = await page.evaluate(() => window.solline.request('engine.snapshot', {}));
+        const checkpoints = snapshot.sessions.flatMap(
+          (session) => session.timeline?.checkpoints ?? [],
+        );
+        return (
+          checkpoints.length > 0 && checkpoints.every((checkpoint) => checkpoint.state === 'done')
+        );
+      },
+      { message: 'Completed real checkpoints before recording the recovery baseline' },
+    )
+    .toBe(true);
+  // `done` is published before the final pending-diff calculation. This public
+  // serialized read waits behind endTurn and refreshes the entire timeline.
+  for (const session of snapshot.sessions) {
+    if (session.timeline?.checkpoints.length)
+      await page.evaluate(
+        (sessionId) => window.solline.request('review.timeline', { sessionId }),
+        session.session.id,
+      );
+  }
+  return page.evaluate(() => window.solline.request('engine.snapshot', {}));
 }
 
 async function newSession(page: Page) {
@@ -864,18 +960,78 @@ test('conflito ao trazer preserva projeto e branch recuperável', async ({ qa })
 });
 
 for (const choice of ['bring', 'discard'] as const) {
-  test(`reiniciar recupera worktree órfã: ${choice}`, async ({ qa }) => {
+  test(`reiniciar restaura sessão e preserva worktree: ${choice}`, async ({ qa }) => {
     const path = await openWorktree(qa);
     const prepared = await readFile(join(path, 'prepared.txt'), 'utf8');
     await send(qa.page);
     await answer(qa.page, 'allow');
     await expect.poll(() => readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+    const before = await settledSnapshot(qa.page);
+    const saved = before.sessions.find((item) => resolve(item.session.cwd) === resolve(path));
+    if (!saved) throw new Error('Worktree session missing from canonical snapshot');
+    const refs = branchesForWorktree(qa, path).map((ref) => qa.git('rev-parse', ref));
+    expect(refs).toHaveLength(1);
+    const page = await qa.restart();
+    const after = await page.evaluate(() => window.solline.request('engine.snapshot', {}));
+    const restored = after.sessions.find((item) => item.session.id === saved.session.id);
+    expect(restored).toMatchObject({
+      session: {
+        id: saved.session.id,
+        cwd: saved.session.cwd,
+        state: 'error',
+        workspace: { kind: 'worktree' },
+      },
+      interrupted: true,
+      turns: saved.turns,
+      queue: { ...saved.queue, paused: true },
+      timeline: saved.timeline ? { ...saved.timeline, conversationRewind: 'summary' } : null,
+    });
+    expect(branchesForWorktree(qa, path).map((ref) => qa.git('rev-parse', ref))).toEqual(refs);
+    expect(qa.git('worktree', 'list', '--porcelain')).toContain(path.replaceAll('\\', '/'));
+    expect(await readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+    expect(await readFile(join(path, 'prepared.txt'), 'utf8')).toBe(prepared);
+    expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe('Original.\n');
+    await page.getByTestId('open-desk').click();
+    await expect(page.getByTestId('orphan-card')).toHaveCount(0);
+    await expect(page.getByTestId('session-row')).toHaveCount(2);
+    await qa.shot(`restored-worktree-${choice}`);
+    await page.locator(`[data-testid="desk-card"][data-session="${saved.session.id}"]`).click();
+    await expect(page.getByTestId('user-turn')).toHaveCount(1);
+    await closeWorktree(page);
+    await page.getByTestId(`close-${choice}`).click();
+    await expect(page.getByTestId('session-row')).toHaveCount(1);
+    await expect.poll(() => existsSync(path)).toBe(false);
+    expect(branchesForWorktree(qa, path)).toEqual([]);
+    expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe(
+      choice === 'bring' ? 'Alteração revista.\n' : 'Original.\n',
+    );
+    if (choice === 'bring')
+      expect(await readFile(join(qa.project, 'prepared.txt'), 'utf8')).toBe(prepared);
+    else expect(existsSync(join(qa.project, 'prepared.txt'))).toBe(false);
+  });
+
+  test(`worktree legada realmente órfã: ${choice}`, async ({ qa }) => {
+    await expect(qa.page.getByTestId('project-trust')).toHaveAttribute('aria-pressed', 'true');
+    const { projects } = await qa.page.evaluate(() => window.solline.request('projects.list', {}));
+    const project = projects[0];
+    if (!project) throw new Error('Real project missing');
+    // Production Git/metadata creation without a session: no recovery journal is modified.
+    const manager = new WorktreeManager({ root: qa.worktreeRoot });
+    const worktree = await manager.create(qa.project, project.id);
+    if (!worktree) throw new Error('Real legacy worktree creation failed');
+    const path = worktree.path;
+    await writeFile(join(path, 'notes.txt'), 'Alteração revista.\n');
+    await writeFile(join(path, 'prepared.txt'), 'Preparação legada.\n');
     const page = await qa.restart();
     await page.getByTestId('open-desk').click();
     await expect(page.getByTestId('orphan-card')).toHaveCount(1);
-    await qa.shot(`orphan-${choice}`);
     await expect(page.getByTestId('session-row')).toHaveCount(0);
+    expect(
+      (await page.evaluate(() => window.solline.request('engine.snapshot', {}))).sessions,
+    ).toEqual([]);
+    expect(branchesForWorktree(qa, path)).toEqual([worktree.branch]);
     expect(await readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+    await qa.shot(`legacy-orphan-${choice}`);
     await page.getByTestId(`orphan-${choice}`).click();
     if (choice === 'discard') {
       await expect(page.getByTestId('orphan-discard')).toHaveText('Confirmar');
@@ -889,7 +1045,7 @@ for (const choice of ['bring', 'discard'] as const) {
       choice === 'bring' ? 'Alteração revista.\n' : 'Original.\n',
     );
     if (choice === 'bring')
-      expect(await readFile(join(qa.project, 'prepared.txt'), 'utf8')).toBe(prepared);
+      expect(await readFile(join(qa.project, 'prepared.txt'), 'utf8')).toBe('Preparação legada.\n');
     else expect(existsSync(join(qa.project, 'prepared.txt'))).toBe(false);
   });
 }
@@ -910,9 +1066,48 @@ test('fechar app com corrida por trazer conserva ambas as worktrees', async ({ q
     .map((line) => line.slice(9))
     .filter((path) => resolve(path) !== resolve(project));
   expect(worktrees).toHaveLength(2);
+  const before = await settledSnapshot(page);
+  const race = before.races[0];
+  if (!race) throw new Error('Ranked race missing from canonical snapshot');
+  const refs = worktrees.map((path) => ({
+    path,
+    refs: branchesForWorktree(qa, path).map((ref) => git('rev-parse', ref)),
+  }));
+  for (const item of refs) expect(item.refs).toHaveLength(1);
   const next = await qa.restart();
+  const after = await next.evaluate(() => window.solline.request('engine.snapshot', {}));
+  expect(after.races[0]).toMatchObject({ id: race.id, phase: 'ranked', verdict: race.verdict });
+  expect(after.races[0]?.lanes.map((lane) => lane.sessionId)).toEqual(
+    race.lanes.map((lane) => lane.sessionId),
+  );
+  for (const lane of race.lanes) {
+    const saved = before.sessions.find((item) => item.session.id === lane.sessionId);
+    if (!saved) throw new Error('Race lane snapshot missing');
+    expect(after.sessions.find((item) => item.session.id === lane.sessionId)).toMatchObject({
+      session: {
+        id: lane.sessionId,
+        cwd: saved.session.cwd,
+        workspace: { kind: 'worktree' },
+        state: 'error',
+      },
+      interrupted: true,
+      turns: saved.turns,
+      queue: { ...saved.queue, paused: true },
+      timeline: saved.timeline ? { ...saved.timeline, conversationRewind: 'summary' } : null,
+    });
+  }
+  for (const item of refs) {
+    expect(branchesForWorktree(qa, item.path).map((ref) => git('rev-parse', ref))).toEqual(
+      item.refs,
+    );
+    expect(git('worktree', 'list', '--porcelain')).toContain(item.path.replaceAll('\\', '/'));
+  }
   await next.getByTestId('open-desk').click();
-  await expect(next.getByTestId('orphan-card')).toHaveCount(2);
+  await expect(next.getByTestId('orphan-card')).toHaveCount(0);
+  await expect(next.getByTestId('race-card')).toHaveCount(1);
+  await next.getByTestId('race-card').click();
+  await expect(next.getByTestId('race-phase')).toHaveAttribute('data-phase', 'ranked');
+  await expect(next.getByTestId('race-lane')).toHaveCount(2);
   await qa.shot('race-recovered-worktrees');
   expect(
     (await Promise.all(worktrees.map((path) => readFile(join(path, 'notes.txt'), 'utf8')))).sort(),
@@ -925,6 +1120,7 @@ test('morte real do utility process preserva conversa e bloqueia envio', async (
   await newSession(page);
   await send(page);
   await answer(page, 'deny');
+  const before = await settledSnapshot(page);
   const ping = await page.evaluate(() => window.solline.request('engine.ping', {}));
   // This PID came from the guarded fixture's engine, never a machine-wide process search.
   expect(ping.pid).toBeGreaterThan(0);
@@ -936,6 +1132,22 @@ test('morte real do utility process preserva conversa e bloqueia envio', async (
   await expect(page.getByTestId('ask-resolved')).toHaveAttribute('data-status', 'denied');
   await expect(page.getByTestId('composer-input')).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Retomar', exact: true })).toBeHidden();
+  const restoredPage = await qa.restoreEngine();
+  const nextPing = await restoredPage.evaluate(() => window.solline.request('engine.ping', {}));
+  expect(nextPing.pid).not.toBe(ping.pid);
+  const after = await restoredPage.evaluate(() => window.solline.request('engine.snapshot', {}));
+  expect(after.sessions).toHaveLength(before.sessions.length);
+  for (const saved of before.sessions)
+    expect(after.sessions.find((item) => item.session.id === saved.session.id)).toMatchObject({
+      interrupted: true,
+      turns: saved.turns,
+      queue: { ...saved.queue, paused: true },
+      timeline: saved.timeline ? { ...saved.timeline, conversationRewind: 'summary' } : null,
+    });
+  await expect(restoredPage.getByTestId('user-turn')).toContainText('Atualiza as notas.');
+  await expect(restoredPage.getByTestId('ask-resolved')).toHaveAttribute('data-status', 'denied');
+  expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe('Original.\n');
+  await qa.shot('engine-process-restored');
 });
 
 for (const failure of ['crash', 'interrupt'] as const) {

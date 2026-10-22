@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
+import {
+  BookOpen,
+  CircleAlert,
+  CircleCheck,
+  CircleEllipsis,
+  CircleHelp,
+  Clock3,
+  Moon,
+} from 'lucide-react';
 import type { AgentDescriptor } from '@solline/protocol';
-import { Bot, HOODS, STATE_COLOURS, type Hood, type Mood } from '@solline/ui/bot';
+import { Bot, type Hood, type Mood } from '@solline/ui/bot';
 import { useApp, useSession } from '../../stores/app.ts';
 import { hoodOf, moodOf, nextMoodChange } from './bot-mood.ts';
 
@@ -62,33 +71,36 @@ export function SessionBot({
   );
 }
 
-/**
- * A marca de uma sessão na lista: só o capuz, sem cara. O bot inteiro fica no cabeçalho da
- * sessão aberta; aqui basta a cor do agente e o estado (âmbar precisa de ti, vermelho caiu,
- * estático enquanto trabalha, apagado a dormir).
- */
-export function SessionMark({ sessionId, size = 12 }: { sessionId: string; size?: number }) {
-  const agent = useSession(sessionId, (s) => s.info.agent);
-  const transport = useApp((s) => s.agents.find((a) => a.id === agent)?.transport);
+const MOOD_ICONS = {
+  waiting: Clock3,
+  working: CircleEllipsis,
+  'needs-you': CircleHelp,
+  done: CircleCheck,
+  crashed: CircleAlert,
+  sleeping: Moon,
+  reading: BookOpen,
+} as const satisfies Record<Mood, typeof Clock3>;
+
+/** Static shapes keep state legible at small sizes and without colour or motion. */
+export function SessionMark({ sessionId, size = 14 }: { sessionId: string; size?: number }) {
   const mood = useSessionMood(sessionId);
-  const fill =
+  const Mark = MOOD_ICONS[mood];
+  const color =
     mood === 'needs-you'
-      ? STATE_COLOURS.attention
+      ? 'var(--sl-attention)'
       : mood === 'crashed'
-        ? STATE_COLOURS.danger
-        : HOODS[hoodOf(agent, transport)];
+        ? 'var(--sl-danger)'
+        : undefined;
   return (
-    <svg
+    <Mark
       aria-hidden
-      width={size}
-      height={(size * 8) / 12}
-      viewBox="0 0 12 8"
+      size={size}
+      strokeWidth={2}
       data-testid="session-mark"
       data-mood={mood}
-      className={`shrink-0 transition-opacity duration-300 ${mood === 'sleeping' ? 'opacity-40' : ''}`}
-    >
-      <path d="M0 7.5a6 6 0 0 1 12 0z" fill={fill} style={{ transition: 'fill 200ms ease' }} />
-    </svg>
+      className="shrink-0"
+      style={{ color }}
+    />
   );
 }
 

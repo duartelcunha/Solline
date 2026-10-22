@@ -102,6 +102,51 @@ test('ícones conservam identidade e ajuda ao teclado sem animar a escolha do mo
   await expect(mode.locator('.sl-swap-in')).toHaveCount(0);
 });
 
+test('marcas de estado mantêm formas distintas sem cor nem movimento', async ({ page }) => {
+  await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+  await open(page);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 60_000));
+  const sidebar = page.getByTestId('session-row').getByTestId('session-mark');
+  const header = page.locator('.session-state-chip').getByTestId('session-mark');
+  const shapes = new Map<string, string>();
+  const record = async (mood: string) => {
+    await expect(sidebar).toHaveAttribute('data-mood', mood);
+    await expect(header).toHaveAttribute('data-mood', mood);
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+    await expect(sidebar).toHaveCSS('opacity', '1');
+    const shape = await sidebar.innerHTML();
+    expect(await header.innerHTML()).toBe(shape);
+    expect(await sidebar.evaluate((element) => element.getAnimations().length)).toBe(0);
+    shapes.set(mood, shape);
+  };
+  const state = async (value: 'running' | 'needs-you' | 'error' | 'idle') => {
+    await page.evaluate(
+      (state) =>
+        window.qa.emit({
+          kind: 'event',
+          type: 'session.state',
+          sessionId: 'session-1',
+          state,
+        }),
+      value,
+    );
+  };
+  await record('waiting');
+  await state('running');
+  await record('working');
+  await state('needs-you');
+  await record('needs-you');
+  await state('error');
+  await record('crashed');
+  await state('running');
+  await state('idle');
+  await record('done');
+  await page.clock.fastForward(600_001);
+  await record('sleeping');
+  expect(new Set(shapes.values()).size).toBe(6);
+});
+
 test('modelo, esforço e modo respeitam as capacidades e o protocolo', async ({ page }) => {
   await open(page);
   for (const [control, option, label] of [

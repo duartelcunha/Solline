@@ -566,7 +566,9 @@ export const actions = {
       }
       useApp.setState((s) => ({
         sessionIds: [...sessions.map((c) => c.session.id), ...s.sessionIds],
-        races: { ...s.races, [race.id]: race },
+        // O ack durável pode chegar depois dos eventos das pistas. A resposta inicial
+        // só preenche a corrida se ainda não tivermos recebido o seu estado atual.
+        races: { ...s.races, [race.id]: s.races[race.id] ?? race },
         activeRaceId: race.id,
         view: 'race',
       }));

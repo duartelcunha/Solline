@@ -44,11 +44,19 @@ Canários descartáveis provam decisão invertida, foco perdido, diff oculto, co
 
 Capturas/clips/traces têm de corresponder à versão revista. Alterações invalidam provas afetadas. Distribuição normal verifica ausência de QA/diálogos nativos, recursos locais e preloads independentes sem chunks locais incompatíveis com sandbox. ASAR/fuses é gate separado; não desligar proteções.
 
+O primeiro run `recovery-final-1` falhou e permanece histórico: encontrou respostas de `race.start` atrasadas a substituir eventos de pista mais recentes, asserções antigas que esperavam worktrees órfãs em vez de sessões restauradas e teardown incompleto após morte do motor. A correção conserva o estado já observado e verifica a ordem resposta/evento de forma determinística. Os testes de restauro mantêm os oráculos de conteúdo Git; worktrees realmente órfãs têm cobertura própria. Nunca contar esse run como aprovação ou ocultar as falhas.
+
+A última orientação do Duarte pede expressões amigáveis e fáceis de distinguir: erro passa a surpresa suave; atenção é curiosa, com um olho mais aberto e cabeça inclinada. Duarte rejeitou o sorriso de atenção, pelo que `friendly-expressions-1` é apenas histórico. Sinais distintos na lista/cabeçalho reforçam estados pequenos sem depender apenas de cor. O teste antigo que proibia qualquer rotação do capuz pertencia à figura anterior; foi removido com essa mudança explícita de postura. Contenção das pupilas, tamanhos reais, temas e interrupções de movimento continuam verificados. Capturas anteriores a esta alteração não aprovam as novas expressões.
+
 ## Ambiente, limites e preservação
 
 Uma chamada acidental ao pnpm global tentou reparar dependências ligadas ao Claude; foi interrompida sem alterar manifests/lockfiles. A implementação recebeu dependências físicas do mesmo lock. Babel 7.29.7 e Electron 44.7.0 do Claude foram reparados com os mesmos ficheiros/versões existentes. Confirmar novamente fonte limpa e resolução antes de entregar. Backups ignorados em qa-evidence/environment-repair contêm junctions: nunca percorrer targets durante limpeza recursiva.
 
 A revisão automática rejeitou remover C:/Users/duart/AppData/Local/Temp/solline-recovery-qa-lJDkMx, sem motivo além de “blocked by policy”. Credencial removida e processos terminados; pasta intacta. A pasta histórica solline-redesign-qa-mzSRWU tem bloqueio anterior equivalente. Não contornar nem declarar limpeza total.
+
+O mesmo bloqueio ocorreu na limpeza de sete fixtures adicionais confirmadas pelos traces: solline-redesign-qa-3KU9EL, DqQgZn, SEx5s5, kA9k3i, 0AymeZ, P07ShH e REeYiy (todas com o prefixo solline-redesign-qa-). Credenciais removidas e ausência de Electron confirmada; pastas preservadas. O detalhe fica na evidência local de cleanup. Não repetir a remoção por outra ferramenta.
+
+Ao empacotar, dar prioridade no PATH aos shims do Corepack instalado, com rede do Corepack desativada, para que chamadas internas do builder usem o pnpm 10.34.6 já disponível. Não invocar o pnpm global de fallback. A verificação do pacote compara também o executável Windows do Claude e as versões das dependências de runtime com as dependências locais do lock.
 
 Login/cancelamento SDK real, juiz/revisor real, MCP externo, DPI nativo e aplicação instalada endurecida precisam de prova própria. Falhas de disco são injetadas nos syscalls, não um teste físico de disco cheio/power-loss. A montagem entre pistas fica fora.
 

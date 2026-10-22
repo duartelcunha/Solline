@@ -71,6 +71,22 @@ if (process.argv[2]) {
     'QA build packaged',
   );
   const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  const nativeAgent = 'node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe';
+  assert(entries.includes(nativeAgent), 'Windows Claude executable missing from package');
+  assert.equal(
+    hash(await readFile(join(packaged, 'resources/app.asar.unpacked', nativeAgent))),
+    hash(await readFile(join('../../', nativeAgent))),
+    'Unpacked Windows Claude executable differs from the installed locked dependency',
+  );
+  for (const dependency of ['@anthropic-ai/claude-agent-sdk', 'zod']) {
+    const manifest = `node_modules/${dependency}/package.json`;
+    assert(entries.includes(manifest), `Runtime dependency missing: ${dependency}`);
+    assert.equal(
+      JSON.parse(extractFile(archive, normalize(manifest)).toString()).version,
+      JSON.parse(await readFile(join('../../', manifest), 'utf8')).version,
+      `Packaged runtime dependency version differs: ${dependency}`,
+    );
+  }
   let packagedFiles = 0;
   for (const entry of entries.filter((entry) => /^out\/.*\.(?:js|css|html|woff2)$/.test(entry))) {
     const bytes = extractFile(archive, normalize(entry));

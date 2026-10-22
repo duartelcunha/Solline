@@ -23,10 +23,6 @@ describe('bots da Solline', () => {
     expect(palette('claude').hem).toContain(HOODS.claude);
   });
 
-  it('o capuz do "caiu" descai sem rodar (rodar deixava um buraco na bainha)', () => {
-    expect(botFrame('crashed').hoodTransform).not.toContain('rotate');
-  });
-
   it('o SVG em texto traz o que o ícone e as pré-visualizações precisam', () => {
     const svg = botSvg('waiting', 'solline', 32);
     expect(svg).toContain('width="32"');
