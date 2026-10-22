@@ -1,6 +1,6 @@
 // Isolated, serial comparison. Never changes either production checkout.
 // Run from apps/desktop: SOLLINE_PERF_EXCLUSIVE=1 node qa/performance.mjs
-/* global window, document, requestAnimationFrame, HTMLElement */
+/* global window, document, requestAnimationFrame, HTMLElement, getComputedStyle */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -30,6 +30,18 @@ const browserPath =
   join(process.env.LOCALAPPDATA, 'ms-playwright/chromium-1247/chrome-win64/chrome.exe');
 const warmups = 1;
 const samples = Number(process.env.SOLLINE_PERF_SAMPLES ?? 5);
+// The original baseline cannot contain the long fixture. Apply the same minimal
+// height constraints to both disposable copies; this is a normalized comparison,
+// not the untouched historical layout. Preserve its failed geometry separately.
+const containmentCSS = `#root > div > main,
+#root > div > main > div > div { min-height: 0; }`;
+const normalization = {
+  kind: 'explicitly-normalized-layout',
+  css: containmentCSS,
+  reason:
+    'Untouched baseline long-conversation layout overflows the viewport; identical containment is applied to both disposable copies.',
+  invalidatedEvidence: 'qa-evidence/performance-diagnostic/DIAGNOSIS.md',
+};
 // These thresholds are written before building or measuring. Noise does not count as a win.
 const policy = {
   interaction: { relative: 0.25, absoluteMs: 16.7 },
@@ -57,7 +69,15 @@ await mkdir(output, { recursive: true });
 await writeFile(
   join(output, 'policy.json'),
   JSON.stringify(
-    { baseline, browserPath, warmups, samples, policy, createdAt: new Date().toISOString() },
+    {
+      baseline,
+      browserPath,
+      warmups,
+      samples,
+      policy,
+      normalization,
+      createdAt: new Date().toISOString(),
+    },
     null,
     2,
   ),
@@ -187,6 +207,27 @@ await import('../src/renderer/src/main');
     source.replace(
       'createRoot(root).render(',
       'const benchmarkRoot = createRoot(root);\nObject.assign(window, { benchmarkUnmount: () => benchmarkRoot.unmount() });\nbenchmarkRoot.render(',
+    ),
+  );
+  // Vite's QA root is outside renderer/src. Explicitly discover each snapshot's
+  // utilities; otherwise older sources without @source compile an unstyled baseline.
+  const stylePath = join(target, 'src/renderer/src/styles.css');
+  let styleSource = await readFile(stylePath, 'utf8');
+  for (const directive of ["@source '.';", "@source '../../../../../packages/ui/src';"]) {
+    if (!styleSource.includes(directive)) styleSource += `\n${directive}\n`;
+  }
+  styleSource += `\n/* Identical benchmark-only containment normalization. */\n${containmentCSS}\n`;
+  await writeFile(stylePath, styleSource);
+  await writeFile(
+    join(output, `${label}-style-discovery.json`),
+    JSON.stringify(
+      {
+        directives: ["@source '.';", "@source '../../../../../packages/ui/src';"],
+        normalization,
+        sha256: createHash('sha256').update(styleSource).digest('hex'),
+      },
+      null,
+      2,
     ),
   );
   const log = command(
@@ -328,6 +369,65 @@ async function resources(page, cdp) {
     ...(await page.evaluate(() => window.benchmarkResources())),
   };
 }
+async function validateLayout(page, label, index) {
+  const geometry = await page.evaluate(() => {
+    const describe = (element) => {
+      if (!(element instanceof HTMLElement)) return null;
+      const style = getComputedStyle(element);
+      return {
+        display: style.display,
+        rect: element.getBoundingClientRect().toJSON(),
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+        fontFamily: style.fontFamily,
+        fontReady: document.fonts.check(`${style.fontSize} ${style.fontFamily}`),
+      };
+    };
+    const conversation = document.querySelector('[data-testid="conversation"]');
+    return {
+      root: describe(document.querySelector('#root')?.firstElementChild),
+      main: describe(document.querySelector('main')),
+      panel: describe(document.querySelector('[data-testid="review-panel"]')),
+      conversation: describe(conversation),
+      conversationParent: describe(conversation?.parentElement),
+      loadedFonts: [...document.fonts]
+        .filter((font) => font.status === 'loaded')
+        .map((font) => font.family),
+    };
+  });
+  await writeFile(join(output, `${label}-${index}-layout.json`), JSON.stringify(geometry, null, 2));
+  if (index === -1) {
+    await page.screenshot({ path: join(output, `${label}-layout.png`), animations: 'disabled' });
+  }
+  assert.equal(geometry.root?.display, 'grid', 'App grid utilities must be compiled');
+  assert.equal(geometry.main?.display, 'flex', 'Main flex utilities must be compiled');
+  assert.equal(
+    geometry.conversationParent?.display,
+    'flex',
+    'Conversation flex utilities must be compiled',
+  );
+  assert.equal(geometry.panel?.display, 'flex', 'Review flex utilities must be compiled');
+  assert.equal(geometry.root.rect.width, 1200, 'App must fit the viewport width');
+  assert.equal(geometry.root.rect.height, 780, 'App must fit the viewport height');
+  assert(
+    Math.abs(geometry.panel.rect.width - 512) < 0.01,
+    'Review must have its intended 32rem width',
+  );
+  assert(
+    geometry.panel.rect.top >= 0 &&
+      geometry.panel.rect.height > 0 &&
+      geometry.panel.rect.bottom <= 780,
+    'Review must be vertically contained in the viewport',
+  );
+  assert(
+    geometry.conversation.scrollHeight > geometry.conversation.clientHeight,
+    'Long conversation must scroll inside its own viewport',
+  );
+  assert(
+    geometry.conversation.fontReady && geometry.loadedFonts.length > 0,
+    'Real local fonts must be loaded',
+  );
+}
 async function runSample(label, url, index, warmup) {
   const context = await browser.newContext({
     viewport: { width: 1200, height: 780 },
@@ -358,6 +458,7 @@ async function runSample(label, url, index, warmup) {
     // Warm all code paths once before measuring the retained state.
     await clickPaint(page, 'review-toggle');
     await page.getByTestId('diff-hunk').first().waitFor();
+    await validateLayout(page, label, index);
     await clickPaint(page, 'review-toggle');
     await page.getByTestId('review-panel').waitFor({ state: 'hidden' });
     await clickPaint(page, 'session-row', 1);
@@ -540,6 +641,7 @@ try {
     }));
   const report = {
     baseline,
+    normalization,
     snapshotDigests,
     recordedAt: new Date().toISOString(),
     environment: {
@@ -562,6 +664,7 @@ try {
     comparisons,
     teardown,
     limitations: [
+      'Explicitly normalized layout: identical harness-only containment fixes the historical baseline overflow. This is not the untouched baseline rendering.',
       'Synthetic renderer comparison, not native Electron or SDK throughput.',
       'Input/state are deterministic; real elapsed time and browser scheduling are inherently noisy.',
       'Two-frame click-to-paint proxy is not field INP.',

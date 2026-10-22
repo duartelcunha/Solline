@@ -54,12 +54,13 @@ export function Bot({
     };
   }, []);
   const live = alive && visible && foreground && !reduced;
+  const gazeActive =
+    visible && foreground && !reduced && !['sleeping', 'done', 'crashed'].includes(mood);
   useEffect(() => {
     const target = pupils.current;
     if (!target) return;
     target.style.transform = 'translate(0px, 0px)';
-    if (!visible || !foreground || reduced || ['sleeping', 'done', 'crashed'].includes(mood))
-      return;
+    if (!gazeActive) return;
     return watchGaze((x, y) => {
       const rect = root.current?.getBoundingClientRect();
       if (!rect || x === null || y === null) {
@@ -73,7 +74,7 @@ export function Bot({
       const scale = length ? Math.min(radius, length / 20) / length : 0;
       target.style.transform = `translate(${(dx * scale).toFixed(2)}px, ${(dy * scale).toFixed(2)}px)`;
     });
-  }, [visible, foreground, reduced, mood]);
+  }, [gazeActive, mood]);
   useEffect(() => {
     animation.current?.cancel();
     if (live && previous.current !== mood) {
@@ -124,6 +125,7 @@ export function Bot({
       data-hood={hood}
       data-mood={mood}
       data-live={live}
+      data-gaze-active={gazeActive}
     >
       {title ? <title>{title}</title> : null}
       {size >= 64 ? (

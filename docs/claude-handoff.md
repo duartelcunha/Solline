@@ -8,6 +8,8 @@ O contrato público do protocolo mantém-se. Radix, fontes locais, CSS/WAAPI e S
 
 ## Alterações funcionais relevantes
 
+- O seguimento inativo das pupilas cancela a transição CSS de forma síncrona através de `data-gaze-active`, evitando que uma janela oculta conserve uma transformação intermédia. A condição deriva do seguimento real, incluindo foco, visibilidade e estado; figuras visíveis sem animação ambiente continuam com gaze suave. Não foi necessário trocar `useEffect` por `useLayoutEffect`. Provas: `native-blur` (falha), `native-blur-effects` (diagnóstico), `native-blur-fixed` (primeira correção) e `gaze-active-fixed` (correção precisa). Hide/blur nativo está demonstrado; `visibilitychange` para hidden continua limitado pela automação.
+
 - Rascunhos e envios pendentes pertencem à sessão. Falhas tardias preservam o texto enviado e o texto entretanto escrito; fecho durante envio fica bloqueado.
 - O consentimento de descartar fila mantém-se durante a decisão de worktree. Drafts de fila/rewind são consumidos atomicamente, incluindo StrictMode.
 - Respostas a permissões/perguntas bloqueiam cliques repetidos, permitem retry e limpam erros antigos. O atalho de orientação respeita capacidades do agente.
@@ -34,6 +36,6 @@ As provas locais estão em `apps/desktop/qa-evidence/`: manifestos e índices po
 
 Login externo, juiz/revisor por modelo real, DPI nativo e executável instalado endurecido precisam de uma sessão própria. Simulação, CSS zoom e Electron de desenvolvimento não os certificam. Não desligar fuses, sandbox, CSP ou Smart App Control para obter um resultado verde.
 
-O benchmark não mostrou regressão acima dos limiares definidos; diferenças de latência/frames ficaram dentro do ruído. Não anunciar ganhos de desempenho. A comparação cobre as cargas registadas, não qualquer projeto possível.
+As comparações iniciais de desempenho foram invalidadas: faltava descoberta explícita de utilitários CSS na cópia antiga e, depois de corrigida, a conversa longa ainda excedia a janela por falta de contenção de altura. As provas e falhas permanecem em `qa-evidence/`, identificadas por `INVALIDATED.md`. O benchmark atual aplica as mesmas fontes CSS e a mesma contenção mínima apenas às duas cópias descartáveis, verifica layout/fontes/scroll antes de medir e mantém a política original. A execução normalizada final, após a correção precisa da suspensão das pupilas, teve layout válido e limpeza completa, com frames/heap/DOM dentro dos limites; as diferenças de latência ficaram inconclusivas por ruído. A anterior permanece em `performance-before-native-fix`. Nenhum gate de regressão disparou, mas isto não demonstra equivalência nem ganho. Não mede a renderização histórica intacta, desempenho nativo Electron ou SDKs reais.
 
 A montagem de soluções entre pistas continua fora deste overhaul. Antes de continuar funcionalidades, rever o bundle final e os limites do mapa; depois validar os percursos externos com as contas do Duarte e o pacote normal. Manter a versão anterior da cópia estável acessível para rollback. Não limpar worktrees do Claude nem processos de outras tarefas.

@@ -82,7 +82,22 @@ test('movimento interrompível, reduzido ao vivo e suspenso fora de vista', asyn
   const bot = page.getByTestId('live-figure').getByTestId('bot');
   await expect(bot).toHaveAttribute('data-live', 'true');
   const pupils = bot.getByTestId('bot-pupils');
+  const nonAmbient = page.getByRole('img', { name: 'waiting', exact: true });
+  const nonAmbientPupils = nonAmbient.getByTestId('bot-pupils');
+  await expect(nonAmbient).toHaveAttribute('data-live', 'false');
+  await expect(nonAmbient).toHaveAttribute('data-gaze-active', 'true');
+  expect(
+    await nonAmbientPupils.evaluate((el) => parseFloat(getComputedStyle(el).transitionDuration)),
+  ).toBeGreaterThan(0);
   await page.mouse.move(1100, 40);
+  await expect
+    .poll(() =>
+      nonAmbientPupils.evaluate((el) => {
+        const matrix = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+        return Math.hypot(matrix.m41, matrix.m42);
+      }),
+    )
+    .toBeGreaterThan(0);
   await expect
     .poll(() => pupils.evaluate((el) => getComputedStyle(el).transform))
     .not.toBe('matrix(1, 0, 0, 1, 0, 0)');
@@ -117,11 +132,16 @@ test('movimento interrompível, reduzido ao vivo e suspenso fora de vista', asyn
   await page.getByRole('button', { name: 'working', exact: true }).click();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(bot).toHaveAttribute('data-live', 'false');
+  await expect(bot).toHaveAttribute('data-gaze-active', 'false');
+  await expect(nonAmbient).toHaveAttribute('data-gaze-active', 'false');
+  await expect(nonAmbientPupils).toHaveCSS('transition-duration', '0s');
   await expect(pupils).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
   await expect.poll(() => bot.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(bot).toHaveAttribute('data-live', 'true');
   await page.getByRole('button', { name: 'Fim da galeria' }).scrollIntoViewIfNeeded();
   await expect(bot).toHaveAttribute('data-live', 'false');
+  await expect(bot).toHaveAttribute('data-gaze-active', 'false');
+  await expect(pupils).toHaveCSS('transition-duration', '0s');
   await expect.poll(() => bot.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0);
 });

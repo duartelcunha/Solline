@@ -82,6 +82,50 @@ test('confiança: um agente pronto mas incompatível fica bloqueado até confiar
   await expect(page.getByTestId('assistant-text')).toBeVisible();
 });
 
+test('revisão: âmbitos e ações por hunk/ficheiro preservam os alvos não escolhidos', async ({
+  page,
+}, info) => {
+  await open(page, 'review-targeted');
+  await page.getByTestId('review-toggle').click();
+  await expect(page.getByTestId('diff-hunk')).toHaveCount(3);
+  const scope = page.getByTestId('review-scope');
+  for (const name of ['Toda a sessão', 'Turno 0', 'Por rever']) {
+    await scope.focus();
+    await scope.press('Enter');
+    await expect(scope).toHaveAttribute('aria-expanded', 'true');
+    await page.getByRole('menuitemradio', { name: new RegExp(`^${name}`) }).press('Enter');
+    await expect(scope).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByTestId('diff-hunk')).toHaveCount(3);
+    if (name !== 'Por rever') await expect(page.getByTestId('accept-hunk')).toHaveCount(0);
+  }
+  expect(await commands(page, 'review.diff')).toEqual([
+    { sessionId: 'session-1', scope: { kind: 'review' } },
+    { sessionId: 'session-1', scope: { kind: 'session' } },
+    { sessionId: 'session-1', scope: { kind: 'turn', turnId: 'user-1' } },
+    { sessionId: 'session-1', scope: { kind: 'review' } },
+  ]);
+  const first = page.locator('[data-hunk="hunk-1"]');
+  const untouched = page.locator('[data-hunk="hunk-2"]');
+  const otherFile = page.locator('[data-testid="diff-file"][data-path="src/shortcuts.ts"]');
+  const untouchedText = await untouched.innerText();
+  const otherText = await otherFile.innerText();
+  await first.getByTestId('accept-hunk').focus();
+  await first.getByTestId('accept-hunk').press('Enter');
+  await expect(first).toHaveCount(0);
+  expect(await untouched.innerText()).toBe(untouchedText);
+  expect(await otherFile.innerText()).toBe(otherText);
+  await otherFile.getByTestId('reject-file').focus();
+  await otherFile.getByTestId('reject-file').press('Enter');
+  await expect(otherFile).toHaveCount(0);
+  expect(await untouched.innerText()).toBe(untouchedText);
+  await expect(page.getByTestId('diff-hunk')).toHaveCount(1);
+  expect(await commands(page, 'review.apply')).toEqual([
+    { sessionId: 'session-1', action: 'accept', path: 'src/navigation.ts', hunkId: 'hunk-1' },
+    { sessionId: 'session-1', action: 'reject', path: 'src/shortcuts.ts' },
+  ]);
+  await capture(page, info, 'review-targeted-preservation');
+});
+
 test('capacidades: sem esforço nem orientação, Ctrl+Enter mantém a mensagem na fila', async ({
   page,
 }) => {

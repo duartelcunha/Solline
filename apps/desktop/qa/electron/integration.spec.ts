@@ -3,7 +3,13 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { _electron as electron, test as base, expect, type Page } from '@playwright/test';
+import {
+  _electron as electron,
+  test as base,
+  expect,
+  type CDPSession,
+  type Page,
+} from '@playwright/test';
 
 type Qa = {
   page: Page;
@@ -11,6 +17,7 @@ type Qa = {
   git: (...args: string[]) => string;
   restart: () => Promise<Page>;
   shot: (name: string) => Promise<void>;
+  setWindowVisible: (visible: boolean) => Promise<{ visible: boolean; focused: boolean }>;
 };
 async function removeFixture(root: string) {
   if (dirname(root) !== resolve(tmpdir()) || !basename(root).startsWith('solline-redesign-qa-')) {
@@ -58,6 +65,7 @@ const test = base.extend<{ qa: Qa }>({
     const processLog: { at: string; stream: string; text: string }[] = [];
     const eventJournal: { generation: number; events: unknown[] }[] = [];
     let generation = 0;
+    let nativeCdp: CDPSession | undefined;
     let flushEvents = () => Promise.resolve();
     const connect = async () => {
       const child = app.process();
@@ -126,7 +134,24 @@ const test = base.extend<{ qa: Qa }>({
         await page.screenshot({ path, animations: 'disabled' });
         await info.attach(name, { path, contentType: 'image/png' });
       };
-      await use({ page, project, git, restart, shot });
+      const setWindowVisible = async (visible: boolean) => {
+        if (!nativeCdp) {
+          // Playwright forces focused/visible emulation by default. Disable that override
+          // for this native lifecycle test; window hide/show below remain real OS actions.
+          nativeCdp = await app.context().newCDPSession(page);
+          await nativeCdp.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+        }
+        return app.evaluate(({ BrowserWindow }, show) => {
+          const window = BrowserWindow.getAllWindows()[0];
+          if (!window) throw new Error('QA: native window missing');
+          if (show) {
+            window.show();
+            window.focus();
+          } else window.hide();
+          return { visible: window.isVisible(), focused: window.isFocused() };
+        }, visible);
+      };
+      await use({ page, project, git, restart, shot, setWindowVisible });
       expect(
         await page.evaluate(() => ({
           node: typeof (globalThis as { require?: unknown }).require,
@@ -144,6 +169,14 @@ const test = base.extend<{ qa: Qa }>({
         }
       };
       try {
+        await capture('native-focus-emulation-restore', async () => {
+          if (!nativeCdp) return;
+          try {
+            await nativeCdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+          } finally {
+            await nativeCdp.detach();
+          }
+        });
         await capture('engine-events', async () => {
           await flushEvents();
           await info.attach('engine-events', {
@@ -247,10 +280,167 @@ async function newSession(page: Page) {
   await page.getByTestId('new-session').click();
   await expect(page.getByTestId('composer-input')).toBeEnabled();
 }
+for (const trusted of [false, true])
+  test(`confiança real persiste depois de reiniciar: ${trusted}`, async ({ qa }) => {
+    const trust = qa.page.getByTestId('project-trust');
+    await expect(trust).toHaveAttribute('aria-pressed', 'true');
+    await trust.click();
+    await expect(trust).toHaveAttribute('aria-pressed', 'false');
+    if (trusted) {
+      await trust.click();
+      await expect(trust).toHaveAttribute('aria-pressed', 'true');
+    }
+    const before = await qa.page.evaluate(() => window.solline.request('projects.list', {}));
+    expect(before.projects).toHaveLength(1);
+    expect(before.projects[0]).toMatchObject({ path: qa.project, trusted });
+    const page = await qa.restart();
+    await expect(page.getByTestId('project-trust')).toHaveAttribute(
+      'aria-pressed',
+      String(trusted),
+    );
+    const after = await page.evaluate(() => window.solline.request('projects.list', {}));
+    expect(after.projects).toEqual(before.projects);
+    expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe('Original.\n');
+    await qa.shot(`trust-persisted-${trusted}`);
+  });
 async function send(page: Page, text = 'Atualiza as notas.') {
   await page.getByTestId('composer-input').fill(text);
   await page.getByTestId('composer-input').press('Enter');
 }
+test('janela nativa oculta cancela animações e recupera o olhar ao voltar', async ({
+  qa,
+}, info) => {
+  const { page } = qa;
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await qa.setWindowVisible(true);
+  await newSession(page);
+  await send(page, 'QA: trabalho contínuo');
+  const bot = page.locator('[data-testid="bot"][data-mood="working"][data-live="true"]');
+  await expect(bot).toHaveCount(1);
+  const activeBot = page.getByRole('img', { name: 'Claude: a trabalhar', exact: true });
+  const pupils = activeBot.getByTestId('bot-pupils');
+  const displacement = () =>
+    pupils.evaluate((el) => {
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+      return Math.hypot(matrix.m41, matrix.m42);
+    });
+  await expect
+    .poll(() =>
+      activeBot.evaluate(
+        (el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await page.mouse.move(1000, 500);
+  await expect.poll(displacement).toBeGreaterThan(0);
+  try {
+    const native = await qa.setWindowVisible(false);
+    await info.attach('native-hide-diagnostic', {
+      body: JSON.stringify({
+        native,
+        browser: await page.evaluate(() => ({
+          visibility: document.visibilityState,
+          focused: document.hasFocus(),
+        })),
+        bot: await activeBot.evaluate((el) => ({
+          live: el.getAttribute('data-live'),
+          animations: el.getAnimations({ subtree: true }).map((animation) => ({
+            constructor: animation.constructor.name,
+            state: animation.playState,
+            timing: animation.effect?.getComputedTiming(),
+            target: (animation.effect as KeyframeEffect | null)?.target?.getAttribute('class'),
+          })),
+        })),
+        method:
+          'Public CDP disables forced focus in a new session; BrowserWindow.hide is the real native action. Original Playwright session may retain its override.',
+      }),
+      contentType: 'application/json',
+    });
+    // Playwright/Electron still reports document.visibilityState=visible while the
+    // actual window is hidden. Assert the native state and real blur, not that override.
+    expect(native).toEqual({ visible: false, focused: false });
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
+    await expect(activeBot).toHaveAttribute('data-live', 'false');
+    await expect(activeBot).toHaveAttribute('data-gaze-active', 'false');
+    await expect(pupils).toHaveCSS('transition-duration', '0s');
+    await expect.poll(displacement).toBe(0);
+    await expect
+      .poll(() => activeBot.evaluate((el) => el.getAnimations({ subtree: true }).length))
+      .toBe(0);
+    await info.attach('native-hidden-state', {
+      body: JSON.stringify(
+        await page.evaluate(() => ({
+          visibility: document.visibilityState,
+          focused: document.hasFocus(),
+        })),
+      ),
+      contentType: 'application/json',
+    });
+  } finally {
+    try {
+      await info.attach('native-final-hidden-state', {
+        body: JSON.stringify({
+          pupils: await pupils.evaluate((el) => ({
+            inline: el.getAttribute('style'),
+            transform: getComputedStyle(el).transform,
+          })),
+          bot: await activeBot.evaluate((el) => ({
+            live: el.getAttribute('data-live'),
+            animations: el.getAnimations({ subtree: true }).map((animation) => ({
+              constructor: animation.constructor.name,
+              state: animation.playState,
+              time: animation.currentTime,
+              timing: animation.effect?.getComputedTiming(),
+              target: (animation.effect as KeyframeEffect | null)?.target?.getAttribute('class'),
+            })),
+          })),
+        }),
+        contentType: 'application/json',
+      });
+    } finally {
+      await qa.setWindowVisible(true);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await info.attach('native-shown-state', {
+        body: JSON.stringify({
+          pupils: await pupils.evaluate((el) => ({
+            inline: el.getAttribute('style'),
+            transform: getComputedStyle(el).transform,
+          })),
+          bot: await activeBot.evaluate((el) => ({
+            live: el.getAttribute('data-live'),
+            animations: el.getAnimations({ subtree: true }).map((animation) => ({
+              constructor: animation.constructor.name,
+              state: animation.playState,
+              timing: animation.effect?.getComputedTiming(),
+              target: (animation.effect as KeyframeEffect | null)?.target?.getAttribute('class'),
+            })),
+          })),
+        }),
+        contentType: 'application/json',
+      });
+    }
+  }
+  await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe('visible');
+  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+  await expect(activeBot).toHaveAttribute('data-live', 'true');
+  await expect(activeBot).toHaveAttribute('data-gaze-active', 'true');
+  await expect
+    .poll(() =>
+      activeBot.evaluate(
+        (el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await page.mouse.move(200, 500);
+  await expect.poll(displacement).toBeGreaterThan(0);
+  expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe('Original.\n');
+  await qa.shot('native-focus-resumed');
+});
 async function answer(page: Page, decision: 'allow' | 'deny') {
   await expect(page.getByTestId('permission-card')).toBeVisible();
   await page

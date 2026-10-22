@@ -161,6 +161,47 @@ export const timeline: Timeline = {
   conversationRewind: 'agent',
   rewoundTo: null,
 };
+/** Two files and independent hunks expose an over-broad renderer review command. */
+export const targetedReview: FileDiff[] = [
+  {
+    ...structuredClone(diff),
+    additions: 2,
+    deletions: 2,
+    hunks: [
+      ...structuredClone(diff.hunks),
+      {
+        id: 'hunk-2',
+        header: '@@ -20 +20 @@',
+        oldStart: 20,
+        oldLines: 1,
+        newStart: 20,
+        newLines: 1,
+        lines: [
+          { kind: 'del', text: 'const fallback = null;', oldNo: 20, newNo: null },
+          { kind: 'add', text: 'const fallback = "mesa";', oldNo: null, newNo: 20 },
+        ],
+      },
+    ],
+  },
+  {
+    ...structuredClone(diff),
+    path: 'src/shortcuts.ts',
+    hunks: [
+      {
+        id: 'hunk-3',
+        header: '@@ -1 +1 @@',
+        oldStart: 1,
+        oldLines: 1,
+        newStart: 1,
+        newLines: 1,
+        lines: [
+          { kind: 'del', text: 'const shortcut = "old";', oldNo: 1, newNo: null },
+          { kind: 'add', text: 'const shortcut = "Escape";', oldNo: null, newNo: 1 },
+        ],
+      },
+    ],
+  },
+];
 export const multipleQuestions: QuestionBlock = {
   kind: 'question',
   id: 'ask-1',
@@ -230,6 +271,7 @@ export const scenes = [
   'question',
   'plan',
   'review',
+  'review-targeted',
   'queue',
   'worktree-queue',
   'error',

@@ -20,6 +20,7 @@ import {
   permission,
   project as initialProject,
   qualityFindings,
+  targetedReview,
   timeline as initialTimeline,
   type Scene,
 } from './fixtures';
@@ -185,7 +186,12 @@ export function installBridge(scene: Scene) {
       sessionId,
       delta: { type: 'turn.start', turn: { id: 'answer-1', role: 'assistant', blocks: content } },
     });
-    emit({ kind: 'event', type: 'session.timeline', sessionId, timeline: initialTimeline });
+    emit({
+      kind: 'event',
+      type: 'session.timeline',
+      sessionId,
+      timeline: required(reviews.get(sessionId), 'revisão inicial').timeline,
+    });
     if (['permission', 'question', 'multi-question', 'plan'].includes(scene))
       pending.add(sessionId);
     state(
@@ -289,8 +295,14 @@ export function installBridge(scene: Scene) {
         sessions.set(session.id, session);
         qualities.set(session.id, structuredClone(quality));
         reviews.set(session.id, {
-          timeline: structuredClone(initialTimeline),
-          files: [structuredClone(diff)],
+          timeline: {
+            ...structuredClone(initialTimeline),
+            ...(scene === 'review-targeted'
+              ? { pending: { files: 2, additions: 3, deletions: 3 } }
+              : {}),
+          },
+          files:
+            scene === 'review-targeted' ? structuredClone(targetedReview) : [structuredClone(diff)],
         });
         seed(session.id); // Deliberately before the response: tests the real early-event buffer.
         return { session: { ...session }, capabilities };
@@ -328,9 +340,51 @@ export function installBridge(scene: Scene) {
         return checks;
       case 'review.timeline':
         return review().timeline;
-      case 'review.diff':
+      case 'review.diff': {
+        if (scene === 'review-targeted') {
+          const scope = payload.scope as { kind: string; turnId?: string };
+          if (
+            !['review', 'session', 'turn'].includes(scope.kind) ||
+            (scope.kind === 'turn' && scope.turnId !== 'user-1')
+          )
+            throw new Error('QA: âmbito de revisão inesperado');
+          return {
+            files: scope.kind === 'review' ? review().files : structuredClone(targetedReview),
+          };
+        }
         return { files: review().files };
+      }
       case 'review.apply': {
+        if (scene === 'review-targeted') {
+          const current = review();
+          const file = current.files.find((file) => file.path === payload.path);
+          if (!file || (payload.hunkId && !file.hunks.some((h) => h.id === payload.hunkId)))
+            throw new Error('QA: alvo de revisão inesperado');
+          current.files = current.files.flatMap((entry) => {
+            if (entry.path !== payload.path) return [entry];
+            if (!payload.hunkId) return [];
+            const hunks = entry.hunks.filter((h) => h.id !== payload.hunkId);
+            return hunks.length
+              ? [{ ...entry, hunks, additions: hunks.length, deletions: hunks.length }]
+              : [];
+          });
+          current.timeline = {
+            ...current.timeline,
+            pending: {
+              files: current.files.length,
+              additions: current.files.reduce((n, file) => n + file.additions, 0),
+              deletions: current.files.reduce((n, file) => n + file.deletions, 0),
+            },
+            undo: payload.action === 'accept' ? 'Aceitar alteração' : 'Rejeitar alteração',
+          };
+          emit({
+            kind: 'event',
+            type: 'session.timeline',
+            sessionId: id,
+            timeline: current.timeline,
+          });
+          return current.timeline;
+        }
         if (payload.path && payload.path !== diff.path) throw new Error('QA: ficheiro inesperado');
         if (payload.hunkId && payload.hunkId !== 'hunk-1') throw new Error('QA: hunk inesperado');
         const current = review();

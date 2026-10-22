@@ -182,6 +182,10 @@
 .bot-pupils {
   transition: transform var(--sl-dur-fast) var(--sl-ease-out);
 }
+/* Hidden windows may freeze transition time. Inactive eyes reset immediately. */
+[data-gaze-active='false'] .bot-pupils {
+  transition: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .bot-pupils {
     transition: none;

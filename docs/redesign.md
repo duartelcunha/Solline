@@ -32,6 +32,8 @@ Revisão independente recebe este contrato, o diff e capturas da mesma versão. 
 
 Distribuição: preservar fuses, sandbox, CSP e isolamento. Recursos de QA são entradas de build separadas e não podem entrar no pacote normal. Login externo, juiz real, DPI nativo e instalação assinada precisam de evidência própria.
 
+O benchmark compara cópias compiladas com descoberta explícita e idêntica de fontes Tailwind. A baseline histórica não contém a conversa longa dentro da janela; por isso a comparação é explicitamente normalizada, aplicando apenas no harness a regra `min-height: 0` a `#root > div > main` e `#root > div > main > div > div`, em ambas as versões. A descoberta CSS inicial incompleta e o overflow subsequente ficam registados como provas negativas. Grid/flex, largura e limites do painel, scroll e fontes carregadas são condições obrigatórias antes de medir. Não interpretar execuções invalidadas como regressões ou melhorias de produto; manter os limites originais e consultar o relatório da execução válida.
+
 Na integração Electron, a configuração de teste substitui a fábrica de opções por um registo de agentes programados. Main, preload, comunicação, motor e Git continuam reais em pastas temporárias. Os testes também fixam as respostas dos diálogos nativos de seleção/confirmação para apontar às fixtures: isso não valida a experiência desses diálogos nem login externo. A nova cobertura de worktrees, revisão e corridas só se considera executada depois de existir relatório da versão correspondente.
 
 ## Ordem de execução

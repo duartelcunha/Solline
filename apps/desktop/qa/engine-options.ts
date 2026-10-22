@@ -38,6 +38,8 @@ const create: AgentAdapterFactory = (options, sink) => {
       if (!id) throw new Error('QA: engine must assign the user turn id');
       sink.delta(userTurnDelta(id, text));
       sink.state('running');
+      // Native-window lifecycle test needs an active turn until the user interrupts.
+      if (text === 'QA: trabalho contínuo') return id;
       if (text === 'QA: falha numa pista' && settings.model === 'opus') {
         sink.state('error', 'QA: falha determinística do agente opus');
         return id;
