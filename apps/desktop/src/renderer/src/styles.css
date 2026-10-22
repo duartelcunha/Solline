@@ -245,16 +245,20 @@ body {
   .session-header {
     flex-wrap: wrap;
     gap: 0;
-    padding-right: 12px;
+    padding-right: 192px;
     padding-bottom: 6px;
   }
   .session-header > :first-child {
     min-height: 44px;
-    width: calc(100% - 144px);
-    margin-right: 144px;
+    flex-basis: 100%;
+    width: 100%;
+    margin-right: 0;
   }
   .session-header > :nth-child(2) {
     margin-left: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+    row-gap: 4px;
   }
   .composer > div {
     gap: 6px;
