@@ -9,23 +9,13 @@ import {
   type EngineCommandResult,
   type RequestEnvelope,
 } from '@solline/protocol';
+import { engineTimeout } from './engine-timeouts.ts';
 
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 }
-
-const DEFAULT_TIMEOUT_MS = 20_000;
-const TIMEOUT_MS: Partial<Record<EngineCommandName, number>> = {
-  'engine.ping': 5_000,
-  // O Codex arranca um app-server para dizer se tem sessão iniciada ou para começar o login.
-  'agents.list': 45_000,
-  // Acima do pior caso do motor (initialize + account/login/start, 30 s cada).
-  'agents.loginStart': 75_000,
-  'session.start': 120_000,
-  'session.resume': 120_000,
-};
 
 /**
  * Arranca o motor num utilityProcess e fala com ele por uma MessagePort.
@@ -98,7 +88,7 @@ export class EngineHost {
     const input = schema.payload.parse(payload);
     const id = randomUUID();
     const envelope: RequestEnvelope = { kind: 'request', id, command, payload: input };
-    const timeout = TIMEOUT_MS[command] ?? DEFAULT_TIMEOUT_MS;
+    const timeout = engineTimeout(command);
     const raw = await new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);

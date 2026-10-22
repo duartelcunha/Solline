@@ -885,7 +885,22 @@ for (const choice of ['bring', 'discard'] as const) {
     await expect(page.getByTestId('user-turn')).toHaveCount(1);
     await closeWorktree(page);
     await page.getByTestId(`close-${choice}`).click();
-    await expect(page.getByTestId('session-row')).toHaveCount(1);
+    try {
+      await expect(page.getByTestId('session-row')).toHaveCount(1);
+    } catch (error) {
+      await test.info().attach('close-diagnostic', {
+        body: JSON.stringify(
+          {
+            snapshot: await page.evaluate(() => window.solline.request('engine.snapshot', {})),
+            ui: await page.locator('body').innerText(),
+          },
+          null,
+          2,
+        ),
+        contentType: 'application/json',
+      });
+      throw error;
+    }
     await expect.poll(() => existsSync(path)).toBe(false);
     expect(branchesForWorktree(qa, path)).toEqual([]);
     expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe(
