@@ -14,6 +14,12 @@ import {
 } from '@playwright/test';
 import { removeRecoveryKey } from '../../src/main/recovery-key';
 import { answerConfirmation, chooseDirectory, observePrompts } from './custom-prompts';
+import {
+  OwnedProcessTree,
+  ProcessCaptureError,
+  cleanupOwnedFixture,
+  stopOwnedProcesses,
+} from './owned-process';
 
 type Fixture = {
   app: () => ElectronApplication;
@@ -24,6 +30,7 @@ type Fixture = {
   shot: (page: Page, name: string) => Promise<void>;
   nativeShot: (name: string) => Promise<void>;
   saveTrace: () => Promise<void>;
+  forceExit: () => Promise<void>;
 };
 const test = base.extend<{ qa: Fixture }>({
   qa: async ({ browserName }, use, info) => {
@@ -47,11 +54,12 @@ const test = base.extend<{ qa: Fixture }>({
     git('add', '.');
     git('commit', '-qm', 'Recovery fixture');
     const applications: ElectronApplication[] = [];
-    const nativePids = new Map<ElectronApplication, number>();
+    const owners = new Map<ElectronApplication, OwnedProcessTree>();
     const prompts: ReturnType<typeof observePrompts>[] = [];
     const errors: string[] = [];
     const logs: { stream: string; text: string }[] = [];
     let app: ElectronApplication;
+    let captureFailure: unknown;
     let generation = 0;
     const traced = new Set<ElectronApplication>();
     const observed = new WeakSet<Page>();
@@ -65,6 +73,7 @@ const test = base.extend<{ qa: Fixture }>({
     };
     const saveTrace = async (application = app) => {
       if (traced.has(application)) return;
+      await owners.get(application)?.refresh();
       const trace = info.outputPath(`recovery-${generation++}.zip`);
       await application.context().tracing.stop({ path: trace });
       traced.add(application);
@@ -86,7 +95,38 @@ const test = base.extend<{ qa: Fixture }>({
         } as Record<string, string>,
       });
       applications.push(app);
-      nativePids.set(app, await app.evaluate(() => process.pid));
+      const launched = app;
+      const nativePid = await launched.evaluate(() => process.pid);
+      try {
+        owners.set(
+          launched,
+          await OwnedProcessTree.create(nativePid, async () => {
+            if ((await launched.evaluate(() => process.pid)) !== nativePid)
+              throw new Error('Original Electron process identity changed during capture');
+          }),
+        );
+      } catch (error) {
+        captureFailure = error;
+        await info
+          .attach('process-capture-failure', {
+            body: JSON.stringify({
+              root,
+              project,
+              nativePid,
+              error: String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+              capture: error instanceof ProcessCaptureError ? error.capture : undefined,
+            }),
+            contentType: 'application/json',
+          })
+          .catch((attachmentError) => {
+            throw new AggregateError(
+              [error, attachmentError],
+              'Capture and evidence recording failed',
+            );
+          });
+        throw error;
+      }
       prompts.push(
         observePrompts(app, {
           directory: project,
@@ -176,7 +216,26 @@ const test = base.extend<{ qa: Fixture }>({
       const page = await launch();
       await page.getByTestId('add-project').click();
       await expect(page.getByTestId('project-trust')).toHaveAttribute('aria-pressed', 'true');
-      await use({ app: () => app, page, project, launch, recovery, shot, nativeShot, saveTrace });
+      await use({
+        app: () => app,
+        page,
+        project,
+        launch,
+        recovery,
+        shot,
+        nativeShot,
+        saveTrace,
+        forceExit: () =>
+          stopOwnedProcesses(
+            [required(owners.get(app), 'owned native process')],
+            async (report) => {
+              await info.attach('deliberate-abrupt-process-exit', {
+                body: JSON.stringify(report),
+                contentType: 'application/json',
+              });
+            },
+          ),
+      });
       for (const prompt of prompts) {
         await prompt.settle();
         expect(prompt.failures).toEqual([]);
@@ -207,38 +266,35 @@ const test = base.extend<{ qa: Fixture }>({
           });
         }
       } finally {
-        try {
-          for (const application of applications) {
-            const pid = nativePids.get(application);
-            if (!pid || !alive(pid)) continue;
-            // Failure cleanup only: this PID belongs to the exact application launched above.
-            // A hung renderer/custom close dialog must never leak its utility/provider tree.
-            execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
-              windowsHide: true,
-              stdio: 'pipe',
+        await cleanupOwnedFixture(
+          async () => {
+            if (owners.size !== applications.length)
+              throw new AggregateError(
+                captureFailure ? [captureFailure] : [],
+                'Unverified application identity; preserve fixture',
+              );
+            await stopOwnedProcesses([...owners.values()], async (report) => {
+              await info.attach('owned-process-cleanup', {
+                body: JSON.stringify(report),
+                contentType: 'application/json',
+              });
             });
-            await expect.poll(() => alive(pid), { timeout: 10_000 }).toBe(false);
-          }
-        } finally {
-          try {
-            await removeRecoveryKey(join(root, 'data'));
-          } finally {
-            await rm(root, { recursive: true, force: true, maxRetries: 3 });
-          }
-        }
+          },
+          () => removeRecoveryKey(join(root, 'data')),
+          () => removeRecoveryFiles(root),
+        );
       }
     }
   },
 });
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
+async function removeRecoveryFiles(root: string): Promise<void> {
+  if (
+    dirname(root) !== resolve(tmpdir()) ||
+    !/^solline-(recovery|native-hang)-qa-/.test(basename(root))
+  )
+    throw new Error('Unsafe QA fixture cleanup');
+  await rm(root, { recursive: true, force: true, maxRetries: 3 });
 }
 
 function required<T>(value: T | null | undefined, label: string): T {
@@ -394,6 +450,7 @@ base(
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
+    let owner: OwnedProcessTree | undefined;
     let browser: Browser | undefined;
     const output: string[] = [];
     let endpoint = '';
@@ -445,6 +502,11 @@ base(
       return context;
     };
     try {
+      const nativePid = required(child.pid, 'native child PID');
+      owner = await OwnedProcessTree.create(nativePid, () => {
+        if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
+          throw new Error('Original native child exited during capture');
+      });
       await expect.poll(() => endpoint).not.toBe('');
       await expect.poll(() => inspectorEndpoint).not.toBe('');
       inspector = new WebSocket(inspectorEndpoint);
@@ -612,6 +674,7 @@ base(
       expect(errors).toEqual([]);
     } finally {
       try {
+        await owner?.refresh();
         if (browser?.isConnected()) {
           const session = await browser.newBrowserCDPSession();
           await info.attach('native-target-inventory', {
@@ -629,24 +692,25 @@ base(
           body: output.join(''),
           contentType: 'text/plain',
         });
-        await browser?.close();
-        inspector?.close();
       } finally {
         try {
-          const pid = child.pid;
-          if (pid && alive(pid)) {
-            execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
-              windowsHide: true,
-              stdio: 'pipe',
-            });
-            await expect.poll(() => alive(pid)).toBe(false);
+          try {
+            await browser?.close();
+          } finally {
+            inspector?.close();
           }
         } finally {
-          try {
-            await removeRecoveryKey(join(root, 'data'));
-          } finally {
-            await rm(root, { recursive: true, force: true, maxRetries: 3 });
-          }
+          await cleanupOwnedFixture(
+            () =>
+              stopOwnedProcesses([required(owner, 'owned native process')], async (report) => {
+                await info.attach('owned-process-cleanup', {
+                  body: JSON.stringify(report),
+                  contentType: 'application/json',
+                });
+              }),
+            () => removeRecoveryKey(join(root, 'data')),
+            () => removeRecoveryFiles(root),
+          );
         }
       }
     }
@@ -751,13 +815,9 @@ test('abrupt whole-process loss restores acknowledged draft and paused work with
     'Fila confirmada antes da falha',
   ]);
   await qa.saveTrace();
-  const pid = await qa.app().evaluate(() => process.pid);
-  // Deliberately bypass every close handler: exercise the acknowledged append journal.
-  execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
-    windowsHide: true,
-    stdio: 'pipe',
-  });
-  await expect.poll(() => alive(pid)).toBe(false);
+  // Deliberately bypass every close handler: force-terminate the captured native
+  // application tree, then prove all identities exited before launching recovery.
+  await qa.forceExit();
   const page = await qa.launch();
   await expect(page.getByTestId('composer-input')).toHaveValue(
     'Rascunho confirmado sem fecho normal',

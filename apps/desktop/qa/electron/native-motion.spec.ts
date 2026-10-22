@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,43 +6,32 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
 import { removeRecoveryKey } from '../../src/main/recovery-key';
 import { answerConfirmation, chooseDirectory } from './custom-prompts';
+import {
+  OwnedProcessTree,
+  cleanupOwnedFixture,
+  stopOwnedProcesses,
+  type CleanupReport,
+} from './owned-process';
 
 function required<T>(value: T | null | undefined, label: string): T {
   if (value === undefined || value === null) throw new Error(`Missing ${label}`);
   return value;
 }
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
-}
-
-async function removeOwnedFixture(child: ChildProcess, root: string) {
+async function removeOwnedFixture(
+  owner: OwnedProcessTree | undefined,
+  root: string,
+  record: (report: CleanupReport) => Promise<void>,
+) {
   if (
     dirname(root) !== resolve(tmpdir()) ||
     !basename(root).startsWith('solline-native-motion-qa-')
-  ) {
+  )
     throw new Error('Unsafe fixture cleanup');
-  }
-  const pid = child.pid;
-  // Direct child handle guards PID reuse; all fixture descendants belong to it.
-  if (pid && child.exitCode === null && child.signalCode === null && alive(pid)) {
-    execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
-      windowsHide: true,
-      stdio: 'pipe',
-    });
-    await expect.poll(() => alive(pid)).toBe(false);
-  }
-  if (pid && alive(pid) && child.exitCode === null && child.signalCode === null) {
-    throw new Error('Owned native process remains alive; preserve key/files');
-  }
-  // Preserve the directory if credential cleanup fails; do not hide that failure.
-  await removeRecoveryKey(join(root, 'data'));
-  await rm(root, { recursive: true, force: true, maxRetries: 3 });
+  await cleanupOwnedFixture(
+    () => stopOwnedProcesses([required(owner, 'owned native process')], record),
+    () => removeRecoveryKey(join(root, 'data')),
+    () => rm(root, { recursive: true, force: true, maxRetries: 3 }),
+  );
 }
 
 test('janela nativa oculta cancela animações e recupera o olhar ao voltar', async ({
@@ -91,6 +80,7 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
+  let owner: OwnedProcessTree | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
   let inspector: WebSocket | undefined;
@@ -146,6 +136,11 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
     return { visible: win.isVisible(), focused: win.isFocused() };
   })()`);
   try {
+    const nativePid = required(child.pid, 'native child PID');
+    owner = await OwnedProcessTree.create(nativePid, () => {
+      if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
+        throw new Error('Original native child exited during capture');
+    });
     await expect.poll(() => endpoint).not.toBe('');
     await expect.poll(() => inspectorEndpoint).not.toBe('');
     inspector = new WebSocket(inspectorEndpoint);
@@ -311,16 +306,25 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
     expect(errors).toEqual([]);
   } finally {
     try {
+      await owner?.refresh();
       await info.attach('native-launch-output', {
         body: output.join(''),
         contentType: 'text/plain',
       });
     } finally {
       try {
-        await browser?.close();
-        inspector?.close();
+        try {
+          await browser?.close();
+        } finally {
+          inspector?.close();
+        }
       } finally {
-        await removeOwnedFixture(child, root);
+        await removeOwnedFixture(owner, root, async (report) => {
+          await info.attach('owned-process-cleanup', {
+            body: JSON.stringify(report),
+            contentType: 'application/json',
+          });
+        });
       }
     }
   }
