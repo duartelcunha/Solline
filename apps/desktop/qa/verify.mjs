@@ -104,6 +104,7 @@ try {
     );
   }
   await run('unit-desktop', ['../../node_modules/vitest/vitest.mjs', 'run', '--maxWorkers=1']);
+  await run('unit-qa', ['--experimental-strip-types', '--test', 'qa/electron/owned-process.node-test.ts']);
   await run(
     'lint',
     [

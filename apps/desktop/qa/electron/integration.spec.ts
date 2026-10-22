@@ -983,7 +983,7 @@ test('morte real do utility process preserva conversa e bloqueia envio', async (
 });
 
 for (const failure of ['crash', 'interrupt'] as const) {
-  test(`corrida: pista ${failure} não impede a outra de terminar`, async ({ qa }) => {
+  test(`corrida: pista ${failure} não impede a outra de terminar`, async ({ qa }, info) => {
     const { page, project, git } = qa;
     await newSession(page);
     await page.getByTestId('pill-race').click();
@@ -1007,8 +1007,34 @@ for (const failure of ['crash', 'interrupt'] as const) {
     await page.getByTestId('open-desk').click();
     await page.getByTestId('race-card').click();
     await expect(page.getByTestId('race-allow')).toBeVisible();
-    await page.getByTestId('race-allow').click();
-    await expect(page.getByTestId('race-phase')).toHaveAttribute('data-phase', 'ranked');
+    const started = performance.now();
+    const stages: { stage: string; elapsedMs: number }[] = [];
+    const recordStage = (stage: string) =>
+      stages.push({ stage, elapsedMs: performance.now() - started });
+    recordStage('permission-click-start');
+    try {
+      await page.getByTestId('race-allow').click();
+      recordStage('permission-click-returned');
+      // Adapter completion and ranking are separate public stages. Idle does not
+      // imply that the asynchronous checkpoint is complete. Keep each stage's
+      // existing assertion deadline and retain the post-ranking/file oracles.
+      await expect(page.getByTestId('race-lane').filter({ hasText: 'sonnet' })).toHaveAttribute(
+        'data-state',
+        'idle',
+      );
+      recordStage('sonnet-idle-observed');
+      await expect(page.getByTestId('race-phase')).toHaveAttribute('data-phase', 'ranked');
+      recordStage('race-ranked-observed');
+    } finally {
+      await info.attach('race-stage-timings', {
+        body: JSON.stringify({
+          failure,
+          scope: 'Observed functional stage durations, not an isolated performance benchmark. Separate deadlines increase the possible composite budget.',
+          stages,
+        }),
+        contentType: 'application/json',
+      });
+    }
     await expect(page.getByTestId('race-lane').filter({ hasText: 'sonnet' })).toHaveAttribute(
       'data-state',
       'idle',
