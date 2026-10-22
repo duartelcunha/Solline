@@ -16,7 +16,7 @@ interface Item {
 }
 
 export class SessionTurns {
-  readonly #start: (text: string) => Promise<string>;
+  readonly #start: (text: string, turnId?: string) => Promise<string>;
   readonly #steer: ((text: string, id: string) => Promise<'joined' | 'too-late'>) | undefined;
   readonly #running: () => boolean;
   readonly #emit: (queue: SessionQueue) => void;
@@ -29,7 +29,7 @@ export class SessionTurns {
 
   constructor(options: {
     /** Abre um turno com esta mensagem (checkpoint, ponto de rebobinar, envio ao agente). */
-    start: (text: string) => Promise<string>;
+    start: (text: string, turnId?: string) => Promise<string>;
     steer?: ((text: string, id: string) => Promise<'joined' | 'too-late'>) | undefined;
     /** O agente está a meio de um turno (a trabalhar ou à espera de ti). */
     running: () => boolean;
@@ -64,9 +64,9 @@ export class SessionTurns {
    * Manda uma mensagem. Parado e sem fila, segue logo. Ocupado: 'now' guia o turno se o agente
    * aceitar; senão (ou se já for tarde) vai para o fim da fila. Nunca se perde.
    */
-  async submit(text: string, how: How = 'queue'): Promise<Submitted> {
+  async submit(text: string, how: How = 'queue', submissionId?: string): Promise<Submitted> {
     if (!this.busy && !this.#held && this.#items.length === 0) {
-      return { turnId: await this.#exclusiveStart(text), how: 'sent' };
+      return { turnId: await this.#exclusiveStart(text, false, submissionId), how: 'sent' };
     }
     if (how === 'now' && this.#steer && this.#running()) {
       const id = crypto.randomUUID();
@@ -77,7 +77,7 @@ export class SessionTurns {
       this.#drainIfIdle();
       return { turnId: id, how: 'queued' };
     }
-    const id = crypto.randomUUID();
+    const id = submissionId ?? crypto.randomUUID();
     this.#items.push({ id, text });
     this.#changed();
     this.#drainIfIdle();
@@ -112,7 +112,7 @@ export class SessionTurns {
     if (!next) return false;
     // #start persists the turn intent synchronously before its first await. Keep the queue
     // item until that point so a crash cannot erase it between dequeue and dispatch.
-    const started = this.#exclusiveStart(next.text, true);
+    const started = this.#exclusiveStart(next.text, true, next.id);
     this.#items.shift();
     this.#changed();
     void started.catch((error: unknown) => {
@@ -182,12 +182,12 @@ export class SessionTurns {
     this.#changed();
   }
 
-  async #exclusiveStart(text: string, fromQueue = false): Promise<string> {
+  async #exclusiveStart(text: string, fromQueue = false, turnId?: string): Promise<string> {
     this.#busy = true;
     try {
-      const turnId = await this.#start(text);
+      const startedId = await this.#start(text, turnId);
       this.#busy = false;
-      return turnId;
+      return startedId;
     } catch (error) {
       this.#busy = false;
       if (fromQueue) this.#paused = true;

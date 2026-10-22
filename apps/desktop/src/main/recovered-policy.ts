@@ -34,6 +34,8 @@ export async function reconcilePolicy(
   payload: unknown,
 ): Promise<void> {
   const input = commandSchemas[command].payload.parse(payload ?? {});
+  // These commands resolve their project/task scope in the engine after a main-owned sync.
+  if (command.startsWith('spaces.')) return;
   if (INSPECTION.has(command) || GLOBAL.has(command)) return;
 
   const projectIds = new Set<string>();

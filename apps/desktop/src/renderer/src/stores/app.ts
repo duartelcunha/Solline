@@ -29,6 +29,7 @@ import {
   type SessionStore,
 } from './session.ts';
 import { morphUpdate, morphs } from '../lib/morph.ts';
+import { receiveSpaces, useSpaces } from './spaces.ts';
 
 /**
  * Estado da app: projetos, a lista de sessões e qual está aberta. Cada sessão tem o
@@ -74,7 +75,8 @@ interface AppState {
     worktree?: 'bring' | 'keep' | 'discard';
   } | null;
   /** A vista principal: a mesa com todas as sessões, ou a conversa da sessão ativa. */
-  view: 'desk' | 'session' | 'race';
+  view: 'desk' | 'session' | 'race' | 'spaces';
+  spaceProjectId: string | null;
   /** Worktrees que ficaram no disco sem sessão (por trazer). */
   orphans: Orphan[];
   /** As corridas abertas, por id. */
@@ -103,6 +105,7 @@ export const useApp = create<AppState>(() => ({
   loginRequests: [],
   closing: null,
   view: 'desk',
+  spaceProjectId: null,
   orphans: [],
   races: {},
   activeRaceId: null,
@@ -136,6 +139,7 @@ export async function flushDrafts(): Promise<void> {
 }
 
 export function restoreSnapshot(snapshot: EngineSnapshot, ui: UiRecoveryState): void {
+  if (snapshot.spaces) useSpaces.setState({ data: snapshot.spaces });
   if (snapshot.durability.status === 'failed')
     throw new Error(snapshot.durability.error ?? 'O estado não está guardado');
   for (const unsubscribe of draftSubscriptions.values()) unsubscribe();
@@ -353,6 +357,10 @@ function adoptStore(id: string, store: SessionStore): void {
 
 /** Todos os eventos do motor entram por aqui. */
 export function dispatch(event: EngineEvent): void {
+  if (event.type === 'spaces.changed') {
+    receiveSpaces(event.spaces);
+    return;
+  }
   if (event.type === 'race.state') {
     useApp.setState((s) => ({ races: { ...s.races, [event.race.id]: event.race } }));
     return;
@@ -418,6 +426,25 @@ function defaultAgent(): AgentId {
 }
 
 export const actions = {
+  openSpace(projectId: string | null): void {
+    useApp.setState({ view: 'spaces', spaceProjectId: projectId, activeProjectId: projectId });
+  },
+  async refreshTaskSessions(): Promise<void> {
+    const snapshot = await request('engine.snapshot', {});
+    for (const item of snapshot.sessions) {
+      if (!sessionStores.has(item.session.id)) {
+        adoptStore(
+          item.session.id,
+          createSessionStore(item.session, item.session.projectId, item.capabilities),
+        );
+      }
+    }
+    useApp.setState((s) => ({
+      sessionIds: [
+        ...new Set([...s.sessionIds, ...snapshot.sessions.map((item) => item.session.id)]),
+      ],
+    }));
+  },
   async loadAgents(refresh = false): Promise<void> {
     try {
       const [{ agents }, { servers }] = await Promise.all([

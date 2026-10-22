@@ -15,6 +15,7 @@ import { Race, RaceStartPayload } from './race.ts';
 import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
+import { DelegateTask, spacesCommandSchemas } from './spaces.ts';
 
 /**
  * Contrato dos comandos da Ponte: interface -> main -> motor.
@@ -96,6 +97,7 @@ export const SessionCreateResult = z.object({
 });
 
 export const commandSchemas = {
+  ...spacesCommandSchemas,
   'engine.snapshot': { payload: Empty, result: EngineSnapshot },
   'engine.flush': { payload: Empty, result: Empty },
   'engine.shutdown': { payload: Empty, result: Empty },
@@ -263,6 +265,7 @@ export const commandSchemas = {
  * pela pasta e só depois chamar o motor com session.start.
  */
 export const MAIN_COMMANDS = [
+  'spaces.delegate',
   'agents.login',
   'agents.setKeys',
   'projects.list',
@@ -293,6 +296,14 @@ export const CommandNameSchema = z.enum(commandNames as [CommandName, ...Command
  * pedido da interface os consegue nomear.
  */
 export const internalCommandSchemas = {
+  'spaces.dispatch': {
+    payload: DelegateTask.extend({ start: SessionStartPayload.optional() }).strict(),
+    result: spacesCommandSchemas['spaces.delegate'].result,
+  },
+  'spaces.syncProjects': {
+    payload: z.object({ projects: z.array(Project), generalCwd: z.string().min(1) }).strict(),
+    result: z.object({}).strict(),
+  },
   'session.start': { payload: SessionStartPayload, result: SessionCreateResult },
   /** Arranca o login de um agente e devolve o endereço que o main vai abrir no browser. */
   'agents.loginStart': {

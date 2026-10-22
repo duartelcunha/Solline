@@ -31,8 +31,12 @@ import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
 import { ENGINE_VERSION } from './version.ts';
+import { SpaceManager } from './spaces/manager.ts';
+import { SpaceAnalysis, type AnalysisRunner } from './spaces/analysis.ts';
+import { claudeAnalysis } from './spaces/claude-analysis.ts';
 
 export interface EngineOptions {
+  spaceAnalyzer?: AnalysisRunner;
   /** Main supplies this in memory over MessagePort; never environment, argv or plaintext disk. */
   recoveryKey?: Uint8Array | undefined;
   claudeExecutable?: string | undefined;
@@ -70,6 +74,8 @@ type Handlers = {
 
 /** O motor recebe envelopes de pedido e devolve envelopes de resposta. Não sabe do Electron. */
 export class Engine {
+  readonly spaces: SpaceManager;
+  readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
   readonly races: RaceManager;
   readonly logins: LoginManager;
@@ -142,10 +148,12 @@ export class Engine {
       } catch (error) {
         this.#persistenceError = error instanceof Error ? error : new Error(String(error));
         emit({ kind: 'event', type: 'engine.error', message: this.#persistenceError.message });
+        if (event.type === 'spaces.changed') throw this.#persistenceError;
         return;
       }
       emit(sequenced);
       box.races?.observe(event);
+      this.spaces?.observe(event);
     };
     this.sessions = new SessionManager({
       beforeEffect: (command, sessionId, text) =>
@@ -186,10 +194,65 @@ export class Engine {
         : { judge: claudeJudge({ claudeExecutable: options.claudeExecutable }) }),
     });
     box.races = this.races;
+    this.spaces = new SpaceManager({
+      save: (spaces) => emitAll({ kind: 'event', type: 'spaces.changed', spaces }),
+      create: async (start) => (await this.sessions.create(start)).session.id,
+      send: (id, text, turnId) => this.sessions.send(id, text, 'queue', turnId),
+      projectOf: (id) =>
+        this.sessions.recovery().find((s) => s.view.session.id === id)?.view.session.projectId,
+      view: (id) => this.sessions.recovery().find((s) => s.view.session.id === id)?.view,
+      pending: (id, turnId) =>
+        this.sessions
+          .recovery()
+          .some(
+            (s) =>
+              s.view.session.id === id && s.view.queue.items.some((item) => item.id === turnId),
+          ),
+    });
+    this.analysis = new SpaceAnalysis({
+      manager: this.spaces,
+      idle: () =>
+        this.sessions
+          .recovery()
+          .every((s) => s.view.session.state === 'idle' && !s.view.queue.items.length),
+      history: () => {
+        const tasks = this.spaces.snapshot().tasks.map((t) => ({
+          id: `task:${t.id}`,
+          projectId: t.projectId,
+          text: `${t.title}\n${t.description}\nEstado: ${t.status}`,
+        }));
+        const turns = this.sessions.recovery().flatMap((s) =>
+          s.view.turns
+            .filter((t) => t.role === 'user')
+            .slice(-10)
+            .map((t) => ({
+              id: `chat:${s.view.session.id}:${t.id}`,
+              projectId:
+                s.view.session.projectId === '__general__' ? null : s.view.session.projectId,
+              text: t.blocks
+                .filter((b) => b.kind === 'text')
+                .map((b) => (b.kind === 'text' ? b.text : ''))
+                .join('\n'),
+            })),
+        );
+        return [...tasks.slice(0, 50), ...turns.slice(-50)];
+      },
+      run: async (input) => {
+        const detected = await registry.get(input.agent)?.detect({ refresh: true });
+        if (detected?.status !== 'ready')
+          throw new Error(
+            'O agente de análise precisa de atenção: verifica o login e a disponibilidade.',
+          );
+        if (options.isolated && !options.spaceAnalyzer)
+          throw new Error('A análise real está desligada neste ambiente de teste.');
+        return (options.spaceAnalyzer ?? claudeAnalysis(options.claudeExecutable))(input);
+      },
+    });
     const restored = replay(this.#journal?.records ?? [], this.#state());
     if (this.#journal) this.#journal.records.length = 0;
     this.sessions.restoreRecovery(restored.sessions, restored.setups);
     this.races.restoreRecovery(restored.snapshot.races);
+    this.spaces.restore(restored.snapshot.spaces);
     for (const operation of restored.snapshot.operations)
       this.#operations.set(operation.id, operation);
     for (const saved of restored.sessions) this.#recordedSessions.add(saved.view.session.id);
@@ -222,6 +285,25 @@ export class Engine {
     const s = this.sessions;
     const ok = {} as Record<string, never>;
     this.#handlers = {
+      'spaces.syncProjects': async (p) => {
+        const before = JSON.stringify(this.spaces.projects());
+        this.spaces.syncProjects(p.projects, p.generalCwd);
+        if (before !== JSON.stringify(this.spaces.projects())) this.analysis.cancel();
+        return {};
+      },
+      'spaces.snapshot': async () => this.spaces.snapshot(),
+      'spaces.taskCreate': async (p) => this.spaces.createTask(p),
+      'spaces.taskUpdate': async (p) => this.spaces.updateTask(p),
+      'spaces.dispatch': (p) => this.spaces.delegate(p, p.start),
+      'spaces.configure': async (p) => {
+        this.analysis.cancel();
+        return this.spaces.configure(p);
+      },
+      'spaces.memorySave': async (p) => this.spaces.saveMemory(p),
+      'spaces.memoryDelete': async (p) => this.spaces.deleteMemory(p.id),
+      'spaces.insightDecision': async (p) => this.spaces.decideInsight(p.id, p.decision),
+      'spaces.analyze': () => this.analysis.analyze(false),
+      'spaces.tick': () => this.analysis.analyze(true),
       'engine.snapshot': async () => this.#state().snapshot,
       'engine.flush': async () => {
         await this.flush();
@@ -289,7 +371,11 @@ export class Engine {
       'projects.checksChanged': async (p) => (await s.setProjectChecks(p.projectId, p.checks), ok),
       'session.resume': (p) => s.resume(p.sessionId),
       'session.send': (p) => s.send(p.sessionId, p.text, p.how),
-      'session.unqueue': async (p) => ({ removed: s.unqueue(p.sessionId, p.id) }),
+      'session.unqueue': async (p) => {
+        const removed = s.unqueue(p.sessionId, p.id);
+        if (removed) this.spaces.removeQueued(p.sessionId, p.id);
+        return { removed };
+      },
       'session.reorder': async (p) => (s.reorder(p.sessionId, p.ids), ok),
       'session.resumeQueue': async (p) => (s.resumeQueue(p.sessionId), ok),
       'session.bring': (p) => s.bring(p.sessionId),
@@ -298,7 +384,12 @@ export class Engine {
       'worktrees.list': async () => ({ orphans: await s.orphans() }),
       'worktrees.bring': (p) => s.bringOrphan(p.id),
       'worktrees.discardNow': async (p) => (await s.discardOrphan(p.id), ok),
-      'session.closeNow': (p) => s.close(p.sessionId, p.worktree, p.dropQueue),
+      'session.closeNow': async (p) => {
+        this.spaces.capture(p.sessionId);
+        const result = await s.close(p.sessionId, p.worktree, p.dropQueue);
+        if (result.closed) this.spaces.sessionClosed(p.sessionId);
+        return result;
+      },
       'session.interrupt': async (p) => (await s.interrupt(p.sessionId), ok),
       'session.setMode': async (p) => (await s.setMode(p.sessionId, p.mode), ok),
       'session.setModel': async (p) => (await s.setModel(p.sessionId, p.model), ok),
@@ -438,6 +529,7 @@ export class Engine {
       lifecycle: this.#disposed ? 'stopped' : this.#stopping ? 'stopping' : 'running',
       sessions: sessions.map((saved) => saved.view),
       races: this.races?.recovery() ?? [],
+      ...(this.spaces ? { spaces: this.spaces.snapshot() } : {}),
       operations: [...this.#operations.values()],
       durability:
         this.#persistenceError || this.#journal?.error
@@ -460,6 +552,7 @@ export class Engine {
   async shutdown(): Promise<void> {
     if (this.#disposed) return;
     this.#stopping = true;
+    await this.analysis.stop();
     this.races.stopForRecovery();
     await this.logins.cancelAll();
     await this.sessions.stopForRecovery();
@@ -478,6 +571,8 @@ export class Engine {
 }
 
 const READ_ONLY = new Set<EngineCommandName>([
+  'spaces.snapshot',
+  'spaces.syncProjects',
   'engine.ping',
   'engine.snapshot',
   'agents.list',

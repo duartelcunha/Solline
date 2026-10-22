@@ -11,3 +11,4 @@ export * from './bridge.ts';
 export * from './reducer.ts';
 export * from './recovery.ts';
 export * from './navigation.ts';
+export * from './spaces.ts';
