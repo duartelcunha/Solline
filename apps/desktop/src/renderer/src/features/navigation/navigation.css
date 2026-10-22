@@ -121,11 +121,14 @@
   color: var(--sl-text-muted);
 }
 .navigation-settings-dialog {
-  padding: 24px;
+  padding: 20px;
   max-width: 520px;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-height: calc(100vh - 40px);
 }
 .navigation-startup {
-  margin-top: 24px;
+  margin-top: 16px;
 }
 .navigation-startup legend {
   font-size: 13px;
@@ -136,7 +139,7 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px 0;
+  padding: 8px 0;
   cursor: pointer;
 }
 .navigation-choice input {

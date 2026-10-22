@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -75,4 +75,22 @@ test('invalid preferences are preserved and unsafe payloads are rejected', async
     NavigationUpdate.safeParse({ lastTarget: { view: 'session', sessionId: 's', command: 'run' } })
       .success,
   ).toBe(false);
+});
+
+test('failed atomic write preserves the previous destination and permits retry', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'solline-navigation-'));
+  roots.push(root);
+  const file = join(root, 'navigation.json');
+  const store = new NavigationPreferencesStore(file);
+  await store.update({ lastTarget: { view: 'desk' } });
+  await mkdir(file + '.next');
+  await expect(store.update({ lastTarget: { view: 'session', sessionId: 's' } })).rejects.toThrow();
+  expect((await store.read()).lastTarget).toEqual({ view: 'desk' });
+  expect((await new NavigationPreferencesStore(file).read()).lastTarget).toEqual({ view: 'desk' });
+  await rm(file + '.next', { recursive: true });
+  await store.update({ lastTarget: { view: 'session', sessionId: 's' } });
+  expect((await new NavigationPreferencesStore(file).read()).lastTarget).toEqual({
+    view: 'session',
+    sessionId: 's',
+  });
 });

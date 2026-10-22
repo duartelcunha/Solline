@@ -167,7 +167,9 @@ test('a janela abre com o nome certo e o motor responde ao ping', async () => {
   await expect(page).toHaveTitle('Solline');
   await expect(page.getByTestId('ping-reply')).toContainText('Motor ligado', { timeout: 15_000 });
   await expect(page.getByTestId('ping-reply')).toContainText(/\d+ ms · v/);
-  // Sem projetos, o familiar recebe-te ao portátil.
+  // A primeira abertura começa nas tarefas do Geral, sem iniciar agentes.
+  await expect(page.getByRole('heading', { name: 'Geral', exact: true })).toBeVisible();
+  await page.getByTestId('open-desk').click();
   await expect(page.getByTestId('familiar')).toBeVisible();
 });
 
@@ -191,7 +193,7 @@ test('a interface não tem acesso ao Node', async () => {
   expect(surface).toEqual({
     require: 'undefined',
     process: 'undefined',
-    api: ['onEvent', 'onFocusSession', 'recovery', 'request', 'window'],
+    api: ['navigation', 'onEvent', 'onFocusSession', 'recovery', 'request', 'window'],
   });
 });
 

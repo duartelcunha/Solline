@@ -55,9 +55,7 @@ export function resolveStartupTarget(
     if (
       target.taskId &&
       !available.tasks.some(
-        (task) =>
-          task.id === target.taskId &&
-          (target.projectId === null || task.projectId === target.projectId),
+        (task) => task.id === target.taskId && task.projectId === target.projectId,
       )
     ) {
       return { view: 'spaces', projectId: target.projectId };

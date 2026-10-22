@@ -852,7 +852,13 @@ export function installBridge(scene: Scene) {
     navigation: {
       read: async () => {
         const saved = localStorage.getItem('solline-qa-navigation');
-        return saved ? NavigationPreferences.parse(JSON.parse(saved)) : defaultNavigation();
+        // The welcome fixture explicitly exercises the empty Desk, independently of startup defaults.
+        return saved
+          ? NavigationPreferences.parse(JSON.parse(saved))
+          : {
+              ...defaultNavigation(),
+              ...(scene === 'welcome' ? { startupView: 'desk' as const } : {}),
+            };
       },
       update: async (patch) => {
         const state = NavigationPreferences.parse({

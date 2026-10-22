@@ -121,9 +121,11 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
 export function Sidebar({
   sessionsByProject,
   footer,
+  search,
 }: {
   sessionsByProject: Map<string, string[]>;
   footer: React.ReactNode;
+  search?: React.ReactNode;
 }) {
   const projects = useApp((s) => s.projects);
   return (
@@ -137,6 +139,7 @@ export function Sidebar({
       </div>
 
       <div className="px-2 pt-1">
+        {search}
         <button
           type="button"
           onClick={() => actions.openSpace(null)}

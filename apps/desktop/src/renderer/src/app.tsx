@@ -22,6 +22,16 @@ import { Sidebar } from './features/sidebar/sidebar.tsx';
 import { usePresence } from '@solline/ui/react';
 import { actions, connectRecovery, sessionStore, useApp, useSession } from './stores/app.ts';
 import { WindowControls } from './features/window/window-controls.tsx';
+import {
+  connectNavigation,
+  navigateTo,
+  setStartupView,
+  useNavigation,
+} from './features/navigation/controller.ts';
+import { NavigationSearch } from './features/navigation/search.tsx';
+import { NavigationSettings } from './features/navigation/settings.tsx';
+import { navigationEntries } from './features/navigation/search-entries.ts';
+import { TaskContext } from './features/navigation/task-context.tsx';
 import { Spaces } from './features/spaces/spaces.tsx';
 import { quietSpace, useSpaces } from './stores/spaces.ts';
 
@@ -283,6 +293,7 @@ function NoticeBar({ notice }: { notice: string | null }) {
 }
 
 export function App() {
+  const navigation = useNavigation();
   const [theme, toggleTheme, themeAnimates] = useTheme();
   const ping = usePing();
   const sessionIds = useApp((s) => s.sessionIds);
@@ -315,14 +326,24 @@ export function App() {
         quietSpace('spaces.tick', {});
     }, 60_000);
     const off = connectRecovery();
+    const offNavigation = connectNavigation();
     // Clicar num aviso do Windows abre a sessão de que ele fala.
     const offFocus = window.solline.onFocusSession((id) => {
-      if (sessionStore(id)) actions.selectSession(id);
+      navigateTo({ view: 'session', sessionId: id });
     });
-    void actions.loadProjects();
+    void actions.loadProjects().catch(() => {
+      useNavigation.setState({
+        ready: true,
+        error: 'Não foi possível carregar os projetos. As preferências foram preservadas.',
+      });
+      useApp.setState({
+        notice: 'Não foi possível carregar os projetos. Tenta recuperar a interface.',
+      });
+    });
     void actions.loadAgents();
     return () => {
       off();
+      offNavigation();
       offFocus();
       window.clearInterval(timer);
       window.removeEventListener('pointerdown', input);
@@ -343,11 +364,18 @@ export function App() {
     <>
       <WindowControls />
       <div
-        inert={recoveryStatus !== 'ready' || closePending}
+        inert={recoveryStatus !== 'ready' || closePending || !navigation.ready}
         className="app-shell grid h-full min-h-0 grid-cols-[15rem_minmax(0,1fr)]"
       >
         <Sidebar
           sessionsByProject={sessionsByProject}
+          search={
+            <NavigationSearch
+              readEntries={navigationEntries}
+              onNavigate={navigateTo}
+              enabled={navigation.ready && recoveryStatus === 'ready' && !closePending}
+            />
+          }
           footer={
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
@@ -378,13 +406,19 @@ export function App() {
               >
                 <SlidersHorizontal size={15} strokeWidth={1.75} />
               </button>
+              <NavigationSettings
+                value={navigation.preferences.startupView}
+                onChange={setStartupView}
+                error={navigation.error}
+                onAgents={actions.openAgentsPanel}
+              />
             </div>
           }
         />
         <AgentsPanel />
         <CloseDialog />
 
-        <main className="flex min-h-0 min-w-0 flex-col">
+        <main tabIndex={-1} className="flex min-h-0 min-w-0 flex-col">
           <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[9.5rem] pl-5">
             {activeSessionId ? (
               <SessionHeaderTitle sessionId={activeSessionId} />
@@ -401,6 +435,7 @@ export function App() {
           </header>
 
           <NoticeBar notice={notice} />
+          {activeSessionId ? <TaskContext sessionId={activeSessionId} /> : null}
           <UncertainOperations />
 
           {showingSpaces ? (

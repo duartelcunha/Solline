@@ -455,6 +455,38 @@ async function send(page: Page, text = 'Atualiza as notas.') {
   await page.getByTestId('composer-input').press('Enter');
 }
 
+test('navegação: pesquisa e arranque persistem no main sem iniciar agentes', async ({ qa }) => {
+  let page = qa.page;
+  await page.getByTestId('project-row').click();
+  await page.getByLabel('Nova tarefa', { exact: true }).fill('Rever autenticação');
+  await page.getByLabel('Nova tarefa', { exact: true }).press('Enter');
+  await expect(page.getByLabel('Detalhes da tarefa')).toBeVisible();
+  await page.getByTestId('open-general').click();
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox').fill('autenticacao');
+  await page.getByRole('combobox').press('Enter');
+  await expect(page.getByLabel('Detalhes da tarefa')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(async () => (await window.solline.navigation.read()).lastTarget))
+    .toMatchObject({ view: 'spaces' });
+  page = await qa.restart();
+  await expect(page.getByLabel('Detalhes da tarefa')).toBeVisible();
+  await expect(page.getByTestId('task-row')).toHaveText('Rever autenticação');
+  expect(
+    (await page.evaluate(() => window.solline.request('engine.snapshot', {}))).sessions,
+  ).toHaveLength(0);
+  await page.getByTestId('navigation-settings').click();
+  await page.getByRole('radio', { name: /^Mesa/ }).check();
+  await expect(page.getByText('A escolha aplica-se na próxima abertura.')).toBeVisible();
+  await page.getByRole('button', { name: 'Fechar definições' }).click();
+  page = await qa.restart();
+  await expect(page.getByTestId('open-desk')).toHaveAttribute('aria-current', 'page');
+  expect(
+    (await page.evaluate(() => window.solline.request('engine.snapshot', {}))).sessions,
+  ).toHaveLength(0);
+  await qa.shot('navigation-durable-startup');
+});
+
 test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', async ({ qa }) => {
   let page = qa.page;
   await page.getByTestId('project-row').click();

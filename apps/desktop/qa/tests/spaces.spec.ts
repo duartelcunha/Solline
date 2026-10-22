@@ -19,6 +19,9 @@ test('capturar não arranca um agente; delegar mostra o contexto e abre a conver
   await expect(page.getByText('Em curso', { exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Abrir conversa' }).click();
   await expect(page.getByTestId('composer-input')).toBeVisible();
+  await page.getByTestId('back-to-task').click();
+  await expect(page.getByLabel('Detalhes da tarefa')).toBeVisible();
+  await expect(page.getByTestId('task-row')).toHaveText('Melhorar os estados vazios');
   expect(errors).toEqual([]);
 });
 

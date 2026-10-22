@@ -30,6 +30,7 @@ import {
 } from './session.ts';
 import { morphUpdate, morphs } from '../lib/morph.ts';
 import { receiveSpaces, useSpaces } from './spaces.ts';
+import { flushNavigation } from '../features/navigation/persistence.ts';
 
 /**
  * Estado da app: projetos, a lista de sessões e qual está aberta. Cada sessão tem o
@@ -37,6 +38,7 @@ import { receiveSpaces, useSpaces } from './spaces.ts';
  */
 interface AppState {
   projects: Project[];
+  projectsLoaded: boolean;
   /** Os agentes que o motor conhece, pela ordem do registo. */
   agents: AgentDescriptor[];
   /** Servidores MCP do catálogo e os escolhidos para as próximas sessões. */
@@ -87,6 +89,7 @@ interface AppState {
 
 export const useApp = create<AppState>(() => ({
   projects: [],
+  projectsLoaded: false,
   agents: [],
   mcpServers: [],
   mcpSelection: [],
@@ -183,8 +186,21 @@ export function restoreSnapshot(snapshot: EngineSnapshot, ui: UiRecoveryState): 
     engineOffline: false,
     recoveryOperations: snapshot.operations.filter((operation) => operation.state === 'unknown'),
     activeSessionId: selected,
-    activeProjectId: selected ? (sessionStores.get(selected)?.getState().projectId ?? null) : null,
-    view: selected ? 'session' : 'desk',
+    activeProjectId:
+      current.view === 'spaces'
+        ? current.spaceProjectId
+        : selected
+          ? (sessionStores.get(selected)?.getState().projectId ?? null)
+          : null,
+    view:
+      current.view === 'spaces' || current.view === 'desk'
+        ? current.view
+        : current.view === 'race' &&
+            snapshot.races.some((r) => r.id === current.activeRaceId && r.phase !== 'closed')
+          ? 'race'
+          : selected
+            ? 'session'
+            : 'desk',
   });
 }
 
@@ -277,6 +293,7 @@ export function connectRecovery(): () => void {
   const offClose = window.solline.window.onPrepareClose(async () => {
     freeze();
     await flushDrafts();
+    await flushNavigation();
   });
   const offCancelled = window.solline.window.onCloseCancelled(thaw);
   void sync();
@@ -528,6 +545,7 @@ export const actions = {
     const { projects } = await request('projects.list', {});
     useApp.setState((s) => ({
       projects,
+      projectsLoaded: true,
       activeProjectId: s.activeProjectId ?? projects[0]?.id ?? null,
     }));
     void actions.refreshOrphans();

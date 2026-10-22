@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   ArrowUpRight,
@@ -22,25 +22,27 @@ const icons = {
   destination: LayoutGrid,
 };
 export function NavigationSearch({
-  entries,
+  readEntries,
   onNavigate,
   enabled = true,
 }: {
-  entries: readonly NavigationEntry[];
+  readEntries: () => readonly NavigationEntry[];
   onNavigate: (target: NavigationTarget) => void;
   enabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [entries, setEntries] = useState<readonly NavigationEntry[]>([]);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
   const pendingTarget = useRef<NavigationTarget | null>(null);
   const listId = useId();
-  const results = findNavigationEntries(entries, query);
+  const results = useMemo(() => findNavigationEntries(entries, query), [entries, query]);
   const current = Math.min(selected, Math.max(0, results.entries.length - 1));
   function changeOpen(next: boolean) {
     if (next) {
+      setEntries(readEntries());
       previousFocus.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
       pendingTarget.current = null;
@@ -60,6 +62,7 @@ export function NavigationSearch({
       ) {
         if (document.querySelector('[role="dialog"]')) return;
         event.preventDefault();
+        setEntries(readEntries());
         previousFocus.current =
           document.activeElement instanceof HTMLElement ? document.activeElement : null;
         setQuery('');
@@ -70,7 +73,7 @@ export function NavigationSearch({
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [enabled]);
+  }, [enabled, readEntries]);
   useEffect(() => {
     if (open) document.getElementById(`${listId}-${current}`)?.scrollIntoView({ block: 'nearest' });
   }, [open, current, listId]);
@@ -186,7 +189,7 @@ export function NavigationSearch({
           <p className="navigation-search-hint" role="status">
             {results.total > 40
               ? `40 de ${results.total} resultados — escreve mais para filtrar.`
-              : `${results.total} resultados · ↑ ↓ escolher · Enter abrir`}
+              : `${results.total} ${results.total === 1 ? 'resultado' : 'resultados'} · ↑ ↓ escolher · Enter abrir`}
           </p>
         </Dialog.Content>
       </Dialog.Portal>

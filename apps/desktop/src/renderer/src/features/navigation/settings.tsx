@@ -13,7 +13,7 @@ const choices: { value: StartupView; label: string; detail: string }[] = [
   {
     value: 'general-tasks',
     label: 'Tarefas do Geral',
-    detail: 'Começa pelas tarefas e ideias de todos os projetos.',
+    detail: 'Começa pelas tarefas e ideias guardadas no Geral.',
   },
   { value: 'desk', label: 'Mesa', detail: 'Começa pela visão do trabalho dos agentes.' },
 ];
