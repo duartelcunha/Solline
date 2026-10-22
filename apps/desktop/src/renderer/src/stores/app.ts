@@ -427,6 +427,7 @@ function defaultAgent(): AgentId {
 
 export const actions = {
   openSpace(projectId: string | null): void {
+    useSpaces.setState({ panel: 'tasks' });
     useApp.setState({ view: 'spaces', spaceProjectId: projectId, activeProjectId: projectId });
   },
   async refreshTaskSessions(): Promise<void> {

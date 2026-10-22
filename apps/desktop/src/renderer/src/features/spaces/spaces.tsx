@@ -38,7 +38,8 @@ export function Spaces() {
   const [saving, setSaving] = useState(false);
   const selected = useSpaces((s) => s.selectedTaskId);
   const setSelected = (selectedTaskId: string | null) => useSpaces.setState({ selectedTaskId });
-  const [panel, setPanel] = useState<'tasks' | 'memory'>('tasks');
+  const panel = useSpaces((s) => s.panel);
+  const setPanel = (panel: 'tasks' | 'memory') => useSpaces.setState({ panel });
   const tasks = data.tasks.filter((t) => t.projectId === projectId);
   const task = tasks.find((t) => t.id === selected);
   const insights = data.insights.filter(

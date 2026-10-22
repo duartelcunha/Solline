@@ -465,6 +465,13 @@ test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', 
   await expect(
     page.getByRole('button', { name: 'Abrir origem: Melhorar os estados vazios', exact: true }),
   ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Abrir origem: Melhorar os estados vazios', exact: true })
+    .click();
+  await expect(page.getByLabel('Título da tarefa', { exact: true })).toHaveValue(
+    'Melhorar os estados vazios',
+  );
+  await page.getByRole('button', { name: 'Memória', exact: true }).click();
   await qa.shot('space-real-memory');
 });
 
