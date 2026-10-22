@@ -12,6 +12,10 @@ ipcRenderer.on(IPC.healthProbe, (_event, token: unknown) => {
 type Reply = { ok: true; result: unknown } | { ok: false; error: { message: string } };
 
 const api: SollineApi = {
+  navigation: {
+    read: () => ipcRenderer.invoke(IPC.navigationRead),
+    update: (patch) => ipcRenderer.invoke(IPC.navigationUpdate, patch),
+  },
   request: async (command, payload) => {
     const reply = (await ipcRenderer.invoke(IPC.request, { command, payload })) as Reply;
     if (!reply.ok) throw new Error(reply.error.message);

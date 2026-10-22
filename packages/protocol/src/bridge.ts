@@ -1,6 +1,7 @@
 import type { CommandName, CommandPayload, CommandResult } from './commands.ts';
 import type { EngineEvent } from './events.ts';
 import type { DiffScope, ReviewComment } from './review.ts';
+import type { NavigationPreferences, NavigationUpdate } from './navigation.ts';
 
 export type Theme = 'light' | 'dark';
 
@@ -25,6 +26,10 @@ export type RecoveryNotice = {
 
 /** A única superfície que o preload expõe à interface (window.solline). */
 export interface SollineApi {
+  navigation: {
+    read(): Promise<NavigationPreferences>;
+    update(patch: NavigationUpdate): Promise<NavigationPreferences>;
+  };
   /** Qualquer comando do contrato; o main valida e encaminha. */
   request<C extends CommandName>(command: C, payload: CommandPayload<C>): Promise<CommandResult<C>>;
   /** Eventos do motor, já validados no main. Devolve a função para deixar de ouvir. */
@@ -48,6 +53,8 @@ export interface SollineApi {
 
 /** Canais IPC entre preload e main. */
 export const IPC = {
+  navigationRead: 'solline:navigation-read',
+  navigationUpdate: 'solline:navigation-update',
   request: 'solline:request',
   event: 'solline:event',
   setTheme: 'solline:set-theme',

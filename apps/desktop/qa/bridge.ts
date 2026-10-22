@@ -1,5 +1,8 @@
 import {
   commandSchemas,
+  defaultNavigation,
+  NavigationPreferences,
+  NavigationUpdate,
   applyDelta,
   EngineEvent,
   EngineSnapshot,
@@ -745,6 +748,20 @@ export function installBridge(scene: Scene) {
     }
   }
   const api: SollineApi = {
+    navigation: {
+      read: async () => {
+        const saved = localStorage.getItem('solline-qa-navigation');
+        return saved ? NavigationPreferences.parse(JSON.parse(saved)) : defaultNavigation();
+      },
+      update: async (patch) => {
+        const state = NavigationPreferences.parse({
+          ...(await api.navigation.read()),
+          ...NavigationUpdate.parse(patch),
+        });
+        localStorage.setItem('solline-qa-navigation', JSON.stringify(state));
+        return state;
+      },
+    },
     async request<C extends CommandName>(
       command: C,
       payload: CommandPayload<C>,

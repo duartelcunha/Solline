@@ -37,6 +37,7 @@ import { PromptWindows } from './prompt-window.ts';
 import { AttentionWindow } from './attention-window.ts';
 import { WindowRecovery } from './window-recovery.ts';
 import { DraftUpdateSchema, WindowActionSchema } from './window-schemas.ts';
+import { NavigationPreferencesStore } from './navigation-preferences.ts';
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId(`app.${APP_NAME.toLowerCase()}`);
@@ -96,6 +97,7 @@ function notify(notice: Attention): void {
   attentionWindow?.show(notice);
 }
 const projects = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
+const navigation = new NavigationPreferencesStore(join(app.getPath('userData'), 'navigation.json'));
 
 const TRUST_DETAIL =
   'Num projeto de confiança, os agentes leem as definições, hooks, servidores MCP e instruções ' +
@@ -404,6 +406,15 @@ ipcMain.handle(IPC.setTheme, (event, theme: unknown) => {
   recovery?.theme(theme);
   prompts?.theme(theme);
   attentionWindow?.theme(theme);
+});
+
+ipcMain.handle(IPC.navigationRead, (event) => {
+  if (!isTrustedSender(event)) throw new Error('Origem não autorizada');
+  return navigation.read();
+});
+ipcMain.handle(IPC.navigationUpdate, (event, raw) => {
+  if (!isTrustedSender(event)) throw new Error('Origem não autorizada');
+  return navigation.update(raw);
 });
 
 ipcMain.handle(IPC.windowState, (event) => {
