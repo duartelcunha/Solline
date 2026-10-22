@@ -84,6 +84,115 @@ test('envio sem confirmação recupera texto e nunca o repete', async ({ page })
   ).toEqual([]);
 });
 
+test('controlos respondem ao canto e reentrada sem ativar ações ocultas', async ({ page }) => {
+  await page.clock.install();
+  await open(page);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 60_000));
+  const controls = page.getByTestId('window-controls');
+  const width = await page.evaluate(() => innerWidth);
+  await expect(controls).toHaveAttribute('data-open', 'false');
+  await expect(page.getByRole('button', { name: 'Fechar janela' })).toBeHidden();
+  await page.mouse.move(width - 2, 2);
+  await expect(controls).toHaveAttribute('data-open', 'true');
+  await page.mouse.move(400, 400);
+  await page.clock.runFor(239);
+  await page.mouse.move(width - 2, 2);
+  await page.clock.runFor(500);
+  await expect(controls).toHaveAttribute('data-open', 'true');
+  await page.mouse.move(400, 400);
+  await page.clock.runFor(240);
+  await expect(controls).toHaveAttribute('data-open', 'false');
+  expect(await page.evaluate(() => window.qa.journal.filter((e) => e.kind === 'window'))).toEqual([]);
+});
+
+for (const theme of ['light', 'dark']) {
+  for (const zoom of [1, 1.25]) {
+    test(`aproximação contínua · ${theme} · zoom ${zoom}`, async ({ page }, info) => {
+      await open(page);
+      await page.evaluate(({ theme, zoom }) => {
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.zoom = String(zoom);
+      }, { theme, zoom });
+      const controls = page.getByTestId('window-controls');
+      const box = await controls.boundingBox();
+      if (!box) throw new Error('Control region missing');
+      const width = await page.evaluate(() => innerWidth);
+      for (const [x, y] of [
+        [width - 2, 2], // client corner, including the former 10px gap
+        [box.x + 12, 2], // top
+        [width - 2, box.height - 4], // right
+        [box.x + 2, box.height - 2], // diagonal from content
+      ] as const) {
+        await page.mouse.move(400, 400);
+        await expect(controls).toHaveAttribute('data-open', 'false');
+        await page.mouse.move(x, y, { steps: 12 });
+        await expect(controls).toHaveAttribute('data-open', 'true');
+      }
+      await page.mouse.move(400, 400);
+      await expect(page.locator('.window-actions')).toHaveCSS('opacity', '0');
+      // Sample the browser's actual CSS transitions at 80ms, rather than relying
+      // on screenshot transport timing. This instrument changes no application state.
+      await controls.evaluate((el) => {
+        const observer = new MutationObserver(() => {
+          if (el.getAttribute('data-open') !== 'true') return;
+          observer.disconnect();
+          const animations = el.getAnimations({ subtree: true });
+          for (const animation of animations) {
+            animation.pause();
+            animation.currentTime = 80;
+          }
+          el.setAttribute('data-qa-sample', String(animations.length));
+        });
+        observer.observe(el, { attributes: true, attributeFilter: ['data-open'] });
+      });
+      await page.mouse.move(width - 2, 2);
+      await expect(controls).toHaveAttribute('data-qa-sample', /^[1-9]\d*$/);
+      const opacity = await page.locator('.window-actions').evaluate((el) => Number(getComputedStyle(el).opacity));
+      expect(opacity).toBeGreaterThan(0);
+      expect(opacity).toBeLessThan(1);
+      await controls.screenshot({ path: info.outputPath('opening-80ms.png') });
+      await controls.evaluate((el) => {
+        for (const animation of el.getAnimations({ subtree: true })) animation.play();
+        el.removeAttribute('data-qa-sample');
+      });
+      await expect(page.locator('.window-actions')).toHaveCSS('opacity', '1');
+      await controls.screenshot({ path: info.outputPath('settled.png') });
+      const maximize = page.getByRole('button', { name: 'Maximizar janela', exact: true });
+      await expect(maximize.locator('svg')).toHaveClass(/lucide-maximize-2/);
+      await maximize.click();
+      await expect(page.getByRole('button', { name: 'Restaurar tamanho da janela' }).locator('svg')).toHaveClass(/lucide-minimize-2/);
+      await page.getByRole('button', { name: 'Restaurar tamanho da janela' }).click();
+      await expect(maximize).toBeVisible();
+    });
+  }
+}
+
+test('cabeçalho estreito conserva conteúdo fora da zona invisível com zoom', async ({ page }, info) => {
+  await page.setViewportSize({ width: 760, height: 780 });
+  await open(page);
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = '1.25';
+    const title = document.querySelector('[data-testid="session-title"]');
+    if (title) title.textContent = 'Uma sessão com um título muito extenso para verificar seleção e controlos';
+  });
+  const controls = await page.getByTestId('window-controls').boundingBox();
+  if (!controls) throw new Error('Control region missing');
+  for (const child of await page.locator('.session-header > *').all()) {
+    const box = await child.boundingBox();
+    if (!box) throw new Error('Header content missing');
+    expect(box.x + box.width).toBeLessThanOrEqual(controls.x);
+  }
+  await page.screenshot({ path: info.outputPath('narrow-header.png') });
+});
+
+test('clique durante abertura ativa maximizar uma única vez', async ({ page }) => {
+  await open(page);
+  await page.mouse.move((await page.evaluate(() => innerWidth)) - 2, 2);
+  await page.getByRole('button', { name: 'Maximizar janela', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Restaurar tamanho da janela', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.qa.journal.filter((e) => e.kind === 'window' && e.name === 'toggle-maximize'))).toHaveLength(1);
+});
+
 test('controlos revelam por proximidade, mantêm foco e saem por Escape', async ({ page }) => {
   await page.clock.install();
   await open(page);

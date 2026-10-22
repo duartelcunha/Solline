@@ -1,4 +1,5 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -802,6 +803,64 @@ test('window IPC rejects unknown actions and observes native maximize without op
         ?.isMaximized(),
     ),
   ).toBe(true);
+});
+
+test('corner controls preserve native sizing and observe minimize/maximize', async ({ qa }, info) => {
+  const app = qa.app();
+  const handle = await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('/index.html'));
+    if (!win) throw new Error('Main window missing');
+    return win.getNativeWindowHandle().readBigUInt64LE().toString();
+  });
+  if (!/^\d+$/.test(handle)) throw new Error('Invalid native window handle');
+  // WM_NCHITTEST asks Windows itself whether the border still sizes the window.
+  // https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-nchittest
+  const { stdout } = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class SollineBorderProbe {
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out Rect r);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, UIntPtr w, IntPtr l, uint flags, uint timeout, out UIntPtr result);
+  static int Hit(IntPtr h, int x, int y) {
+    UIntPtr result;
+    long point = ((long)(ushort)y << 16) | (ushort)x;
+    if (SendMessageTimeoutW(h, 0x84, UIntPtr.Zero, new IntPtr(point), 0x22, 2000, out result) == IntPtr.Zero) throw new Exception("Native hit test timed out");
+    return (int)result.ToUInt64();
+  }
+  public static int[] Probe(long value) {
+    var h = new IntPtr(value); Rect r;
+    if (!GetWindowRect(h, out r)) throw new Exception("Native window rectangle unavailable");
+    return new[] { Hit(h, r.Right-2, r.Top+2), Hit(h, r.Right-2, (r.Top+r.Bottom)/2), Hit(h, (r.Left+r.Right)/2, r.Top+2) };
+  }
+}
+'@
+ConvertTo-Json -InputObject @([SollineBorderProbe]::Probe(${handle})) -Compress
+`], { windowsHide: true, timeout: 15_000 });
+  const hits: unknown = JSON.parse(stdout);
+  await info.attach('native-border-hit-test', { body: JSON.stringify(hits), contentType: 'application/json' });
+  expect(hits).toEqual([14, 11, 12]); // top-right, right, top sizing borders
+  const controls = qa.page.getByTestId('window-controls');
+  await qa.page.mouse.move((await qa.page.evaluate(() => innerWidth)) - 2, 2);
+  await expect(controls).toHaveAttribute('data-open', 'true');
+  await qa.page.getByRole('button', { name: 'Maximizar janela', exact: true }).click();
+  await expect.poll(() => qa.page.evaluate(() => window.solline.window.state())).toMatchObject({ maximized: true });
+  await qa.shot(qa.page, 'corner-maximized');
+  // Maximization moves the corner away from the previous pointer position.
+  await qa.page.mouse.move(400, 400);
+  await qa.page.mouse.move((await qa.page.evaluate(() => innerWidth)) - 2, 2);
+  await qa.page.getByRole('button', { name: 'Restaurar tamanho da janela', exact: true }).click();
+  await expect.poll(() => qa.page.evaluate(() => window.solline.window.state())).toMatchObject({ maximized: false });
+  await qa.page.mouse.move(400, 400);
+  await qa.page.mouse.move((await qa.page.evaluate(() => innerWidth)) - 2, 2);
+  await qa.page.getByRole('button', { name: 'Minimizar janela', exact: true }).click();
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('/index.html'))?.isMinimized())).toBe(true);
+  await app.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('/index.html')); win?.restore(); win?.focus(); });
+  await qa.page.mouse.move(400, 400);
+  await qa.page.mouse.move((await qa.page.evaluate(() => innerWidth)) - 2, 2);
+  await expect(controls).toHaveAttribute('data-open', 'true');
 });
 
 test('abrupt whole-process loss restores acknowledged draft and paused work without replay', async ({

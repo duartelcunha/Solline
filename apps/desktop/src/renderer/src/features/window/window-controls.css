@@ -1,19 +1,19 @@
 .window-controls {
   position: absolute;
   z-index: 30;
-  top: 10px;
-  right: 10px;
-  width: 152px;
-  height: 56px;
+  top: 0;
+  right: 0;
+  width: 184px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding-right: 8px;
   -webkit-app-region: no-drag;
 }
 .window-controls-surface {
   position: absolute;
-  right: 8px;
+  top: 20px;
+  right: 18px;
   width: 104px;
   height: 36px;
   border-radius: 12px;
@@ -34,7 +34,9 @@
   transition-duration: var(--sl-dur-fast);
 }
 .window-actions {
-  position: relative;
+  position: absolute;
+  top: 22px;
+  right: 18px;
   display: flex;
   gap: 2px;
   opacity: 0;
@@ -75,8 +77,8 @@
 }
 .window-controls-handle {
   position: absolute;
-  right: 8px;
-  top: 12px;
+  right: 18px;
+  top: 22px;
 }
 .window-controls-handle span {
   width: 14px;
@@ -92,7 +94,11 @@
   width: 44px;
   height: 44px;
 }
+.window-controls[data-coarse='true'] .window-actions {
+  top: 16px;
+}
 .window-controls[data-coarse='true'] .window-controls-surface {
+  top: 14px;
   width: 140px;
   height: 48px;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Copy, Minus, Square, X } from 'lucide-react';
+import { Maximize2, Minimize2, Minus, X } from 'lucide-react';
 import type { WindowAction, WindowState } from '@solline/protocol/bridge';
 import { useApp } from '../../stores/app.ts';
 import './window-controls.css';
@@ -188,7 +188,7 @@ export function WindowControls() {
           disabled={busy}
           onClick={() => void act('minimize')}
         >
-          <Minus size={13} />
+          <Minus size={15} strokeWidth={1.75} />
         </button>
         <button
           type="button"
@@ -196,7 +196,11 @@ export function WindowControls() {
           disabled={busy}
           onClick={() => void act('toggle-maximize')}
         >
-          {state.maximized ? <Copy size={13} /> : <Square size={13} />}
+          {state.maximized ? (
+            <Minimize2 size={15} strokeWidth={1.75} />
+          ) : (
+            <Maximize2 size={15} strokeWidth={1.75} />
+          )}
         </button>
         <button
           type="button"
@@ -204,7 +208,7 @@ export function WindowControls() {
           disabled={busy}
           onClick={() => void act('close')}
         >
-          <X size={13} />
+          <X size={15} strokeWidth={1.75} />
         </button>
       </div>
     </div>

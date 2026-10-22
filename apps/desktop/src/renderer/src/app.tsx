@@ -360,7 +360,7 @@ export function App() {
         <CloseDialog />
 
         <main className="flex min-h-0 min-w-0 flex-col">
-          <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[9.5rem] pl-5">
+          <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[12rem] pl-5">
             {activeSessionId ? (
               <SessionHeaderTitle sessionId={activeSessionId} />
             ) : raceId ? (

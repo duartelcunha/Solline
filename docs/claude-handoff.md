@@ -8,6 +8,8 @@ Ler [DESIGN.md](../DESIGN.md), [pesquisa e decisões](redesign.md) e [mapa de co
 
 ## Design e janelas próprias
 
+Correção de aproximação dos controlos (23/10): zona invisível de 184 × 72 px encostada ao canto da área cliente; pega e botões conservam posição visual. O teste anterior falhava no ponto (largura−2, 2), agora coberto. Cabeçalho reserva 192 px também no layout estreito; grupos de estado podem quebrar linha sem invadir a zona. Maximizar/restaurar usam Maximize2/Minimize2 de 15 px. Mantêm-se entrada 160 ms, saída 140 ms após 240 ms, teclado, Escape, coarse e estado nativo autoritativo. A reserva substitui as dimensões antigas mencionadas no histórico abaixo. A prova Windows consulta WM_NCHITTEST na janela real e exige HTTOPRIGHT/HTRIGHT/HTTOP, além de observar minimizar/maximizar/restaurar. Não é prova de gesto físico de arrasto, DPI universal ou Snap nativo.
+
 Interface sem verde nem cor de marca. Ações inversas, foco com contorno, seleção com marcador, conclusão com visto. Vidro quase opaco apenas no compositor/controlos; conversa, código e decisões sólidos. Reflexo iridescente estático localizado. Radix, fontes locais, CSS/WAAPI e SVG originais; nenhuma dependência nova.
 
 Figuras gráficas de papel com googly eyes e silhuetas próprias: ocre, coral, azul, mauve, pêssego e violeta. Gaze partilhado, limitado à órbita, sem render React por frame; suspende em blur, invisibilidade, coarse pointer e movimento reduzido. Rótulos complementam poses pequenas. Fila, pedidos e checkpoints têm movimento localizado/interrompível; texto em streaming não anima.
