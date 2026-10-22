@@ -63,6 +63,25 @@ test('serial updates preserve startup choice and restore exact destination from 
   expect(saved.lastTarget).toEqual({ view: 'spaces', projectId: 'p', taskId: 't' });
   expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(saved);
 });
+
+test('task identities never cross spaces and memory panel survives a removed task', () => {
+  for (const projectId of [null, 'p']) {
+    const target = { view: 'spaces' as const, projectId, taskId: 't', panel: 'memory' as const };
+    const resolved = resolveStartupTarget(
+      { ...defaultNavigation(), lastTarget: target },
+      available,
+    );
+    expect(resolved).toEqual(
+      projectId === 'p'
+        ? target
+        : {
+            view: 'spaces',
+            projectId: null,
+            panel: 'memory',
+          },
+    );
+  }
+});
 test('invalid preferences are preserved and unsafe payloads are rejected', async () => {
   const root = await mkdtemp(join(tmpdir(), 'solline-navigation-'));
   roots.push(root);

@@ -5,7 +5,14 @@ export type StartupView = z.infer<typeof StartupView>;
 const Id = z.string().min(1).max(128);
 export const NavigationTarget = z.discriminatedUnion('view', [
   z.object({ view: z.literal('desk') }).strict(),
-  z.object({ view: z.literal('spaces'), projectId: Id.nullable(), taskId: Id.optional() }).strict(),
+  z
+    .object({
+      view: z.literal('spaces'),
+      projectId: Id.nullable(),
+      taskId: Id.optional(),
+      panel: z.enum(['tasks', 'memory']).optional(),
+    })
+    .strict(),
   z.object({ view: z.literal('session'), sessionId: Id }).strict(),
   z.object({ view: z.literal('race'), raceId: Id }).strict(),
 ]);
@@ -58,7 +65,11 @@ export function resolveStartupTarget(
         (task) => task.id === target.taskId && task.projectId === target.projectId,
       )
     ) {
-      return { view: 'spaces', projectId: target.projectId };
+      return {
+        view: 'spaces',
+        projectId: target.projectId,
+        ...(target.panel ? { panel: target.panel } : {}),
+      };
     }
   }
   return target;

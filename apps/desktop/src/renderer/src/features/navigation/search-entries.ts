@@ -11,7 +11,8 @@ const taskStatus = {
 /** Called when opening the palette: streaming tokens never rebuild the search index. */
 export function navigationEntries(): NavigationEntry[] {
   const { projects, sessionIds, races } = useApp.getState();
-  const projectName = (id: string | null) => projects.find((p) => p.id === id)?.name ?? 'Geral';
+  const projectName = (id: string | null) =>
+    id === null ? 'Geral' : (projects.find((p) => p.id === id)?.name ?? 'Projeto indisponível');
   return [
     {
       id: 'general',

@@ -95,6 +95,30 @@ test('um destino removido cai no Geral', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Geral', exact: true })).toBeVisible();
 });
 
+test('retomar conserva o painel de memória e pesquisar uma tarefa volta às tarefas', async ({
+  page,
+}) => {
+  await page.goto('/?scene=conversation');
+  await page.getByTestId('project-row').click();
+  await page.getByLabel('Nova tarefa', { exact: true }).fill('Retomar contexto');
+  await page.getByLabel('Nova tarefa', { exact: true }).press('Enter');
+  await expect(page.getByLabel('Detalhes da tarefa')).toBeVisible();
+  await page.getByRole('button', { name: 'Memória', exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => JSON.parse(localStorage.getItem('solline-qa-navigation') ?? '{}').lastTarget?.panel,
+      ),
+    )
+    .toBe('memory');
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Memória', exact: true })).toHaveCount(2);
+  await page.getByTestId('navigation-search').click();
+  await page.getByRole('combobox').fill('Retomar contexto');
+  await page.getByRole('combobox').press('Enter');
+  await expect(page.getByLabel('Detalhes da tarefa')).toBeVisible();
+});
+
 test('preferências inválidas são preservadas e mostram uma explicação', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('solline-qa-navigation', 'corrupt'));
   await page.goto('/?scene=conversation');
