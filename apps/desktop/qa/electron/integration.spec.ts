@@ -442,7 +442,8 @@ test('navegação: pesquisa e arranque persistem no main sem iniciar agentes', a
     (await page.evaluate(() => window.solline.request('engine.snapshot', {}))).sessions,
   ).toHaveLength(0);
   await page.getByTestId('navigation-settings').click();
-  await page.getByRole('radio', { name: /^Mesa/ }).check();
+  await page.getByRole('radio', { name: /^Mesa/ }).click();
+  await expect(page.getByRole('radio', { name: /^Mesa/ })).toBeChecked();
   await expect(page.getByText('A escolha aplica-se na próxima abertura.')).toBeVisible();
   await page.getByRole('button', { name: 'Fechar definições' }).click();
   page = await qa.restart();

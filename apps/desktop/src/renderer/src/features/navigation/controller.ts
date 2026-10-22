@@ -13,8 +13,9 @@ import { persistNavigation, persistStartup } from './persistence.ts';
 export const useNavigation = create<{
   preferences: NavigationPreferences;
   ready: boolean;
+  writable: boolean;
   error: string | null;
-}>(() => ({ preferences: defaultNavigation(), ready: false, error: null }));
+}>(() => ({ preferences: defaultNavigation(), ready: false, writable: false, error: null }));
 let pendingTarget: NavigationTarget | null = null;
 let applying = false;
 let recordCurrent = () => {};
@@ -82,9 +83,10 @@ export function connectNavigation(): () => void {
   let initialized = false;
   let saved = '';
   let generation = 0;
-  useNavigation.setState({ ready: false, error: null });
+  useNavigation.setState({ ready: false, writable: false, error: null });
   async function persist(target: NavigationTarget) {
     saved = JSON.stringify(target);
+    if (!useNavigation.getState().writable) return;
     const version = ++generation;
     try {
       await persistNavigation(target);
@@ -138,7 +140,7 @@ export function connectNavigation(): () => void {
     .read()
     .then((raw) => {
       if (disposed) return;
-      useNavigation.setState({ preferences: NavigationPreferences.parse(raw) });
+      useNavigation.setState({ preferences: NavigationPreferences.parse(raw), writable: true });
       loaded = true;
       observe();
     })
@@ -146,9 +148,11 @@ export function connectNavigation(): () => void {
       if (disposed) return;
       // Corrupt/unreadable preferences never get silently overwritten.
       useNavigation.setState({
-        ready: true,
         error: 'Não foi possível ler as preferências de arranque. O ficheiro foi preservado.',
       });
+      // Keep navigation and explicit notification targets usable without writing over unreadable data.
+      loaded = true;
+      observe();
     });
   return () => {
     disposed = true;
@@ -159,6 +163,7 @@ export function connectNavigation(): () => void {
 }
 
 export async function setStartupView(startupView: StartupView): Promise<void> {
+  if (!useNavigation.getState().writable) return;
   try {
     const preferences = NavigationPreferences.parse(await persistStartup(startupView));
     useNavigation.setState({ preferences, error: null });

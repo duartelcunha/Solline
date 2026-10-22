@@ -19,11 +19,13 @@ const choices: { value: StartupView; label: string; detail: string }[] = [
 ];
 export function NavigationSettings({
   value,
+  writable,
   onChange,
   error,
   onAgents,
 }: {
   value: StartupView;
+  writable: boolean;
   onChange: (value: StartupView) => Promise<void>;
   error: string | null;
   onAgents: () => void;
@@ -65,7 +67,7 @@ export function NavigationSettings({
           <Dialog.Description className="mt-2 text-sm text-muted">
             Escolhe como queres começar no Solline.
           </Dialog.Description>
-          <fieldset disabled={saving} className="navigation-startup">
+          <fieldset disabled={saving || !writable} className="navigation-startup">
             <legend>Ao abrir a aplicação</legend>
             {choices.map((choice) => (
               <label key={choice.value} className="navigation-choice">
@@ -73,7 +75,7 @@ export function NavigationSettings({
                   type="radio"
                   name="startup-view"
                   value={choice.value}
-                  checked={value === choice.value}
+                  checked={writable && value === choice.value}
                   onChange={() => void save(choice.value)}
                 />
                 <span>
@@ -89,7 +91,11 @@ export function NavigationSettings({
             </p>
           ) : null}
           <p className="mt-4 text-xs text-muted" role="status">
-            {saving ? 'A guardar…' : 'A escolha aplica-se na próxima abertura.'}
+            {!writable
+              ? 'As preferências estão indisponíveis. Podes continuar a usar o Solline.'
+              : saving
+                ? 'A guardar…'
+                : 'A escolha aplica-se na próxima abertura.'}
           </p>
           <button
             type="button"

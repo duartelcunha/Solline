@@ -408,6 +408,7 @@ export function App() {
               </button>
               <NavigationSettings
                 value={navigation.preferences.startupView}
+                writable={navigation.writable}
                 onChange={setStartupView}
                 error={navigation.error}
                 onAgents={actions.openAgentsPanel}

@@ -64,7 +64,9 @@ for (const startup of ['Tarefas do Geral', 'Mesa', 'Retomar onde estava'])
     await page.goto('/?scene=conversation');
     await page.getByTestId('project-row').click();
     await page.getByTestId('navigation-settings').click();
-    await page.getByRole('radio', { name: new RegExp(`^${startup}`) }).check();
+    const choice = page.getByRole('radio', { name: new RegExp(`^${startup}`) });
+    await choice.click();
+    await expect(choice).toBeChecked();
     await expect(page.getByText('A escolha aplica-se na próxima abertura.')).toBeVisible();
     await page.getByRole('button', { name: 'Fechar definições' }).click();
     await expect(page.getByRole('heading', { name: 'Atelier', exact: true })).toBeVisible();
@@ -124,6 +126,16 @@ test('preferências inválidas são preservadas e mostram uma explicação', asy
   await page.goto('/?scene=conversation');
   await page.getByTestId('navigation-settings').click();
   await expect(page.getByRole('alert')).toContainText('O ficheiro foi preservado');
+  await expect(page.getByRole('radio', { name: /^Mesa/ })).toBeDisabled();
+  expect(await page.evaluate(() => localStorage.getItem('solline-qa-navigation'))).toBe('corrupt');
+  await page.getByRole('button', { name: 'Fechar definições' }).click();
+  await page.getByTestId('project-row').click();
+  await expect(page.getByRole('heading', { name: 'Atelier', exact: true })).toBeVisible();
+  await page.evaluate(async () => {
+    await window.solline.window.action('close');
+    await window.qa.confirmClose();
+  });
+  expect(await page.evaluate(() => window.qa.windowState().closed)).toBe(true);
   expect(await page.evaluate(() => localStorage.getItem('solline-qa-navigation'))).toBe('corrupt');
 });
 
