@@ -22,6 +22,8 @@ import { Sidebar } from './features/sidebar/sidebar.tsx';
 import { usePresence } from '@solline/ui/react';
 import { actions, connectRecovery, sessionStore, useApp, useSession } from './stores/app.ts';
 import { WindowControls } from './features/window/window-controls.tsx';
+import { Spaces } from './features/spaces/spaces.tsx';
+import { quietSpace, useSpaces } from './stores/spaces.ts';
 
 const THEME_KEY = 'solline.theme';
 
@@ -290,8 +292,28 @@ export function App() {
   const recoveryStatus = useApp((s) => s.recoveryStatus);
   const closePending = useApp((s) => s.closePending);
   const raceId = useApp((s) => (s.view === 'race' ? s.activeRaceId : null));
+  const showingSpaces = useApp((s) => s.view === 'spaces');
+  const spaceKey = useApp((s) => s.spaceProjectId ?? 'general');
 
   useEffect(() => {
+    let lastInput = Date.now();
+    const input = () => {
+      lastInput = Date.now();
+    };
+    window.addEventListener('pointerdown', input, { passive: true });
+    window.addEventListener('keydown', input);
+    const timer = window.setInterval(() => {
+      const state = useSpaces.getState().data;
+      if (
+        !document.hidden &&
+        Date.now() - lastInput >= 60_000 &&
+        state.settings.analysisMode === 'proactive' &&
+        state.settings.agent &&
+        state.settings.projectIds.length &&
+        state.analysis.state === 'idle'
+      )
+        quietSpace('spaces.tick', {});
+    }, 60_000);
     const off = connectRecovery();
     // Clicar num aviso do Windows abre a sessão de que ele fala.
     const offFocus = window.solline.onFocusSession((id) => {
@@ -302,6 +324,9 @@ export function App() {
     return () => {
       off();
       offFocus();
+      window.clearInterval(timer);
+      window.removeEventListener('pointerdown', input);
+      window.removeEventListener('keydown', input);
     };
   }, []);
 
@@ -365,6 +390,8 @@ export function App() {
               <SessionHeaderTitle sessionId={activeSessionId} />
             ) : raceId ? (
               <RaceTitle raceId={raceId} />
+            ) : showingSpaces ? (
+              <span className="text-[12px] text-muted">Espaços</span>
             ) : (
               <DeskTitle />
             )}
@@ -376,7 +403,9 @@ export function App() {
           <NoticeBar notice={notice} />
           <UncertainOperations />
 
-          {activeSessionId ? (
+          {showingSpaces ? (
+            <Spaces key={spaceKey} />
+          ) : activeSessionId ? (
             <div className="session-body relative flex min-h-0 flex-1">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <Conversation key={activeSessionId} sessionId={activeSessionId} />

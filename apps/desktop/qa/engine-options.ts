@@ -121,6 +121,27 @@ export function engineOptions(): EngineOptions {
     dataDir: process.env.SOLLINE_DATA_DIR,
     isolated: true,
     reviewer: false,
+    spaceAnalyzer: async ({ sources }) => {
+      const source = sources[0];
+      if (!source) return { insights: [], memories: [] };
+      return {
+        insights: [
+          {
+            projectId: source.projectId,
+            title: 'Rever os estados do projeto',
+            detail: 'Melhorar os estados vazios com base no contexto guardado.',
+            sources: [source.id],
+          },
+        ],
+        memories: [
+          {
+            projectId: source.projectId,
+            text: 'Preferir estados claros e respostas curtas.',
+            sources: [source.id],
+          },
+        ],
+      };
+    },
     checks: {},
     registry: registryOf([
       {

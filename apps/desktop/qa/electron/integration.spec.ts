@@ -455,6 +455,50 @@ async function send(page: Page, text = 'Atualiza as notas.') {
   await page.getByTestId('composer-input').press('Enter');
 }
 
+test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', async ({ qa }) => {
+  let page = qa.page;
+  await page.getByTestId('project-row').click();
+  await page.getByLabel('Nova tarefa', { exact: true }).fill('Melhorar os estados vazios');
+  await page.getByLabel('Nova tarefa', { exact: true }).press('Enter');
+  await expect(page.getByTestId('session-row')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Delegar', exact: true }).click();
+  await page.getByLabel('Agente', { exact: true }).click();
+  await page.getByTestId('choice-task-agent-claude').click();
+  await page.getByRole('button', { name: 'Enviar tarefa' }).click();
+  await page.getByRole('button', { name: 'Abrir conversa' }).click();
+  await page.getByRole('button', { name: /^Permitir uma vez/ }).click();
+  await expect
+    .poll(() => readFile(join(qa.project, 'notes.txt'), 'utf8'))
+    .toBe('Alteração revista.\n');
+  await page.getByTestId('project-row').click();
+  await expect(page.getByRole('heading', { name: 'Para rever' })).toBeVisible();
+  await page.getByTestId('task-row').click();
+  await expect(page.getByRole('button', { name: 'Ver alterações' })).toBeVisible();
+  await qa.shot('space-real-project');
+  page = await qa.restart();
+  await page.getByTestId('project-row').click();
+  await expect(page.getByTestId('task-row')).toHaveText('Melhorar os estados vazios');
+  await page.getByTestId('task-row').click();
+  await expect(page.getByText('Para rever', { exact: true }).last()).toBeVisible();
+  await expect(page.getByTestId('session-row')).toHaveCount(1);
+  await page.getByTestId('open-general').click();
+  await page.getByLabel('Definições de análise e aprendizagem').click();
+  await page.getByLabel('Agente de análise', { exact: true }).click();
+  await page.getByTestId('choice-analysis-agent-claude').click();
+  await page.getByRole('checkbox', { name: 'project', exact: true }).check();
+  await page.getByRole('button', { name: 'Guardar preferências' }).click();
+  await page.getByRole('button', { name: 'Analisar', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Rever os estados do projeto' })).toBeVisible();
+  await page.getByTestId('project-row').click();
+  await page.getByRole('button', { name: 'Memória', exact: true }).click();
+  await expect(
+    page.getByText('Preferir estados claros e respostas curtas.', { exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Aprovar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Desativar', exact: true })).toBeVisible();
+  await qa.shot('space-real-memory');
+});
+
 test('confirmação própria permite recusar confiança sem a ativar', async ({ qa }) => {
   const trust = qa.page.getByTestId('project-trust');
   await expect(trust).toHaveAttribute('aria-pressed', 'true');
