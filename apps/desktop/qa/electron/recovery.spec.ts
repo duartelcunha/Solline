@@ -137,6 +137,30 @@ const test = base.extend<{ qa: Fixture }>({
       await info.attach(name, { path: file, contentType: 'image/png' });
     };
     const nativeShot = async (name: string) => {
+      // capturePage does not settle CSS/WAAPI like Playwright screenshot. Observe
+      // the actual restored card and its ancestors, without changing animation.
+      await expect
+        .poll(() =>
+          app.evaluate(async ({ BrowserWindow }) => {
+            const win = BrowserWindow.getAllWindows().find((window) =>
+              window.webContents.getURL().endsWith('/index.html'),
+            );
+            if (!win || win.webContents.isLoading()) return false;
+            return win.webContents.executeJavaScript(`(() => {
+          const card = document.querySelector('[data-testid="permission-card"]');
+          if (!card) return false;
+          const box = card.getBoundingClientRect();
+          if (box.width <= 0 || box.height <= 0) return false;
+          for (let node = card; node; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            if (Number(style.opacity) !== 1 || style.visibility !== 'visible') return false;
+            if (node.getAnimations().some(animation => animation.playState === 'running')) return false;
+          }
+          return true;
+        })()`);
+          }),
+        )
+        .toBe(true);
       const png = await app.evaluate(async ({ BrowserWindow }) => {
         const win = BrowserWindow.getAllWindows().find((window) =>
           window.webContents.getURL().endsWith('/index.html'),
@@ -231,8 +255,31 @@ async function begin(page: Page, text: string) {
   const snapshot = await page.evaluate(() => window.solline.request('engine.snapshot', {}));
   const id = snapshot.sessions[0]?.session.id;
   if (!id) throw new Error('Missing real engine session');
+  await acknowledgedSend(page, id);
   return id;
 }
+// The input clears before send IPC finishes. The public durable draft projection
+// records completion only after the send acknowledgement; never inspect a store.
+async function acknowledgedSend(page: Page, sessionId: string) {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) => window.solline.recovery.ui().then((state) => state.drafts[id]?.pendingSend),
+        sessionId,
+      ),
+    )
+    .toBeNull();
+  await expect(page.getByTestId('composer-input')).toHaveValue('');
+}
+async function enqueue(page: Page, sessionId: string, text: string) {
+  await acknowledgedSend(page, sessionId);
+  await page.getByTestId('composer-input').fill(text);
+  await page.getByTestId('composer-input').press('Enter');
+  await expect(page.getByTestId('queued')).toHaveCount(1);
+  await expect(page.getByTestId('queued')).toContainText(text);
+  await acknowledgedSend(page, sessionId);
+}
+
 async function savedDraft(page: Page, sessionId: string, text: string) {
   await page.getByTestId('composer-input').fill(text);
   await expect
@@ -455,7 +502,7 @@ base(
         .toEqual({ visible: 'visible', focused: true });
       const started = Date.now();
       // An attached renderer debugger can suppress Chromium's hung-renderer
-      // detection. Observe target discovery over HTTP while fully detached.
+      // detection. Observe window readiness through the independent main inspector.
       await required(browser, 'native browser').close();
       await mainEvaluate(`(async () => {
         const { BrowserWindow } = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron');
@@ -476,19 +523,26 @@ base(
       })()`),
       ).toEqual({ disabled: false, visible: true, focused: true });
       await expect.poll(() => output.join('').includes('QA native hang entered')).toBe(true);
-      const discovery = new URL(endpoint);
-      discovery.protocol = 'http:';
-      discovery.pathname = '/json/list';
+      let recoveryWindowId: number | null = null;
+      // A DevTools target URL can precede BrowserWindow's committed URL. Bind the
+      // same loaded native window we will query, rather than mixing those clocks.
       await expect
         .poll(async () => {
-          const targets = (await (await fetch(discovery)).json()) as { url: string }[];
-          return targets.some((target) => target.url.endsWith('/recovery.html'));
+          const id = await mainEvaluate(`(() => {
+          const { BrowserWindow } = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron');
+          const win = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/recovery.html'));
+          return win && win.isVisible() && !win.webContents.isLoading() ? win.id : null;
+        })()`);
+          recoveryWindowId = typeof id === 'number' ? id : null;
+          return recoveryWindowId;
         })
-        .toBe(true);
+        .not.toBeNull();
+      const recoveryId = required(recoveryWindowId, 'loaded independent recovery window');
       const recoveryScript = (script: string) =>
         mainEvaluate(`(async () => {
         const { BrowserWindow } = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron');
-        const win = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/recovery.html'));
+        const win = BrowserWindow.fromId(${recoveryId});
+        if (!win || win.isDestroyed()) throw new Error('Bound recovery window disappeared');
         return win.webContents.executeJavaScript(${JSON.stringify(script)});
       })()`);
       await expect
@@ -513,7 +567,8 @@ base(
       expect(Date.now() - started).toBeLessThan(30_000);
       const png = await mainEvaluate(`(async () => {
         const { BrowserWindow } = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron');
-        const win = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/recovery.html'));
+        const win = BrowserWindow.fromId(${recoveryId});
+        if (!win || win.isDestroyed()) throw new Error('Bound recovery window disappeared');
         return (await win.webContents.capturePage()).toPNG().toString('base64');
       })()`);
       if (typeof png !== 'string') throw new Error('Recovery capture missing');
@@ -531,7 +586,7 @@ base(
         const win = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/index.html'));
         const recovery = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/recovery.html'));
         if (recovery?.isVisible()) return false;
-        if (win.webContents.isCrashed() || win.webContents.isLoading()) return false;
+        if (!win || win.webContents.isCrashed() || win.webContents.isLoading()) return false;
         return win.webContents.executeJavaScript("Boolean(document.querySelector('[data-testid=composer-input]'))");
       })()`),
         )
@@ -610,11 +665,13 @@ test('actual window close warns and restart restores exact text, paused queue an
   await qa.page.getByTestId('composer-input').fill('Pedido ainda por autorizar');
   await qa.page.getByTestId('composer-input').press('Enter');
   await expect(qa.page.getByTestId('permission-card')).toBeVisible();
-  await qa.page.getByTestId('composer-input').fill('Texto em fila, sem envio automático');
-  await qa.page.getByTestId('composer-input').press('Enter');
+  await enqueue(qa.page, id, 'Texto em fila, sem envio automático');
   await savedDraft(qa.page, id, 'Rascunho exato\ncom duas linhas.');
   await qa.page.evaluate(() => window.solline.request('engine.flush', {}));
   const before = await qa.page.evaluate(() => window.solline.request('engine.snapshot', {}));
+  expect(before.sessions[0]?.queue.items.map((item) => item.text)).toEqual([
+    'Texto em fila, sem envio automático',
+  ]);
   await qa.page.getByRole('button', { name: 'Controlos da janela', exact: true }).focus();
   await qa.page.getByRole('button', { name: 'Fechar janela', exact: true }).click();
   const recovery = await qa.recovery();
@@ -687,8 +744,7 @@ test('abrupt whole-process loss restores acknowledged draft and paused work with
   qa,
 }) => {
   const id = await begin(qa.page, 'Pedido pendente antes de terminar o processo');
-  await qa.page.getByTestId('composer-input').fill('Fila confirmada antes da falha');
-  await qa.page.getByTestId('composer-input').press('Enter');
+  await enqueue(qa.page, id, 'Fila confirmada antes da falha');
   await savedDraft(qa.page, id, 'Rascunho confirmado sem fecho normal');
   const before = await qa.page.evaluate(() => window.solline.request('engine.snapshot', {}));
   expect(before.sessions[0]?.queue.items.map((item) => item.text)).toEqual([
