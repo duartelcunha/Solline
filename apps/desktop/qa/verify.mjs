@@ -61,12 +61,15 @@ async function save() {
 await save();
 async function run(name, args, cwd = desktop) {
   const started = Date.now();
+  // Native cases each retain their own deadline. Budget the complete sequential batch
+  // separately: process setup/recovery can exceed 15 minutes under concurrent host load.
+  const timeoutMs = name === 'electron' ? 1_800_000 : 900_000;
   const result = spawnSync(process.execPath, args, {
     cwd,
     env,
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 900_000,
+    timeout: timeoutMs,
     maxBuffer: 32 * 1024 * 1024,
   });
   await writeFile(join(output, `${name}.log`), `${result.stdout ?? ''}\n${result.stderr ?? ''}`);
@@ -76,6 +79,7 @@ async function run(name, args, cwd = desktop) {
     args,
     exitCode: result.status,
     elapsedMs: Date.now() - started,
+    timeoutMs,
     error: result.error?.message,
   });
   await save();
