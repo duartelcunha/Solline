@@ -6,6 +6,9 @@ release/
 .vite/
 test-results/
 playwright-report/
+qa-report/
+qa-electron-report/
+qa-evidence/
 .eslintcache
 .DS_Store
 Thumbs.db

@@ -10,6 +10,11 @@ export default tseslint.config(
       '**/out/**',
       '**/dist/**',
       '**/release/**',
+      '**/qa-evidence/**',
+      '**/qa-report/**',
+      '**/qa-electron-report/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
       'archive/**',
       // Tipos gerados pelo codex app-server (scripts/codex-gen.mjs).
       'packages/engine/src/adapters/codex/protocol/**',

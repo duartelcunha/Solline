@@ -16,6 +16,7 @@ import { shouldAnimate } from '@solline/ui/motion';
 import { ReviewPanel } from './features/review/review-panel.tsx';
 import { Timeline } from './features/review/timeline.tsx';
 import { Familiar, SessionBot } from './features/agents/bots.tsx';
+import { Bot } from '@solline/ui/bot';
 import { Sidebar } from './features/sidebar/sidebar.tsx';
 import { usePresence } from '@solline/ui/react';
 import { actions, dispatch, sessionStore, useApp, useSession } from './stores/app.ts';
@@ -105,18 +106,32 @@ function EngineStatus({ ping }: { ping: PingState }) {
 
 function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
   const title = useSession(sessionId, (s) => s.info.title);
+  const state = useSession(sessionId, (s) => s.info.state);
+  const label = {
+    starting: 'A preparar',
+    idle: 'À tua espera',
+    running: 'A trabalhar',
+    'needs-you': 'Precisa de ti',
+    error: 'Ligação interrompida',
+  }[state];
   return (
-    <div className="flex min-w-48 items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       {/* O mesmo nome de transição do capuz dos cartões da mesa: abrir uma sessão transforma um no outro. */}
       <span className="session-bot-target">
-        <SessionBot key={sessionId} sessionId={sessionId} size={30} alive />
+        <SessionBot key={sessionId} sessionId={sessionId} size={36} alive />
       </span>
-      <h1
-        className="truncate text-[13px] font-semibold tracking-[-0.01em]"
-        data-testid="session-title"
-      >
-        {title}
-      </h1>
+      <div className="flex min-w-0 flex-col gap-0.5 py-1">
+        <h1
+          className="truncate text-[13px] font-semibold tracking-[-0.01em]"
+          data-testid="session-title"
+        >
+          {title}
+        </h1>
+        <span className="session-state-chip" data-state={state}>
+          <span aria-hidden className="size-1 rounded-full bg-current" />
+          {label}
+        </span>
+      </div>
     </div>
   );
 }
@@ -201,13 +216,22 @@ function Welcome() {
   const activeProjectId = useApp((s) => s.activeProjectId);
   const project = projects.find((p) => p.id === activeProjectId);
   return (
-    <section className="flex flex-1 flex-col items-center justify-center gap-6 px-8 text-center">
+    <section className="welcome flex flex-1 flex-col items-center justify-center gap-5 px-8 pb-16 text-center">
       {/* O familiar recebe-te: ao portátil no início, à porta de um projeto ainda vazio. */}
-      <Familiar size={132} />
+      <div className="companion-gathering" aria-hidden>
+        <Bot hood="codex" mood="reading" size={82} />
+        <Familiar size={152} />
+        <Bot hood="claude" mood="waiting" size={90} />
+      </div>
       <div>
         <h2 className="text-[2rem] leading-tight font-semibold tracking-[-0.025em]">
-          {project ? project.name : 'Bem-vindo'}
+          {project ? project.name : 'Um lugar para criar.'}
         </h2>
+        <p className="mt-3 max-w-sm text-[14px] leading-relaxed text-muted">
+          {project
+            ? 'O teu próximo passo começa aqui.'
+            : 'Os teus projetos, os teus agentes. Tudo com espaço para pensar.'}
+        </p>
       </div>
       {project ? (
         <NewSessionButton project={project} variant="primary" />
@@ -287,7 +311,7 @@ export function App() {
   }, [sessionIds]);
 
   return (
-    <div className="grid h-full grid-cols-[16rem_1fr]">
+    <div className="app-shell grid h-full min-h-0 grid-cols-[15rem_minmax(0,1fr)]">
       <Sidebar
         sessionsByProject={sessionsByProject}
         footer={
@@ -326,8 +350,8 @@ export function App() {
       <AgentsPanel />
       <CloseDialog />
 
-      <main className="flex min-w-0 flex-col">
-        <header className="drag flex h-11 shrink-0 items-center gap-3 pr-[9.5rem] pl-5">
+      <main className="flex min-h-0 min-w-0 flex-col">
+        <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[9.5rem] pl-5">
           {activeSessionId ? (
             <SessionHeaderTitle sessionId={activeSessionId} />
           ) : raceId ? (
@@ -343,8 +367,8 @@ export function App() {
         <NoticeBar notice={notice} />
 
         {activeSessionId ? (
-          <div className="flex min-h-0 flex-1">
-            <div className="flex min-w-0 flex-1 flex-col">
+          <div className="session-body relative flex min-h-0 flex-1">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <Conversation key={activeSessionId} sessionId={activeSessionId} />
               <Composer
                 key={`c-${activeSessionId}`}

@@ -45,7 +45,7 @@ export function SettingsPills({
   const showMode = capabilities.modes.length > 0;
   return (
     <div
-      className="flex min-w-0 flex-nowrap items-center gap-1.5"
+      className="flex min-w-0 flex-wrap items-center gap-1.5"
       role="group"
       aria-label="Modelo, effort e modo"
     >
@@ -56,11 +56,12 @@ export function SettingsPills({
             disabled={disabled}
             data-testid="pill-model"
             aria-label={`Modelo: ${modelName}. Mudar`}
-            className={pillClass}
+            title={modelName}
+            className={`${pillClass} max-w-[min(12rem,100%)]`}
           >
-            <Cpu aria-hidden size={13} strokeWidth={1.9} />
-            {modelName}
-            <ChevronDown aria-hidden size={12} strokeWidth={2} className="opacity-60" />
+            <Cpu aria-hidden size={13} strokeWidth={1.9} className="shrink-0" />
+            <span className="min-w-0 truncate">{modelName}</span>
+            <ChevronDown aria-hidden size={12} strokeWidth={2} className="shrink-0 opacity-60" />
           </Menu.Trigger>
         }
       >
@@ -117,13 +118,15 @@ export function SettingsPills({
               data-testid="pill-mode"
               aria-label={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}. Mudar`}
               title={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}`}
-              className={pillClass}
+              className={`${pillClass} max-w-full !h-auto min-h-7 py-1`}
             >
               <IconSwap swapKey={mode?.id ?? settings.mode ?? 'ask'}>
                 <ModeIcon risk={mode?.risk ?? 'ask'} size={14} />
               </IconSwap>
               {/* O modo é o que diz o risco: o nome fica sempre. */}
-              {mode?.label ?? settings.mode ?? 'Modo'}
+              <span className="max-w-48 min-w-0 text-left leading-4 whitespace-normal break-words">
+                {mode?.label ?? settings.mode ?? 'Modo'}
+              </span>
               <ChevronDown
                 aria-hidden
                 size={12}

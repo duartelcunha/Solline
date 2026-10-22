@@ -1,14 +1,6 @@
-/**
- * A geometria dos bots da Solline: o Solline Pin de olhos abertos. A linha do tempo é a
- * bainha do capuz, o meio sol é o capuz, a abertura escura é outro meio sol e os olhos são
- * meios sóis pequenos. Tudo numa grelha de 256 (a do ícone da app), em funções puras: a app,
- * o gerador do ícone e os testes desenham a partir daqui.
- */
-
-/** O humor do bot: o que a cara e o capuz mostram. */
+/** Original cut-paper companions. Shape identifies the agent; eyes and posture communicate state. */
 export type Mood =
   'waiting' | 'working' | 'needs-you' | 'done' | 'crashed' | 'sleeping' | 'reading';
-
 export const MOODS: readonly Mood[] = [
   'waiting',
   'working',
@@ -18,166 +10,36 @@ export const MOODS: readonly Mood[] = [
   'sleeping',
   'reading',
 ];
-
-/**
- * A cor do estado vive na bainha (a linha da marca) e, quando é urgente, nos olhos: calma é
- * a cor do agente, atenção é âmbar ("precisa de ti"), perigo é vermelho ("caiu").
- */
 export type Tone = 'calm' | 'attention' | 'danger';
-
-const CX = 128;
-const BASE = 150;
-const HOOD_R = 84;
-/** O capuz é mais alto do que largo: lê-se melhor num quadrado pequeno. */
-const HOOD_RY = 112;
-const FACE_R = 54;
-const FACE_RY = 74;
-const HEM_Y = 158;
-const HEM_X0 = 38;
-const HEM_X1 = 218;
-const EYE_R = 13;
-const EYE_Y = 128;
-const EYE_DX = 22;
-
-export const HEM_WIDTH = 16;
-export const EYE_STROKE = 8;
-
-/** A janela de desenho: o bot ao centro, a encher a largura. */
-export const VIEWBOX = '24 -14 208 208';
-
+export const HOODS = {
+  claude: '#e88451',
+  codex: '#728bce',
+  reviewer: '#79a879',
+  acp: '#c77aba',
+  other: '#8f78bf',
+  solline: '#d9ab36',
+  familiar: '#d9ab36',
+} as const;
+export type Hood = keyof typeof HOODS;
+export const STATE_COLOURS = { attention: '#e8b64d', danger: '#d76464' };
+export const VIEWBOX = '0 0 256 224';
+export const HEM_WIDTH = 8;
+export const EYE_STROKE = 6;
+export const HOOD_ORIGIN = '128px 164px';
 export interface EyePath {
   d: string;
-  /** fill: forma cheia; stroke: traço (olhos em arco, em X, fechados). */
   paint: 'fill' | 'stroke';
+  layer?: 'pupil' | 'lid';
 }
-
 export interface BotFrame {
-  /** O capuz (meio disco) e a sua transformação para o humor (levantado, descaído). */
   hood: string;
   hoodTransform: string;
-  /** A mesma transformação em CSS (com HOOD_ORIGIN), para poder fazer transição. */
   hoodCss: string;
-  /** A abertura escura onde vive a cara. */
   face: string;
-  /** A bainha: a linha do tempo da marca. */
   hem: string;
   eyes: EyePath[];
   tone: Tone;
 }
-
-const num = (n: number) => Math.round(n * 100) / 100;
-
-/** Meio disco (ou meia elipse) com o lado plano em baixo, centrado em (cx, cy). */
-function halfDisc(cx: number, cy: number, r: number, ry = r): string {
-  return `M${num(cx - r)} ${num(cy)}A${num(r)} ${num(ry)} 0 0 1 ${num(cx + r)} ${num(cy)}Z`;
-}
-
-function circle(cx: number, cy: number, r: number): string {
-  return `M${num(cx - r)} ${num(cy)}a${num(r)} ${num(r)} 0 1 0 ${num(2 * r)} 0a${num(r)} ${num(r)} 0 1 0 ${num(-2 * r)} 0Z`;
-}
-
-function eyes(mood: Mood): EyePath[] {
-  const xs = [CX - EYE_DX, CX + EYE_DX];
-  switch (mood) {
-    case 'working':
-      // Três pontos no lugar dos olhos: está a pensar.
-      return [CX - 24, CX, CX + 24].map((x) => ({ d: circle(x, EYE_Y - 4, 8), paint: 'fill' }));
-    case 'needs-you':
-      // Olhos grandes, a olhar para cima, para ti.
-      return xs.map((x) => ({ d: circle(x, EYE_Y - 16, 15), paint: 'fill' }));
-    case 'done':
-      // Olhos em arco: contente.
-      return xs.map((x) => ({
-        d: `M${x - EYE_R} ${EYE_Y}A${EYE_R} ${EYE_R} 0 0 1 ${x + EYE_R} ${EYE_Y}`,
-        paint: 'stroke',
-      }));
-    case 'crashed':
-      return xs.map((x) => ({
-        d: `M${x - 10} ${EYE_Y - 14}L${x + 10} ${EYE_Y + 6}M${x + 10} ${EYE_Y - 14}L${x - 10} ${EYE_Y + 6}`,
-        paint: 'stroke',
-      }));
-    case 'sleeping':
-      return xs.map((x) => ({ d: `M${x - EYE_R} ${EYE_Y - 3}H${x + EYE_R}`, paint: 'stroke' }));
-    case 'reading':
-      // Uma fenda a toda a largura da cara: está a varrer uma linha.
-      return [{ d: `M${CX - 30} ${EYE_Y - 6}H${CX + 30}`, paint: 'stroke' }];
-    default:
-      return xs.map((x) => ({ d: halfDisc(x, EYE_Y, EYE_R), paint: 'fill' }));
-  }
-}
-
-function hoodTransform(mood: Mood): string {
-  // Pivô na bainha, ao centro: o capuz levanta-se ou descai a partir da base.
-  const pivot = (t: string) => `translate(${CX} ${HEM_Y}) ${t} translate(${-CX} ${-HEM_Y})`;
-  switch (mood) {
-    case 'needs-you':
-      return pivot('scale(1.05)');
-    case 'crashed':
-      return pivot('scale(1 0.9)');
-    case 'sleeping':
-      return pivot('scale(1 0.92)');
-    default:
-      return '';
-  }
-}
-
-/** O pivô do capuz (o centro da bainha), em unidades da grelha. */
-export const HOOD_ORIGIN = `${CX}px ${HEM_Y}px`;
-
-function hoodCss(mood: Mood): string {
-  switch (mood) {
-    case 'needs-you':
-      return 'scale(1.05)';
-    case 'crashed':
-      return 'scale(1, 0.9)';
-    case 'sleeping':
-      return 'scale(1, 0.92)';
-    default:
-      return 'scale(1)';
-  }
-}
-
-function toneOf(mood: Mood): Tone {
-  if (mood === 'needs-you') return 'attention';
-  if (mood === 'crashed') return 'danger';
-  return 'calm';
-}
-
-/** O desenho do bot para um humor, parado (a animação interpola entre estes). */
-export function botFrame(mood: Mood): BotFrame {
-  return {
-    hood: halfDisc(CX, BASE, HOOD_R, HOOD_RY),
-    hoodTransform: hoodTransform(mood),
-    hoodCss: hoodCss(mood),
-    face: halfDisc(CX, BASE, FACE_R, FACE_RY),
-    hem: `M${HEM_X0} ${HEM_Y}H${HEM_X1}`,
-    eyes: eyes(mood),
-    tone: toneOf(mood),
-  };
-}
-
-/**
- * Capuzes com a mesma luminosidade e pouca saturação: a cor diz quem é sem gritar. A cor
- * forte fica para o estado.
- */
-export const HOODS = {
-  claude: 'oklch(0.7 0.09 45)',
-  codex: 'oklch(0.7 0.09 210)',
-  reviewer: 'oklch(0.7 0.09 150)',
-  acp: 'oklch(0.7 0.09 350)',
-  other: 'oklch(0.7 0.09 265)',
-  solline: 'oklch(0.79 0.145 82)',
-  familiar: 'oklch(0.62 0.012 80)',
-} as const;
-
-export type Hood = keyof typeof HOODS;
-
-export const STATE_COLOURS: Record<Exclude<Tone, 'calm'>, string> = {
-  attention: 'oklch(0.79 0.145 82)',
-  danger: 'oklch(0.66 0.18 28)',
-};
-
-/** As cores de um bot num tom: o capuz é a identidade; a bainha e os olhos dizem o estado. */
 export interface BotPalette {
   hood: string;
   hem: string;
@@ -185,36 +47,98 @@ export interface BotPalette {
   eyes: string;
 }
 
-export function palette(hood: Hood, tone: Tone = 'calm'): BotPalette {
-  const base = HOODS[hood];
-  const calmEyes = hood === 'solline' ? '#ffd071' : '#fff1d6';
+/** Each silhouette is authored rather than a random/noisy blob, and remains recognisable at 24 px. */
+const SHAPES: Record<Hood, string> = {
+  familiar:
+    'M115 35C134 11 164 20 168 44C171 62 166 64 186 69C218 75 232 99 213 120C201 134 192 130 199 151C210 185 185 202 159 190C144 183 143 178 128 191C103 213 76 201 75 178C74 164 67 165 52 161C20 152 20 121 43 107C59 97 58 96 50 80C38 55 60 34 83 42C100 48 102 50 115 35Z',
+  solline:
+    'M115 35C134 11 164 20 168 44C171 62 166 64 186 69C218 75 232 99 213 120C201 134 192 130 199 151C210 185 185 202 159 190C144 183 143 178 128 191C103 213 76 201 75 178C74 164 67 165 52 161C20 152 20 121 43 107C59 97 58 96 50 80C38 55 60 34 83 42C100 48 102 50 115 35Z',
+  claude:
+    'M131 21L150 62L192 42L182 85L225 101L188 125L212 166L166 162L151 204L124 172L84 197L83 155L38 160L61 122L29 92L73 82L65 38L108 60Z',
+  codex:
+    'M87 37C111 25 128 41 129 57C145 30 171 31 183 49C192 61 184 79 177 88C209 77 229 95 224 115C221 129 205 135 191 136C215 150 210 178 189 184C172 189 157 177 149 166C153 196 131 209 111 199C97 192 94 179 96 167C75 191 47 182 44 162C41 145 55 135 69 130C37 124 29 101 43 84C55 71 72 76 81 82C68 62 72 44 87 37Z',
+  reviewer:
+    'M132 25L153 53L190 42L194 78L226 94L207 125L221 158L185 166L170 200L136 186L105 204L87 174L49 170L53 133L27 107L55 83L60 48L98 53Z',
+  acp: 'M57 63C67 41 117 22 150 29C182 35 192 53 176 70C166 80 147 83 132 84C182 78 218 95 216 119C214 139 186 143 164 146C188 151 193 168 177 183C156 202 97 204 66 183C42 167 42 144 64 135C35 121 38 99 63 90C50 83 49 76 57 63Z',
+  other:
+    'M58 71C80 39 113 39 132 56C158 24 193 40 198 68C202 89 190 100 181 112C215 130 212 166 183 176C162 183 151 172 136 163C119 198 80 196 68 169C60 151 67 138 75 124C41 120 40 95 58 71Z',
+};
+const ellipse = (x: number, y: number, rx: number, ry: number) =>
+  `M${x - rx} ${y}a${rx} ${ry} 0 1 0 ${rx * 2} 0a${rx} ${ry} 0 1 0 ${-rx * 2} 0Z`;
+function eyes(mood: Mood): EyePath[] {
+  const xs = [103, 153];
+  if (mood === 'done')
+    return xs.map((x) => ({
+      d: `M${x - 13} 116Q${x} 96 ${x + 13} 116`,
+      paint: 'stroke',
+      layer: 'lid',
+    }));
+  if (mood === 'sleeping')
+    return xs.map((x) => ({
+      d: `M${x - 12} 116Q${x} 124 ${x + 12} 116`,
+      paint: 'stroke',
+      layer: 'lid',
+    }));
+  const wide = mood === 'needs-you';
+  const reading = mood === 'reading';
+  const whites: EyePath[] = xs.map((x) => ({
+    d: ellipse(x, 112, wide ? 20 : 18, reading ? 15 : 25),
+    paint: 'fill',
+  }));
+  const pupils: EyePath[] = xs.map((x, i) => ({
+    d: ellipse(x, mood === 'crashed' ? 119 - i * 4 : 113, wide ? 9 : 10, reading ? 8 : 14),
+    paint: 'fill',
+    layer: 'pupil',
+  }));
+  const worry: EyePath[] =
+    mood === 'crashed'
+      ? [
+          {
+            d: 'M88 87L111 93M145 93L168 87M117 153Q128 145 139 153',
+            paint: 'stroke',
+            layer: 'lid',
+          },
+        ]
+      : [];
+  return [...whites, ...pupils, ...worry];
+}
+export function botFrame(mood: Mood, hood: Hood = 'solline'): BotFrame {
+  const posture =
+    mood === 'sleeping'
+      ? 'rotate(-7deg) scale(1.03, .94)'
+      : mood === 'needs-you'
+        ? 'translateY(-3px) scale(.97, 1.04)'
+        : mood === 'crashed'
+          ? 'scale(1.03, .94)'
+          : 'scale(1)';
+  const svgPosture =
+    mood === 'sleeping' ? 'rotate(-7 128 164)' : mood === 'needs-you' ? 'translate(0 -3)' : '';
   return {
-    hood: base,
-    hem: tone === 'calm' ? `color-mix(in oklch, ${base} 78%, black)` : STATE_COLOURS[tone],
-    face: '#14120f',
-    eyes: tone === 'attention' ? STATE_COLOURS.attention : calmEyes,
+    hood: SHAPES[hood],
+    hoodTransform: svgPosture,
+    hoodCss: posture,
+    face: '',
+    hem: 'M88 209H168',
+    eyes: eyes(mood),
+    tone: mood === 'needs-you' ? 'attention' : mood === 'crashed' ? 'danger' : 'calm',
   };
 }
-
-/** O bot como SVG em texto: para o gerador do ícone, pré-visualizações e testes. */
+export function palette(hood: Hood, tone: Tone = 'calm'): BotPalette {
+  return {
+    hood: HOODS[hood],
+    hem: tone === 'calm' ? `color-mix(in oklch, ${HOODS[hood]} 78%, black)` : STATE_COLOURS[tone],
+    face: '#202128',
+    eyes: '#fffdf4',
+  };
+}
 export function botSvg(mood: Mood, hood: Hood, size = 64): string {
-  const f = botFrame(mood);
-  const p = palette(hood, f.tone);
-  const eyesMarkup = f.eyes
-    .map((e) =>
-      e.paint === 'fill'
-        ? `<path d="${e.d}" fill="${p.eyes}"/>`
-        : `<path d="${e.d}" fill="none" stroke="${p.eyes}" stroke-width="${EYE_STROKE}" stroke-linecap="round"/>`,
+  const f = botFrame(mood, hood),
+    p = palette(hood, f.tone);
+  const markup = f.eyes
+    .map(
+      (e) =>
+        `<path d="${e.d}" fill="${e.paint === 'fill' ? (e.layer === 'pupil' ? p.face : p.eyes) : 'none'}" stroke="${e.paint === 'stroke' ? p.face : 'none'}" stroke-width="${EYE_STROKE}" stroke-linecap="round"/>`,
     )
     .join('');
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${VIEWBOX}" width="${size}" height="${size}">` +
-    `<g transform="${f.hoodTransform}">` +
-    `<path d="${f.hood}" fill="${p.hood}"/>` +
-    `<path d="${f.face}" fill="${p.face}"/>` +
-    eyesMarkup +
-    `</g>` +
-    `<path d="${f.hem}" stroke="${p.hem}" stroke-width="${HEM_WIDTH}" stroke-linecap="round"/>` +
-    `</svg>`
-  );
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${VIEWBOX}" width="${size}" height="${size}"><g transform="${f.hoodTransform}"><path d="${f.hood}" fill="${p.hood}"/>${markup}</g></svg>`;
 }

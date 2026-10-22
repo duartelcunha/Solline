@@ -45,6 +45,7 @@ interface AppState {
   /** A criar uma sessão neste projeto. */
   creatingIn: string | null;
   notice: string | null;
+  engineOffline: boolean;
   /** O painel de rever está aberto (vale para a sessão ativa). */
   reviewOpen: boolean;
   /** O painel de agentes está aberto. */
@@ -61,6 +62,10 @@ interface AppState {
     deletions: number;
     /** Mensagens na fila que se perdem ao fechar. */
     queued?: number;
+    draft?: boolean;
+    dropDraft?: boolean;
+    dropQueue?: boolean;
+    worktree?: 'bring' | 'keep' | 'discard';
   } | null;
   /** A vista principal: a mesa com todas as sessões, ou a conversa da sessão ativa. */
   view: 'desk' | 'session' | 'race';
@@ -82,6 +87,7 @@ export const useApp = create<AppState>(() => ({
   activeSessionId: null,
   creatingIn: null,
   notice: null,
+  engineOffline: false,
   reviewOpen: false,
   agentsPanel: false,
   checkingAgents: false,
@@ -162,7 +168,7 @@ export function dispatch(event: EngineEvent): void {
     return;
   }
   if (event.type === 'engine.error') {
-    useApp.setState({ notice: event.message });
+    useApp.setState({ notice: event.message, engineOffline: true });
     for (const store of sessionStores.values()) {
       // Pela fila, como os outros eventos: nada que esteja à espera o desfaz depois.
       enqueue(() => {
@@ -181,7 +187,10 @@ export function dispatch(event: EngineEvent): void {
     }
     return;
   }
-  if (event.type === 'engine.ready') return;
+  if (event.type === 'engine.ready') {
+    useApp.setState({ engineOffline: false });
+    return;
+  }
   if (event.type === 'agents.changed') {
     if (event.error) useApp.setState({ notice: event.error });
     void actions.loadAgents();
@@ -495,7 +504,28 @@ export const actions = {
     sessionId: string,
     worktree?: 'bring' | 'keep' | 'discard',
     dropQueue = false,
+    dropDraft = false,
   ): Promise<void> {
+    const session = sessionStores.get(sessionId)?.getState();
+    if (session?.pendingSend !== null && session?.pendingSend !== undefined) {
+      useApp.setState({
+        notice: 'A mensagem ainda está a ser enviada. Espera pela resposta antes de fechar.',
+      });
+      return;
+    }
+    if (!dropDraft && session?.composerText.trim()) {
+      useApp.setState({
+        closing: {
+          sessionId,
+          files: 0,
+          additions: 0,
+          deletions: 0,
+          draft: true,
+          queued: session.queue?.items.length ?? 0,
+        },
+      });
+      return;
+    }
     try {
       const result = await request('session.close', {
         sessionId,
@@ -505,7 +535,15 @@ export const actions = {
       if (!result.closed) {
         if (result.queued) {
           useApp.setState({
-            closing: { sessionId, files: 0, additions: 0, deletions: 0, queued: result.queued },
+            closing: {
+              sessionId,
+              files: 0,
+              additions: 0,
+              deletions: 0,
+              queued: result.queued,
+              worktree,
+              dropDraft,
+            },
           });
           return;
         }
@@ -517,7 +555,7 @@ export const actions = {
             notice: 'Há conflitos: pede ao agente para os resolver.',
           });
         } else if (result.stats) {
-          useApp.setState({ closing: { sessionId, ...result.stats } });
+          useApp.setState({ closing: { sessionId, ...result.stats, dropDraft, dropQueue } });
         }
         return;
       }
@@ -641,14 +679,63 @@ export const actions = {
     );
   },
 
-  async answer(sessionId: string, requestId: string, answer: PermissionAnswer): Promise<void> {
-    await request('permission.answer', { sessionId, requestId, answer }).catch((error: unknown) =>
-      setActionError(sessionId, error),
-    );
+  async answer(sessionId: string, requestId: string, answer: PermissionAnswer): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('permission.answer', { sessionId, requestId, answer });
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
+  editComposer(sessionId: string, value: string | ((current: string) => string)): void {
+    const store = sessionStores.get(sessionId);
+    if (store)
+      store.setState({
+        composerText: typeof value === 'function' ? value(store.getState().composerText) : value,
+      });
+  },
+
+  beginComposerSend(sessionId: string, text: string): boolean {
+    const store = sessionStores.get(sessionId);
+    if (!store || store.getState().pendingSend !== null) return false;
+    store.setState({ pendingSend: text, composerText: '' });
+    return true;
+  },
+
+  finishComposerSend(sessionId: string, ok: boolean): void {
+    const store = sessionStores.get(sessionId);
+    const current = store?.getState();
+    if (!store || !current || current.pendingSend === null) return;
+    store.setState({
+      pendingSend: null,
+      ...(!ok
+        ? {
+            composerText: current.composerText
+              ? `${current.pendingSend}\n${current.composerText}`
+              : current.pendingSend,
+          }
+        : {}),
+    });
+  },
+
+  receiveDraft(sessionId: string): void {
+    const store = sessionStores.get(sessionId);
+    const current = store?.getState();
+    if (!store || !current || current.draft === null) return;
+    store.setState({
+      draft: null,
+      composerText: current.composerText.trim()
+        ? `${current.composerText}\n${current.draft}`
+        : current.draft,
+    });
   },
 
   /** Retoma uma sessão cujo claude.exe caiu (resume do agente, mesmo histórico). */
   async resume(sessionId: string): Promise<void> {
+    if (useApp.getState().engineOffline) return;
     const store = sessionStores.get(sessionId);
     store?.setState({ actionError: null });
     try {

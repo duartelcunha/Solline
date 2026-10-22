@@ -27,6 +27,8 @@ export interface SessionData {
   timeline: Timeline | null;
   /** Texto que volta à caixa de mensagem (depois de rebobinar a conversa). */
   draft: string | null;
+  composerText: string;
+  pendingSend: string | null;
   /** A segunda opinião: se está ligada e o que o revisor achou do último turno. */
   quality: Quality | null;
   /** As verificações do projeto (tipos, lint, testes) depois do último turno que mudou ficheiros. */
@@ -60,6 +62,8 @@ export function createSessionStore(
     actionError: null,
     timeline: null,
     draft: null,
+    composerText: '',
+    pendingSend: null,
     quality: null,
     checks: null,
     conflicts: null,

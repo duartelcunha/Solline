@@ -161,8 +161,8 @@ export function CloseDialog() {
   const title = useSession(closing?.sessionId ?? null, (s) => s.info.title);
   if (!closing) return null;
   const close = (choice: 'bring' | 'keep' | 'discard') =>
-    void actions.closeSession(closing.sessionId, choice);
-  if (closing.queued) {
+    void actions.closeSession(closing.sessionId, choice, closing.dropQueue, closing.dropDraft);
+  if (closing.queued || closing.draft) {
     // Mensagens na fila: fechar deita-as fora, por isso pergunta antes.
     return (
       <Dialog.Root
@@ -180,9 +180,12 @@ export function CloseDialog() {
                 {title}
               </Dialog.Title>
               <Dialog.Description className="text-[12px] text-muted">
+                {closing.draft ? 'Tens uma mensagem por enviar. ' : ''}
                 {closing.queued === 1
                   ? 'Tens uma mensagem na fila.'
-                  : `Tens ${closing.queued} mensagens na fila.`}
+                  : closing.queued
+                    ? `Tens ${closing.queued} mensagens na fila.`
+                    : ''}
               </Dialog.Description>
             </div>
             <div className="flex items-center gap-2">
@@ -195,7 +198,9 @@ export function CloseDialog() {
               </button>
               <button
                 type="button"
-                onClick={() => void actions.closeSession(closing.sessionId, undefined, true)}
+                onClick={() =>
+                  void actions.closeSession(closing.sessionId, closing.worktree, true, true)
+                }
                 className={`${buttonClass} ml-auto text-danger hover:bg-surface-hover`}
                 data-testid="close-drop-queue"
               >

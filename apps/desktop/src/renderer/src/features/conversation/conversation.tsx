@@ -8,7 +8,7 @@ import {
 } from '@solline/ui/scroll';
 import type { Block, PermissionAnswer, ToolBlock, Turn } from '@solline/protocol';
 import { Markdown } from '../../components/markdown.tsx';
-import { actions, useSession } from '../../stores/app.ts';
+import { actions, useApp, useSession } from '../../stores/app.ts';
 import { AgentLabelContext, useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { MorphScope } from '../../lib/morph.ts';
 import { PermissionCard, PlanCard, QuestionCard } from './asks.tsx';
@@ -54,7 +54,7 @@ function AssistantTurn({
   /** O último turno: só os pedidos dele se transformam (lib/morph.ts). */
   latest: boolean;
   onOpen: (tool: ToolBlock) => void;
-  onAnswer: (requestId: string, answer: PermissionAnswer) => void;
+  onAnswer: (requestId: string, answer: PermissionAnswer) => Promise<boolean>;
 }) {
   // shortcut: os passos de subagentes (parentToolId) aparecem na mesma lista, sem
   // sub-conversa dobrável; isso é do M2.
@@ -135,6 +135,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   const cwd = useSession(sessionId, (s) => s.info.cwd);
   const error = useSession(sessionId, (s) => s.error);
   const canResume = useSession(sessionId, (s) => s.capabilities?.features.resume !== false);
+  const engineOffline = useApp((s) => s.engineOffline);
   const agentLabel = useSessionAgentLabel(sessionId);
   const [openToolId, setOpenToolId] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -174,7 +175,14 @@ export function Conversation({ sessionId }: { sessionId: string }) {
     const el = scroller.current;
     if (!el || !firstPendingId) return;
     const card = el.querySelector(`[data-ask="${CSS.escape(firstPendingId)}"]`);
-    if (card) scrollIntoViewSmooth(el, card, 'nearest', 32);
+    if (card) {
+      // Keep the complete decision visible when it fits; decorative margins must not crop buttons.
+      const margin = Math.max(
+        0,
+        Math.min(32, (el.clientHeight - card.getBoundingClientRect().height) / 2),
+      );
+      scrollIntoViewSmooth(el, card, 'nearest', margin);
+    }
   }, [firstPendingId]);
 
   const signature = `${turns.length}:${turns.at(-1)?.blocks.length ?? 0}`;
@@ -223,9 +231,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
                       firstPendingId={firstPendingId}
                       latest={index === turns.length - 1}
                       onOpen={(tool) => setOpenToolId(tool.id)}
-                      onAnswer={(requestId, answer) =>
-                        void actions.answer(sessionId, requestId, answer)
-                      }
+                      onAnswer={(requestId, answer) => actions.answer(sessionId, requestId, answer)}
                     />
                   )}
                 </div>
@@ -269,7 +275,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
             >
               <WifiOff size={16} className="shrink-0 text-muted" />
               <p className="min-w-0 flex-1 text-[13px] text-muted">{error}</p>
-              {canResume ? (
+              {canResume && !engineOffline ? (
                 <button
                   type="button"
                   onClick={() => void actions.resume(sessionId)}

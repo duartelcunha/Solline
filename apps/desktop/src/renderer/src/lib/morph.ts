@@ -3,6 +3,13 @@ import { flushSync } from 'react-dom';
 import type { EngineEvent } from '@solline/protocol';
 import { prefersReducedMotion } from '@solline/ui/motion';
 
+/** Superseding an animation rejects ready, even when its DOM update succeeded. */
+export function observeTransition(transition: ViewTransition): void {
+  void transition.ready.catch((error: unknown) => {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) console.error(error);
+  });
+}
+
 /**
  * Uma mudança de estado que se transforma em vez de saltar: o browser fotografa o antes,
  * aplica a mudança e transforma cada elemento com o mesmo view-transition-name no novo
@@ -39,6 +46,7 @@ export function createMorphQueue(): (update: () => void, transform: boolean) => 
     }
     waiting += 1;
     const transition = document.startViewTransition(() => flushSync(update));
+    observeTransition(transition);
     tail = transition.updateCallbackDone.catch(() => undefined).finally(settle);
   };
 }

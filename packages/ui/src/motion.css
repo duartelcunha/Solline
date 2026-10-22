@@ -179,6 +179,14 @@
 .bot-hood {
   transition: transform var(--sl-dur-base) var(--sl-ease-out);
 }
+.bot-pupils {
+  transition: transform var(--sl-dur-fast) var(--sl-ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bot-pupils {
+    transition: none;
+  }
+}
 [data-mood='crashed'] .bot-hood,
 [data-mood='sleeping'] .bot-hood {
   transition: transform var(--sl-dur-slow) var(--sl-ease-in-out);
@@ -222,6 +230,10 @@
 }
 .bot-scan {
   animation: sl-bot-scan 1.2s var(--sl-ease-in-out) infinite alternate;
+}
+[data-live='false'] .bot-dot,
+[data-live='false'] .bot-scan {
+  animation: none;
 }
 /* Janela escondida ou sem foco: o que se repete fica parado. */
 :root[data-ambient='paused'] .bot-dot,

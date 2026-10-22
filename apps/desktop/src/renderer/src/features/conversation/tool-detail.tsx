@@ -1,4 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
+import { useRef } from 'react';
 import { X } from 'lucide-react';
 import type { ToolBlock } from '@solline/protocol';
 import { IconSwap } from '@solline/ui/icon-swap';
@@ -26,11 +27,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /** A vista detalhada de uma ferramenta: o "ctrl+o" do CLI, com input e output completos. */
 export function ToolDetail({ tool, onClose }: { tool: ToolBlock | null; onClose: () => void }) {
+  const returnFocus = useRef<HTMLElement | null>(null);
   return (
     <Dialog.Root open={tool !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]" />
         <Dialog.Content
+          onOpenAutoFocus={() => {
+            returnFocus.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (returnFocus.current?.isConnected)
+              returnFocus.current.focus({ preventScroll: true });
+          }}
           data-testid="tool-detail"
           className="dialog-content fixed top-1/2 left-1/2 z-50 flex max-h-[86vh] w-[min(46rem,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-line bg-surface shadow-raised outline-none"
         >

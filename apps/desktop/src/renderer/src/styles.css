@@ -2,6 +2,8 @@
 @import '@solline/ui/fonts.css';
 @import '@solline/ui/tokens.css';
 @import '@solline/ui/motion.css';
+@source '.';
+@source '../../../../../packages/ui/src';
 
 /* Os tokens da Solline passam a utilitários do Tailwind (bg-surface, text-muted, ...). */
 @theme inline {
@@ -18,6 +20,9 @@
   --color-accent: var(--sl-accent);
   --color-accent-soft: var(--sl-accent-soft);
   --color-accent-text: var(--sl-accent-text);
+  --color-attention: var(--sl-attention);
+  --color-attention-soft: var(--sl-attention-soft);
+  --color-on-accent: var(--sl-on-accent);
   --color-success: var(--sl-success);
   --color-danger: var(--sl-danger);
   --font-sans: var(--sl-font-sans);
@@ -51,8 +56,8 @@ body {
   user-select: none;
   /* A troca de tema suaviza em vez de piscar. */
   transition:
-    background-color var(--sl-duration-base) var(--sl-ease-out),
-    color var(--sl-duration-base) var(--sl-ease-out);
+    background-color var(--sl-dur-base) var(--sl-ease-out),
+    color var(--sl-dur-base) var(--sl-ease-out);
 }
 
 /* Na camada base, para um outline-none de um componente ganhar. */
@@ -69,7 +74,7 @@ body {
   }
   textarea,
   input {
-    caret-color: var(--sl-accent);
+    caret-color: var(--sl-accent-text);
   }
   * {
     scrollbar-width: thin;
@@ -83,6 +88,182 @@ body {
 
 .no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* Shared surfaces retain their own interaction logic and gain one visual language. */
+.app-shell {
+  padding: 10px;
+  gap: 10px;
+  background:
+    radial-gradient(
+      ellipse at 8% 100%,
+      color-mix(in srgb, var(--sl-accent) 24%, transparent),
+      transparent 48%
+    ),
+    var(--sl-ground);
+}
+.app-shell > aside {
+  padding-inline: 6px;
+  border: 1px solid var(--sl-glass-edge);
+  border-radius: 20px;
+  background: var(--sl-glass);
+  box-shadow: var(--sl-glass-shadow);
+}
+.app-shell > main {
+  overflow: hidden;
+  border: 1px solid var(--sl-glass-edge);
+  border-radius: 20px;
+  background: var(--sl-bg);
+  box-shadow: var(--sl-glass-shadow);
+}
+.app-shell > aside > .drag {
+  height: 56px;
+}
+[data-testid='session-row'][aria-current='page'] {
+  background: var(--sl-surface);
+  box-shadow:
+    inset 0 1px 0 var(--sl-glass-edge),
+    0 3px 8px #213c3510;
+}
+.composer {
+  border: 1px solid var(--sl-glass-edge);
+  border-radius: 24px;
+  background: var(--sl-glass);
+  backdrop-filter: blur(20px);
+  box-shadow:
+    inset 0 1px 0 var(--sl-glass-edge),
+    0 10px 24px -12px #20352d35;
+}
+.composer:focus-within {
+  border-color: var(--sl-focus);
+  box-shadow:
+    inset 0 1px 0 var(--sl-glass-edge),
+    0 10px 24px -12px #20352d35;
+}
+[data-testid='send']:not(:disabled),
+[data-testid='welcome-new-session'] {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--sl-accent), white 13%),
+    var(--sl-accent)
+  );
+  color: var(--sl-on-accent);
+  box-shadow:
+    inset 0 1px 0 #ffffff70,
+    0 3px 8px #163e2920;
+}
+[data-testid='permission-card'],
+[data-testid='question-card'],
+[data-testid='plan-card'] {
+  scroll-margin-block: 24px;
+}
+[data-testid='review-panel'] {
+  background: var(--sl-surface);
+}
+.welcome h2 {
+  font-size: clamp(28px, 3vw, 40px);
+  letter-spacing: -0.045em;
+  font-weight: 550;
+}
+.welcome [data-testid='familiar'] {
+  margin-bottom: -6px;
+}
+.prose-sl {
+  color: var(--sl-text);
+}
+.dialog-content {
+  box-shadow:
+    0 24px 96px -24px #0d281d50,
+    var(--sl-shadow-raised);
+}
+.session-state-chip {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--sl-glass-edge);
+  border-radius: 20px;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--sl-text-muted);
+  background: var(--sl-surface-hover);
+  box-shadow: inset 0 1px 0 var(--sl-glass-edge);
+}
+.session-state-chip[data-state='running'] {
+  color: var(--sl-accent-text);
+  background: var(--sl-accent-soft);
+}
+.session-state-chip[data-state='needs-you'] {
+  color: var(--sl-attention);
+  background: var(--sl-attention-soft);
+}
+.session-state-chip[data-state='error'] {
+  color: var(--sl-danger);
+  background: color-mix(in srgb, var(--sl-danger) 12%, var(--sl-surface));
+}
+[data-testid='desk-card'] {
+  border-radius: 22px;
+  background: var(--sl-glass);
+  box-shadow: var(--sl-glass-shadow);
+}
+.companion-gathering {
+  display: flex;
+  align-items: end;
+  gap: 6px;
+}
+.companion-gathering > :first-child {
+  transform: rotate(-9deg) translateY(5px);
+}
+.companion-gathering > :last-child {
+  transform: rotate(8deg) translateY(9px);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .composer,
+  .app-shell > aside {
+    background: var(--sl-surface);
+    backdrop-filter: none;
+  }
+}
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 12.5rem minmax(0, 1fr);
+  }
+  .session-body:has([data-testid='review-panel']) > div:first-child {
+    display: none;
+  }
+  [data-testid='review-panel'] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    border-left: 0;
+  }
+  .session-header {
+    flex-wrap: wrap;
+    gap: 0;
+    padding-right: 12px;
+    padding-bottom: 6px;
+  }
+  .session-header > :first-child {
+    min-height: 44px;
+    width: calc(100% - 144px);
+    margin-right: 144px;
+  }
+  .session-header > :nth-child(2) {
+    margin-left: 0;
+  }
+  .composer > div {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 800px) {
+  .app-shell {
+    grid-template-columns: 12rem minmax(0, 1fr);
+  }
+  .app-shell .max-w-3xl {
+    padding-inline: 20px;
+  }
 }
 
 /* ---------- Conversa ---------- */

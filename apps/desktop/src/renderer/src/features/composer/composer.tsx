@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, CornerDownRight, ListPlus, Square } from 'lucide-react';
 import type { Checks, TokenUsage } from '@solline/protocol';
 import { IconSwap } from '@solline/ui/icon-swap';
-import { actions, useSession } from '../../stores/app.ts';
+import { actions, useApp, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { SettingsPills } from './pills.tsx';
 import { RacePill } from '../race/race-pill.tsx';
@@ -81,6 +81,7 @@ function firstFailing(checks: Checks | null): { id: string; label: string } | nu
 }
 
 export function Composer({ sessionId, above }: { sessionId: string; above?: React.ReactNode }) {
+  const engineOffline = useApp((s) => s.engineOffline);
   const state = useSession(sessionId, (s) => s.info.state);
   const settings = useSession(sessionId, (s) => s.info.settings);
   const capabilities = useSession(sessionId, (s) => s.capabilities);
@@ -88,7 +89,10 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   const actionError = useSession(sessionId, (s) => s.actionError);
   const agentLabel = useSessionAgentLabel(sessionId);
   const features = capabilities?.features;
-  const [text, setText] = useState('');
+  const text = useSession(sessionId, (s) => s.composerText);
+  const setText = (value: string | ((current: string) => string)) =>
+    actions.editComposer(sessionId, value);
+  const sending = useSession(sessionId, (s) => s.pendingSend !== null);
   // As pistas de uma corrida (vazio: uma mensagem normal).
   const [lanes, setLanes] = useState<RaceLaneSpec[]>([]);
   const agent = useSession(sessionId, (s) => s.info.agent);
@@ -96,27 +100,23 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   const input = useRef<HTMLTextAreaElement>(null);
   // A mensagem de um turno rebobinado volta para aqui, para editar e mandar de novo.
   const draft = useSession(sessionId, (s) => s.draft);
-  const [seenDraft, setSeenDraft] = useState<string | null>(null);
-  if (draft !== seenDraft) {
-    setSeenDraft(draft);
-    if (draft !== null) setText((current) => (current.trim() ? `${current}\n${draft}` : draft));
-  }
   useEffect(() => {
     if (draft === null) return;
-    actions.takeDraft(sessionId);
+    actions.receiveDraft(sessionId);
     input.current?.focus();
   }, [draft, sessionId]);
 
   // O componente monta de novo por sessão (key), por isso basta focar à entrada.
   useEffect(() => {
-    input.current?.focus();
+    if (input.current && !input.current.closest('main')?.querySelector('[data-ask]'))
+      input.current.focus();
   }, []);
 
   const checks = useSession(sessionId, (s) => s.checks);
   const busy = state === 'running' || state === 'needs-you';
-  const offline = state === 'starting' || state === 'error';
+  const offline = engineOffline || state === 'starting' || state === 'error';
   const hasText = text.trim().length > 0;
-  const canSend = !offline && hasText;
+  const canSend = !offline && hasText && !sending;
   const canSteer = busy && features?.steer === true;
   const failing = firstFailing(checks);
 
@@ -127,16 +127,16 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   async function send(how: 'queue' | 'now' = 'queue') {
     if (!canSend) return;
     const message = text.trim();
-    setText('');
+    if (!actions.beginComposerSend(sessionId, message)) return;
     if (lanes.length > 1 && !busy) {
       // N×: o mesmo pedido em várias pistas, cada uma na sua worktree.
       const started = await actions.startRace(projectId, message, lanes);
       if (started) setLanes([]);
-      else setText(message);
+      actions.finishComposerSend(sessionId, started);
       return;
     }
     const ok = await actions.send(sessionId, message, busy ? how : undefined);
-    if (!ok) setText(message);
+    actions.finishComposerSend(sessionId, ok);
   }
 
   // O botão muda de papel: enviar, parar (a trabalhar sem texto) ou pôr na fila.
@@ -182,17 +182,19 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                void send(e.ctrlKey || e.metaKey ? 'now' : 'queue');
+                void send(canSteer && (e.ctrlKey || e.metaKey) ? 'now' : 'queue');
               }
             }}
             placeholder={
               offline
                 ? 'A sessão não está ligada'
-                : busy
-                  ? canSteer
-                    ? `O ${agentLabel} está a trabalhar · Enter põe na fila, Ctrl+Enter guia agora`
-                    : `O ${agentLabel} está a trabalhar · Enter põe na fila`
-                  : 'Escreve uma mensagem'
+                : state === 'needs-you'
+                  ? `O ${agentLabel} aguarda a tua decisão · podes deixar uma mensagem na fila`
+                  : busy
+                    ? canSteer
+                      ? `O ${agentLabel} está a trabalhar · Enter põe na fila, Ctrl+Enter guia agora`
+                      : `O ${agentLabel} está a trabalhar · Enter põe na fila`
+                    : 'Escreve uma mensagem'
             }
             aria-label="Mensagem"
             data-testid="composer-input"

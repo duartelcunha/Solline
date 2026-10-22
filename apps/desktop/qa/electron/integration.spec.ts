@@ -1,0 +1,575 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
+import { _electron as electron, test as base, expect, type Page } from '@playwright/test';
+
+type Qa = {
+  page: Page;
+  project: string;
+  git: (...args: string[]) => string;
+  restart: () => Promise<Page>;
+  shot: (name: string) => Promise<void>;
+};
+async function removeFixture(root: string) {
+  if (dirname(root) !== resolve(tmpdir()) || !basename(root).startsWith('solline-redesign-qa-')) {
+    throw new Error('Unsafe fixture cleanup');
+  }
+  await rm(root, { recursive: true, force: true });
+}
+const test = base.extend<{ qa: Qa }>({
+  qa: async ({ browserName }, use, info) => {
+    expect(browserName).toBe('chromium');
+    // Fail closed BEFORE startup: never accidentally launch the real-agent build.
+    expect(await readFile(resolve('out/qa-electron/main/engine.js'), 'utf8')).toContain(
+      'solline-scripted-qa-agent',
+    );
+    const root = await mkdtemp(join(tmpdir(), 'solline-redesign-qa-'));
+    const project = join(root, 'project');
+    await mkdir(project);
+    await writeFile(join(project, 'notes.txt'), 'Original.\n');
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: project, windowsHide: true, encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.name', 'Solline QA');
+    git('config', 'user.email', 'qa@solline.local');
+    git('config', 'core.autocrlf', 'false');
+    git('add', '.');
+    git('commit', '-qm', 'Fixture');
+    const launch = () =>
+      electron.launch({
+        args: [resolve('out/qa-electron/main/index.js')],
+        env: {
+          // Keep launch traces free of inherited credentials. The fixture needs only OS paths.
+          ...Object.fromEntries(
+            Object.entries(process.env).filter(([name]) =>
+              /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMDATA)$/i.test(
+                name,
+              ),
+            ),
+          ),
+          SOLLINE_USER_DATA: join(root, 'data'),
+          SOLLINE_ISOLATED: '1',
+        } as Record<string, string>,
+      });
+    let app = await launch();
+    const errors: string[] = [];
+    const connect = async () => {
+      const page = await app.firstWindow();
+      page.on('pageerror', (e) => errors.push(e.message));
+      page.on('console', (entry) => {
+        if (entry.type() === 'error') errors.push(entry.text());
+      });
+      await app.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
+      await app.evaluate(({ dialog }, folder) => {
+        dialog.showOpenDialog = (async () => ({
+          canceled: false,
+          filePaths: [folder],
+        })) as typeof dialog.showOpenDialog;
+        dialog.showMessageBox = (async () => ({
+          response: 0,
+          checkboxChecked: false,
+        })) as typeof dialog.showMessageBox;
+      }, project);
+      await expect(page.getByTestId('ping-reply')).toBeAttached();
+      const descriptors = await page.evaluate(() => window.solline.request('agents.list', {}));
+      expect(descriptors.agents.map((a) => a.label)).toEqual(['Claude QA']);
+      return page;
+    };
+    try {
+      let page = await connect();
+      await page.getByTestId('add-project').click();
+      const restart = async () => {
+        await app.context().tracing.stop({ path: info.outputPath('before-restart.zip') });
+        await info.attach('before-restart', {
+          path: info.outputPath('before-restart.zip'),
+          contentType: 'application/zip',
+        });
+        await app.close();
+        app = await launch();
+        page = await connect();
+        return page;
+      };
+      const shot = async (name: string) => {
+        const path = info.outputPath(`${name}.png`);
+        await page.screenshot({ path, animations: 'disabled' });
+        await info.attach(name, { path, contentType: 'image/png' });
+      };
+      await use({ page, project, git, restart, shot });
+      expect(
+        await page.evaluate(() => ({
+          node: typeof (globalThis as { require?: unknown }).require,
+          qa: 'qa' in window,
+        })),
+      ).toEqual({ node: 'undefined', qa: false });
+      expect(errors).toEqual([]);
+    } finally {
+      const page = app.windows()[0];
+      if (page && !page.isClosed())
+        await info.attach('electron', { body: await page.screenshot(), contentType: 'image/png' });
+      await app.context().tracing.stop({ path: info.outputPath('electron-trace.zip') });
+      await info.attach('electron-trace', {
+        path: info.outputPath('electron-trace.zip'),
+        contentType: 'application/zip',
+      });
+      await app.close();
+      // Delete only this fixture's mkdtemp directory, never a project supplied by the user.
+      await removeFixture(root);
+    }
+  },
+});
+
+async function newSession(page: Page) {
+  await page.getByTestId('new-session').click();
+  await expect(page.getByTestId('composer-input')).toBeEnabled();
+}
+async function send(page: Page, text = 'Atualiza as notas.') {
+  await page.getByTestId('composer-input').fill(text);
+  await page.getByTestId('composer-input').press('Enter');
+}
+async function answer(page: Page, decision: 'allow' | 'deny') {
+  await expect(page.getByTestId('permission-card')).toBeVisible();
+  await page
+    .getByRole('button', { name: decision === 'deny' ? /^Negar/ : /^Permitir uma vez/ })
+    .click();
+  await expect(page.getByTestId('ask-resolved').last()).toHaveAttribute(
+    'data-status',
+    decision === 'deny' ? 'denied' : 'allowed',
+  );
+  await expect(page.getByTestId('session-row').first()).toHaveAttribute('data-state', 'idle');
+}
+async function openWorktree(qa: Qa, failFirst = false) {
+  const { page, project, git } = qa;
+  await writeFile(
+    join(project, 'setup.cjs'),
+    failFirst
+      ? "const fs = require('node:fs'); if (!fs.existsSync('setup-attempted')) { fs.writeFileSync('setup-attempted', '1'); console.error('QA setup failed once'); process.exit(1); } fs.writeFileSync('prepared.txt', process.env.SOLLINE_PORT);\n"
+      : "require('node:fs').writeFileSync('prepared.txt', process.env.SOLLINE_PORT);\n",
+  );
+  await writeFile(
+    join(project, 'conductor.json'),
+    JSON.stringify({ scripts: { setup: 'node setup.cjs' } }),
+  );
+  git('add', '.');
+  git('commit', '-qm', 'Setup fixture');
+  await newSession(page);
+  await newSession(page);
+  await expect(page.getByTestId('session-row')).toHaveCount(2);
+  await expect(page.getByTestId('workspace-label')).toHaveText('Por preparar');
+  const paths = git('worktree', 'list', '--porcelain')
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice(9));
+  expect(paths).toHaveLength(2);
+  const path = paths.find((path) => resolve(path) !== resolve(project));
+  if (!path) throw new Error('Missing real worktree');
+  expect(existsSync(join(path, 'prepared.txt'))).toBe(false);
+  await page.getByTestId('workspace-chip').click();
+  await page.getByTestId('setup-approve').click();
+  if (failFirst) {
+    await expect.poll(() => existsSync(join(path, 'setup-attempted'))).toBe(true);
+    await page.getByTestId('workspace-chip').click();
+    await expect(page.getByTestId('setup-tail')).toContainText('QA setup failed once');
+    await qa.shot('setup-failure');
+    expect(existsSync(join(path, 'prepared.txt'))).toBe(false);
+    await page.getByTestId('setup-retry').click();
+  }
+  await expect
+    .poll(() => readFile(join(path, 'prepared.txt'), 'utf8').catch(() => ''))
+    .toMatch(/^4\d{4}$/);
+  await expect(page.getByTestId('workspace-label')).not.toHaveText(/A preparar|Por preparar/);
+  if (failFirst) await qa.shot('setup-recovered');
+  return path;
+}
+async function closeWorktree(page: Page) {
+  await page.getByTestId('workspace-chip').click();
+  await page.getByTestId('workspace-close').click();
+}
+
+for (const decision of ['deny', 'allow'] as const) {
+  test(`Electron → preload → motor → Git: ${decision}`, async ({ qa }) => {
+    const { page, project } = qa;
+    await newSession(page);
+    await send(page);
+    await answer(page, decision);
+    await expect
+      .poll(() => readFile(join(project, 'notes.txt'), 'utf8'))
+      .toBe(decision === 'deny' ? 'Original.\n' : 'Alteração revista.\n');
+  });
+}
+
+test('review: comentário enviado e rejeitar/desfazer muda os ficheiros reais', async ({ qa }) => {
+  const { page, project } = qa;
+  const notes = () => readFile(join(project, 'notes.txt'), 'utf8');
+  await newSession(page);
+  await send(page);
+  await answer(page, 'allow');
+  await expect(page.getByTestId('review-pending')).toBeVisible();
+  await page.getByTestId('review-toggle').click();
+  const file = page.locator('[data-testid="diff-file"][data-path="notes.txt"]');
+  await expect(file.getByTestId('diff-hunk')).toBeVisible();
+  await file.locator('[data-kind="add"]').hover();
+  await file.locator('[data-kind="add"] [data-testid="comment-line"]').click();
+  await page.getByTestId('comment-input').fill('Mantém a frase original por favor.');
+  await page.getByTestId('comment-save').click();
+  await expect(page.getByTestId('comment-chip')).toContainText('Mantém a frase original');
+  await page.getByTestId('send-comments').click();
+  await expect(page.getByTestId('user-turn').last()).toContainText('notes.txt, linha 1');
+  await expect(page.getByTestId('user-turn').last()).toContainText(
+    'Mantém a frase original por favor.',
+  );
+  await answer(page, 'deny');
+  // Comment delivery is a genuine second engine turn, not just a local chip.
+  await expect(page.getByTestId('user-turn')).toHaveCount(2);
+  if (!(await page.getByTestId('review-panel').isVisible()))
+    await page.getByTestId('review-toggle').click();
+  await page.getByTestId('reject-all').click();
+  await expect.poll(notes).toBe('Original.\n');
+  await page.getByTestId('review-undo').click();
+  await expect.poll(notes).toBe('Alteração revista.\n');
+});
+
+test('rebobinar ficheiros, voltar ao presente e rebobinar conversa', async ({ qa }) => {
+  const { page, project } = qa;
+  const notes = () => readFile(join(project, 'notes.txt'), 'utf8');
+  await newSession(page);
+  await send(page);
+  await answer(page, 'allow');
+  await expect(page.getByTestId('review-pending')).toBeVisible();
+  await page.getByTestId('timeline-stop').first().click();
+  await page.getByTestId('rewind-files').click();
+  await expect.poll(notes).toBe('Original.\n');
+  await expect(page.getByTestId('user-turn')).toHaveCount(1);
+  await page.getByTestId('timeline-present').click();
+  await expect.poll(notes).toBe('Alteração revista.\n');
+  await page.getByTestId('timeline-stop').first().click();
+  await page.getByTestId('rewind-both').click();
+  await expect.poll(notes).toBe('Original.\n');
+  await expect(page.getByTestId('user-turn')).toHaveCount(0);
+  await expect(page.getByTestId('composer-input')).toHaveValue('Atualiza as notas.');
+  await expect(page.getByTestId('composer-input')).toBeEnabled();
+  // The replacement adapter remains usable after the rewind.
+  await page.getByTestId('composer-input').press('Enter');
+  await answer(page, 'allow');
+  await expect(page.getByTestId('user-turn')).toHaveCount(1);
+  await expect.poll(notes).toBe('Alteração revista.\n');
+});
+
+for (const choice of ['keep', 'discard', 'bring'] as const) {
+  test(`setup real + fechar worktree: ${choice}`, async ({ qa }, info) => {
+    const { page, project, git } = qa;
+    const path = await openWorktree(qa);
+    await send(page);
+    await answer(page, 'allow');
+    await expect.poll(() => readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+    expect(await readFile(join(project, 'notes.txt'), 'utf8')).toBe('Original.\n');
+    const branch = await page.getByTestId('workspace-chip').getAttribute('data-branch');
+    if (!branch) throw new Error('Missing worktree branch');
+    const before = {
+      branch,
+      project: await readFile(join(project, 'notes.txt'), 'utf8'),
+      worktree: await readFile(join(path, 'notes.txt'), 'utf8'),
+      status: git('-C', path, 'status', '--porcelain'),
+    };
+    await closeWorktree(page);
+    await expect(page.getByTestId('close-dialog')).toBeVisible();
+    await qa.shot(`worktree-close-${choice}`);
+    await page.getByTestId(`close-${choice}`).click();
+    await expect(page.getByTestId('session-row')).toHaveCount(1);
+    await expect.poll(() => existsSync(path)).toBe(false);
+    const branches = git('branch', '--format=%(refname:short)').split('\n');
+    await info.attach('git-close-evidence', {
+      body: JSON.stringify(
+        {
+          choice,
+          before,
+          after: {
+            branches,
+            project: await readFile(join(project, 'notes.txt'), 'utf8'),
+            head: git('show', 'HEAD:notes.txt'),
+            log: git('log', '--all', '--oneline', '--stat', '-5'),
+            status: git('status', '--porcelain'),
+          },
+        },
+        null,
+        2,
+      ),
+      contentType: 'application/json',
+    });
+    expect(branches.includes(branch)).toBe(choice === 'keep');
+    expect(await readFile(join(project, 'notes.txt'), 'utf8')).toBe(
+      choice === 'bring' ? 'Alteração revista.\n' : 'Original.\n',
+    );
+    if (choice === 'keep') expect(git('show', `${branch}:notes.txt`)).toBe('Alteração revista.');
+    if (choice === 'bring')
+      expect(await readFile(join(project, 'prepared.txt'), 'utf8')).toMatch(/^4\d{4}$/);
+    else expect(existsSync(join(project, 'prepared.txt'))).toBe(false);
+  });
+}
+
+test('fechar com fila preserva autorização através do diálogo da worktree', async ({ qa }) => {
+  const { page, git } = qa;
+  const path = await openWorktree(qa);
+  await send(page);
+  await answer(page, 'allow');
+  await send(page, 'Segundo turno, espera pela permissão.');
+  await expect(page.getByTestId('permission-card')).toBeVisible();
+  await send(page, 'Mensagem que fica na fila.');
+  await expect(page.getByTestId('queued')).toHaveCount(1);
+  await page.getByTestId('interrupt').click();
+  await expect(page.getByTestId('queue-resume')).toBeVisible();
+  const branch = await page.getByTestId('workspace-chip').getAttribute('data-branch');
+  if (!branch) throw new Error('Missing branch');
+  await closeWorktree(page);
+  await expect(page.getByTestId('close-queue-dialog')).toBeVisible();
+  await page.getByTestId('close-drop-queue').click();
+  await expect(page.getByTestId('close-dialog')).toBeVisible();
+  await page.getByTestId('close-keep').click();
+  await expect(page.getByTestId('close-queue-dialog')).toBeHidden();
+  await expect(page.getByTestId('session-row')).toHaveCount(1);
+  await expect.poll(() => existsSync(path)).toBe(false);
+  expect(git('show', `${branch}:notes.txt`)).toBe('Alteração revista.');
+});
+
+for (const scenario of ['empate', 'falha'] as const) {
+  test(`corrida: classificação real com ${scenario}`, async ({ qa }) => {
+    const { page, project, git } = qa;
+    if (scenario === 'falha') {
+      await writeFile(
+        join(project, 'check.cjs'),
+        "process.exit(require('node:fs').readFileSync('notes.txt','utf8').includes('BROKEN') ? 1 : 0);\n",
+      );
+      await writeFile(
+        join(project, 'package.json'),
+        JSON.stringify({ private: true, scripts: { typecheck: 'node check.cjs' } }),
+      );
+      git('add', '.');
+      git('commit', '-qm', 'Check fixture');
+    }
+    await newSession(page);
+    await page.getByTestId('pill-race').click();
+    await page.getByTestId('race-lane-claude-opus').click();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('pill-race')).toContainText('2×');
+    await send(page, `QA: corrida com ${scenario}`);
+    await expect(page.getByTestId('race-lane')).toHaveCount(2);
+    await expect(page.getByTestId('race-allow-all')).toBeVisible();
+    await page.getByTestId('race-allow-all').click();
+    await expect(page.getByTestId('race-phase')).toHaveAttribute('data-phase', 'ranked', {
+      timeout: 45_000,
+    });
+    await expect(page.getByTestId('race-rank')).toHaveCount(2);
+    if (scenario === 'falha') {
+      const contrast = await page
+        .locator('[data-rank="1"] [data-testid="race-rank"]')
+        .evaluate((badge) => {
+          const style = getComputedStyle(badge);
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 1;
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Missing colour conversion context');
+          const luminance = (colour: string) => {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = colour;
+            context.fillRect(0, 0, 1, 1);
+            const rgba = context.getImageData(0, 0, 1, 1).data;
+            if (rgba[3] !== 255) throw new Error('Badge contrast requires opaque colours');
+            const linear = Array.from(rgba)
+              .slice(0, 3)
+              .map((value) => {
+                const channel = value / 255;
+                return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+              });
+            const [red = 0, green = 0, blue = 0] = linear;
+            return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+          };
+          const fg = luminance(style.color);
+          const bg = luminance(style.backgroundColor);
+          return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+        });
+      expect(contrast).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const lane of await page.getByTestId('race-lane').all())
+      await expect(lane).not.toContainText('A pensar…');
+    await qa.shot(`race-ranked-${scenario}`);
+    if (scenario === 'empate') {
+      await expect(page.getByTestId('race-tie')).toContainText('Empate: escolhe tu');
+      await expect(page.getByTestId('race-rank')).toHaveText(['Empate', 'Empate']);
+      for (const lane of await page.getByTestId('race-lane').all())
+        await expect(lane).toHaveAttribute('data-winner', 'false');
+    } else {
+      await expect(page.getByTestId('race-tie')).toBeHidden();
+      await expect(page.locator('[data-testid="race-lane"][data-rank="1"]')).toContainText(
+        'sonnet',
+      );
+      await expect(page.locator('[data-testid="race-lane"][data-rank="2"]')).toContainText('opus');
+      await expect(page.locator('[data-testid="race-lane"][data-rank="2"]')).toContainText('Tipos');
+    }
+    expect(await readFile(join(project, 'notes.txt'), 'utf8')).toBe('Original.\n');
+    await page.getByTestId('open-desk').click();
+    await expect(page.getByTestId('race-card')).toHaveCount(1);
+  });
+}
+
+test('preparação falha uma vez e repetir corre o comando real', async ({ qa }) => {
+  const path = await openWorktree(qa, true);
+  expect(await readFile(join(path, 'setup-attempted'), 'utf8')).toBe('1');
+  expect(await readFile(join(path, 'prepared.txt'), 'utf8')).toMatch(/^4\d{4}$/);
+  await send(qa.page);
+  await answer(qa.page, 'allow');
+  await expect.poll(() => readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+});
+
+test('conflito ao trazer preserva projeto e branch recuperável', async ({ qa }) => {
+  const { page, project, git } = qa;
+  const path = await openWorktree(qa);
+  await send(page);
+  await answer(page, 'allow');
+  await expect.poll(() => readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+  await writeFile(join(project, 'notes.txt'), 'Edição local.\n');
+  git('add', 'notes.txt');
+  git('commit', '-qm', 'Independent local edit');
+  const before = git('rev-parse', 'HEAD');
+  const branch = await page.getByTestId('workspace-chip').getAttribute('data-branch');
+  if (!branch) throw new Error('Missing branch');
+  await page.getByTestId('workspace-chip').click();
+  await expect(page.getByTestId('workspace-bring')).toBeEnabled();
+  await page.getByTestId('workspace-bring').click();
+  await expect(page.getByTestId('workspace-chip')).toHaveAttribute('data-state', 'closed');
+  await expect(page.getByTestId('workspace-bring')).toBeHidden();
+  await page.getByTestId('workspace-chip').click();
+  await expect(page.getByTestId('workspace-resolve')).toBeVisible();
+  await qa.shot('merge-conflict');
+  expect(await readFile(join(project, 'notes.txt'), 'utf8')).toBe('Edição local.\n');
+  expect(await readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+  expect(git('rev-parse', 'HEAD')).toBe(before);
+  expect(git('status', '--porcelain')).toBe('');
+  await page.keyboard.press('Escape');
+  await closeWorktree(page);
+  await page.getByTestId('close-keep').click();
+  await expect(page.getByTestId('session-row')).toHaveCount(1);
+  expect(git('show', `${branch}:notes.txt`)).toBe('Alteração revista.');
+});
+
+for (const choice of ['bring', 'discard'] as const) {
+  test(`reiniciar recupera worktree órfã: ${choice}`, async ({ qa }) => {
+    const path = await openWorktree(qa);
+    await send(qa.page);
+    await answer(qa.page, 'allow');
+    await expect.poll(() => readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+    const branch = await qa.page.getByTestId('workspace-chip').getAttribute('data-branch');
+    if (!branch) throw new Error('Missing branch');
+    const page = await qa.restart();
+    await page.getByTestId('open-desk').click();
+    await expect(page.getByTestId('orphan-card')).toHaveCount(1);
+    await qa.shot(`orphan-${choice}`);
+    await expect(page.getByTestId('session-row')).toHaveCount(0);
+    expect(await readFile(join(path, 'notes.txt'), 'utf8')).toBe('Alteração revista.\n');
+    await page.getByTestId(`orphan-${choice}`).click();
+    if (choice === 'discard') {
+      await expect(page.getByTestId('orphan-discard')).toHaveText('Confirmar');
+      expect(existsSync(path)).toBe(true);
+      await page.getByTestId('orphan-discard').click();
+    }
+    await expect(page.getByTestId('orphan-card')).toHaveCount(0);
+    await expect.poll(() => existsSync(path)).toBe(false);
+    expect(qa.git('branch', '--format=%(refname:short)').split('\n')).not.toContain(branch);
+    expect(await readFile(join(qa.project, 'notes.txt'), 'utf8')).toBe(
+      choice === 'bring' ? 'Alteração revista.\n' : 'Original.\n',
+    );
+  });
+}
+
+test('fechar app com corrida por trazer conserva ambas as worktrees', async ({ qa }) => {
+  const { page, project, git } = qa;
+  await newSession(page);
+  await page.getByTestId('pill-race').click();
+  await page.getByTestId('race-lane-claude-opus').click();
+  await page.keyboard.press('Escape');
+  await send(page, 'QA: corrida com empate');
+  await expect(page.getByTestId('race-allow-all')).toBeVisible();
+  await page.getByTestId('race-allow-all').click();
+  await expect(page.getByTestId('race-phase')).toHaveAttribute('data-phase', 'ranked');
+  const worktrees = git('worktree', 'list', '--porcelain')
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice(9))
+    .filter((path) => resolve(path) !== resolve(project));
+  expect(worktrees).toHaveLength(2);
+  const next = await qa.restart();
+  await next.getByTestId('open-desk').click();
+  await expect(next.getByTestId('orphan-card')).toHaveCount(2);
+  await qa.shot('race-recovered-worktrees');
+  expect(
+    (await Promise.all(worktrees.map((path) => readFile(join(path, 'notes.txt'), 'utf8')))).sort(),
+  ).toEqual(['Solução opus.\n', 'Solução sonnet.\n']);
+  expect(await readFile(join(project, 'notes.txt'), 'utf8')).toBe('Original.\n');
+});
+
+test('morte real do utility process preserva conversa e bloqueia envio', async ({ qa }) => {
+  const { page } = qa;
+  await newSession(page);
+  await send(page);
+  await answer(page, 'deny');
+  const ping = await page.evaluate(() => window.solline.request('engine.ping', {}));
+  // This PID came from the guarded fixture's engine, never a machine-wide process search.
+  expect(ping.pid).toBeGreaterThan(0);
+  expect(ping.pid).not.toBe(process.pid);
+  process.kill(ping.pid);
+  await expect(page.getByTestId('session-error')).toContainText('O motor parou');
+  await qa.shot('engine-process-failed');
+  await expect(page.getByTestId('user-turn')).toContainText('Atualiza as notas.');
+  await expect(page.getByTestId('ask-resolved')).toHaveAttribute('data-status', 'denied');
+  await expect(page.getByTestId('composer-input')).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Retomar', exact: true })).toBeHidden();
+});
+
+for (const failure of ['crash', 'interrupt'] as const) {
+  test(`corrida: pista ${failure} não impede a outra de terminar`, async ({ qa }) => {
+    const { page, project, git } = qa;
+    await newSession(page);
+    await page.getByTestId('pill-race').click();
+    await page.getByTestId('race-lane-claude-opus').click();
+    await page.keyboard.press('Escape');
+    await send(page, failure === 'crash' ? 'QA: falha numa pista' : 'QA: interromper uma pista');
+    const failedLane = page.getByTestId('race-lane').filter({ hasText: 'opus' });
+    await expect(failedLane).toHaveAttribute(
+      'data-state',
+      failure === 'crash' ? 'error' : 'needs-you',
+    );
+    await failedLane.getByRole('button', { name: 'Abrir a conversa desta pista' }).click();
+    if (failure === 'crash') {
+      await expect(page.getByTestId('session-error')).toContainText('QA: falha determinística');
+    } else {
+      await expect(page.getByTestId('permission-card')).toBeVisible();
+      await page.getByTestId('interrupt').click();
+      await expect(page.getByTestId('ask-resolved')).toHaveAttribute('data-status', 'denied');
+    }
+    await qa.shot(`race-lane-${failure}`);
+    await page.getByTestId('open-desk').click();
+    await page.getByTestId('race-card').click();
+    await expect(page.getByTestId('race-allow')).toBeVisible();
+    await page.getByTestId('race-allow').click();
+    await expect(page.getByTestId('race-phase')).toHaveAttribute('data-phase', 'ranked');
+    await expect(page.getByTestId('race-lane').filter({ hasText: 'sonnet' })).toHaveAttribute(
+      'data-state',
+      'idle',
+    );
+    await expect(page.getByTestId('race-lane').filter({ hasText: 'opus' })).toHaveAttribute(
+      'data-state',
+      failure === 'crash' ? 'error' : 'idle',
+    );
+    await qa.shot(`race-finished-${failure}`);
+    const paths = git('worktree', 'list', '--porcelain')
+      .split('\n')
+      .filter((line) => line.startsWith('worktree '))
+      .map((line) => line.slice(9))
+      .filter((path) => resolve(path) !== resolve(project));
+    expect(paths).toHaveLength(2);
+    expect(
+      (await Promise.all(paths.map((path) => readFile(join(path, 'notes.txt'), 'utf8')))).sort(),
+    ).toEqual(['Alteração revista.\n', 'Original.\n']);
+    expect(await readFile(join(project, 'notes.txt'), 'utf8')).toBe('Original.\n');
+  });
+}

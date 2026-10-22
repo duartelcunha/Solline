@@ -367,6 +367,7 @@ export function AgentsPanel() {
   const agents = useApp((s) => s.agents);
   const checking = useApp((s) => s.checkingAgents);
   const [candidates, setCandidates] = useState<string[]>([]);
+  const returnFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (open) void actions.keyCandidates().then(setCandidates);
   }, [open]);
@@ -379,6 +380,14 @@ export function AgentsPanel() {
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]" />
         <Dialog.Content
+          onOpenAutoFocus={() => {
+            returnFocus.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            returnFocus.current?.focus({ preventScroll: true });
+          }}
           data-testid="agents-panel"
           className="dialog-content fixed top-1/2 left-1/2 z-50 flex max-h-[86vh] w-[min(40rem,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-line bg-surface shadow-raised outline-none"
         >

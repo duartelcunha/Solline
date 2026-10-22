@@ -13,12 +13,13 @@ import { prefersReducedMotion, shouldAnimate } from '@solline/ui/motion';
 import { scrollIntoViewSmooth, useDragScroll } from '@solline/ui/scroll';
 import { flushSync } from 'react-dom';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { SessionMark } from '../agents/bots.tsx';
+import { SessionBot } from '../agents/bots.tsx';
 import { RaceCard } from '../race/race.tsx';
 import { ContextMeter, money } from '../composer/composer.tsx';
 import { Mark } from '../quality/checks.tsx';
 import { deskOrder, lastAction, pendingAsk } from './desk-order.ts';
 import { sessionStore } from '../../stores/app.ts';
+import { observeTransition } from '../../lib/morph.ts';
 
 function Delta({ additions, deletions }: { additions: number; deletions: number }) {
   return (
@@ -34,7 +35,7 @@ const smallButton =
 
 /** Responde e desliza para o próximo cartão que precisa de ti, se houver. */
 async function answerAndMove(sessionId: string, id: string, decision: 'allow-once' | 'deny') {
-  await actions.answer(sessionId, id, { decision });
+  if (!(await actions.answer(sessionId, id, { decision }))) return;
   requestAnimationFrame(() => {
     const desk = document.querySelector<HTMLElement>('[data-testid="desk"]');
     const next = desk?.querySelector('[data-testid="desk-card"][data-state="needs-you"]');
@@ -124,7 +125,8 @@ function SessionCard({ sessionId }: { sessionId: string }) {
       el.style.removeProperty('view-transition-name');
       flushSync(() => actions.selectSession(sessionId));
     });
-    void transition.finished.finally(() => delete root.dataset.opening);
+    observeTransition(transition);
+    void transition.finished.finally(() => delete root.dataset.opening).catch(console.error);
   };
   // Na mesa só se veem as verificações que falharam: o que passa não pede atenção.
   const failing = checks?.trusted
@@ -140,7 +142,10 @@ function SessionCard({ sessionId }: { sessionId: string }) {
       tabIndex={0}
       onClick={(e) => open(shouldAnimate(e.nativeEvent))}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' && e.target === e.currentTarget) open(false);
+        if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+          e.preventDefault();
+          open(false);
+        }
       }}
       data-testid="desk-card"
       data-session={sessionId}
@@ -151,8 +156,8 @@ function SessionCard({ sessionId }: { sessionId: string }) {
       }`}
     >
       <div className="flex items-start gap-3">
-        <span ref={mark} className="grid h-5 w-5 shrink-0 place-items-center pt-0.5">
-          <SessionMark sessionId={sessionId} size={20} />
+        <span ref={mark} className="grid size-12 shrink-0 place-items-center">
+          <SessionBot sessionId={sessionId} size={48} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-semibold tracking-[-0.01em]">{title}</div>

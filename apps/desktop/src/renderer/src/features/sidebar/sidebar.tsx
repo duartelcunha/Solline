@@ -194,7 +194,7 @@ function DeskButton() {
       Mesa
       {waiting > 0 ? (
         <span
-          className="ml-auto grid h-4.5 min-w-4.5 place-items-center rounded-full bg-accent px-1 text-[10.5px] font-semibold text-[#1b1916] tabular-nums"
+          className="ml-auto grid h-4.5 min-w-4.5 place-items-center rounded-full bg-attention-soft px-1 text-[10.5px] font-semibold text-attention tabular-nums"
           aria-label={`${waiting} à tua espera`}
           data-testid="desk-waiting"
         >

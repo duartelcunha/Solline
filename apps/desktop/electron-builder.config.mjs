@@ -10,7 +10,8 @@ export default {
     output: 'release',
     buildResources: 'build',
   },
-  files: ['out/**', 'package.json'],
+  // Test builds share out/, but only these production entry points may ship.
+  files: ['out/main/**', 'out/preload/**', 'out/renderer/**', 'package.json'],
   // O claude.exe não corre de dentro do asar; fica ao lado, em app.asar.unpacked.
   asarUnpack: ['**/node_modules/@anthropic-ai/**'],
   extraMetadata: {

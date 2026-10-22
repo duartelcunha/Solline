@@ -21,7 +21,26 @@ import { useMorphName } from '../../lib/morph.ts';
 import { useAgentLabel } from '../agents/agent-label.tsx';
 import { ToolInput } from './tool-input.tsx';
 
-type Answer = (answer: PermissionAnswer) => void;
+type Answer = (answer: PermissionAnswer) => Promise<boolean>;
+
+function useAnswer(onAnswer: Answer): [boolean, (answer: PermissionAnswer) => void] {
+  const [sent, setSent] = useState(false);
+  const locked = useRef(false);
+  return [
+    sent,
+    (answer) => {
+      if (locked.current) return;
+      locked.current = true;
+      setSent(true);
+      void onAnswer(answer).then((ok) => {
+        if (!ok) {
+          locked.current = false;
+          setSent(false);
+        }
+      });
+    },
+  ];
+}
 
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -111,7 +130,7 @@ function Kbd({ children }: { children: React.ReactNode }) {
 
 const button =
   'inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium sl-press disabled:opacity-50';
-const primary = `${button} bg-fg text-bg hover:opacity-90`;
+const primary = `${button} bg-accent text-on-accent hover:opacity-90`;
 const secondary = `${button} border border-line-strong bg-surface hover:bg-surface-hover`;
 const quiet = `${button} text-muted hover:bg-surface-hover hover:text-fg`;
 
@@ -133,7 +152,7 @@ function Card({
       data-testid={testId}
       data-ask={id}
       style={morph}
-      className="appear rounded-lg border border-accent/40 bg-surface p-4 shadow-raised ring-1 ring-accent/10"
+      className="appear rounded-lg border border-attention/30 bg-surface p-5 shadow-raised"
     >
       {children}
     </section>
@@ -151,12 +170,7 @@ export function PermissionCard({
 }) {
   const agentLabel = useAgentLabel();
   const first = useRef<HTMLButtonElement>(null);
-  const [sent, setSent] = useState(false);
-  const answer = (a: PermissionAnswer) => {
-    if (sent) return;
-    setSent(true);
-    onAnswer(a);
-  };
+  const [sent, answer] = useAnswer(onAnswer);
   const pending = block.status === 'pending';
   useEffect(() => {
     if (pending && active) first.current?.focus({ preventScroll: true });
@@ -195,7 +209,7 @@ export function PermissionCard({
   return (
     <Card id={block.id} label={`Pedido de permissão: ${block.title}`} testId="permission-card">
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-accent-soft text-accent-text">
+        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-attention-soft text-attention">
           <ShieldQuestion size={15} strokeWidth={1.9} />
         </span>
         <div className="min-w-0 flex-1">
@@ -249,12 +263,7 @@ export function PermissionCard({
 }
 
 export function PlanCard({ block, onAnswer }: { block: PlanBlock; onAnswer: Answer }) {
-  const [sent, setSent] = useState(false);
-  const answer = (a: PermissionAnswer) => {
-    if (sent) return;
-    setSent(true);
-    onAnswer(a);
-  };
+  const [sent, answer] = useAnswer(onAnswer);
   if (block.status !== 'pending') {
     return (
       <Resolved
@@ -299,7 +308,7 @@ export function PlanCard({ block, onAnswer }: { block: PlanBlock; onAnswer: Answ
 export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnswer: Answer }) {
   const agentLabel = useAgentLabel();
   const [picked, setPicked] = useState<Record<string, string[]>>({});
-  const [sent, setSent] = useState(false);
+  const [sent, send] = useAnswer(onAnswer);
   if (block.status !== 'pending') {
     const summary = block.answers
       ? Object.values(block.answers).join(' · ')
@@ -324,11 +333,6 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
         : [label];
       return { ...current, [question]: next };
     });
-  const send = (answer: PermissionAnswer) => {
-    if (sent) return;
-    setSent(true);
-    onAnswer(answer);
-  };
   // shortcut: só as opções dadas, sem "outra resposta" escrita; o cartão completo é do M2.
   return (
     <Card id={block.id} label={`Pergunta do ${agentLabel}`} testId="question-card">

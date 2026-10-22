@@ -47,13 +47,15 @@ function Lane({
   lane,
   verdict,
   celebrate,
+  tied,
 }: {
   lane: RaceLane;
   verdict: RaceLaneVerdict | undefined;
   celebrate: boolean;
+  tied: boolean;
 }) {
   const id = lane.sessionId;
-  const winner = verdict?.rank === 1;
+  const winner = verdict?.rank === 1 && !tied;
   const action = useSession(id, (s) => lastAction(s.turns));
   const usage = useSession(id, (s) => s.usage);
   const workspace = useSession(id, (s) => s.info.workspace);
@@ -65,16 +67,17 @@ function Lane({
       data-testid="race-lane"
       data-state={lane.state}
       data-rank={verdict?.rank}
+      data-winner={winner}
     >
       <header className="flex items-center gap-2.5">
         <SessionMark sessionId={id} size={18} />
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{laneName(lane)}</span>
         {verdict ? (
           <span
-            className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold tabular-nums ${winner ? `bg-accent text-bg ${celebrate ? 'sl-reward' : ''}` : 'bg-surface-hover text-muted'}`}
+            className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold tabular-nums ${winner ? `bg-accent text-on-accent ${celebrate ? 'sl-reward' : ''}` : 'bg-surface-hover text-muted'}`}
             data-testid="race-rank"
           >
-            {ordinal(verdict.rank)}
+            {tied ? 'Empate' : ordinal(verdict.rank)}
           </span>
         ) : null}
         <button
@@ -87,9 +90,18 @@ function Lane({
         </button>
       </header>
       <p className="min-h-[2.5rem] text-[12.5px] leading-snug text-muted line-clamp-2">
-        {verdict?.empty
-          ? 'Não mudou nada'
-          : (action ?? (lane.state === 'starting' ? 'A arrancar…' : 'A pensar…'))}
+        {lane.state === 'error'
+          ? 'A pista falhou'
+          : verdict?.empty
+            ? 'Não mudou nada'
+            : (action ??
+              (lane.state === 'starting'
+                ? 'A arrancar…'
+                : lane.state === 'needs-you'
+                  ? 'Precisa de ti'
+                  : lane.state === 'running'
+                    ? 'A pensar…'
+                    : 'Concluída'))}
       </p>
       {verdict?.best || verdict?.worst ? (
         <ul className="flex flex-col gap-1 text-[12px] leading-snug">
@@ -302,6 +314,7 @@ export function RaceView({ raceId }: { raceId: string }) {
             lane={lane}
             verdict={race.verdict?.lanes.find((v) => v.sessionId === lane.sessionId)}
             celebrate={celebrate}
+            tied={race.verdict?.tie?.includes(lane.sessionId) ?? false}
           />
         ))}
       </div>
@@ -331,7 +344,10 @@ export function RaceCard({ race }: { race: Race }) {
       tabIndex={0}
       onClick={() => actions.openRace(race.id)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') actions.openRace(race.id);
+        if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+          e.preventDefault();
+          actions.openRace(race.id);
+        }
       }}
       data-flip={race.id}
       data-testid="race-card"

@@ -3,27 +3,14 @@
  * a lógica toda vive em packages/engine e testa-se em Node puro.
  */
 import type { MessagePortMain } from 'electron';
-import { ENGINE_VERSION, Engine, claudeReviewer, resolveClaudeExecutable } from '@solline/engine';
+import { ENGINE_VERSION, Engine } from '@solline/engine';
 import { EngineEvent } from '@solline/protocol';
+import { engineOptions } from './options.ts';
 
 let port: MessagePortMain | undefined;
 
-const claudeExecutable = resolveClaudeExecutable({
-  packaged: process.env.SOLLINE_PACKAGED === '1',
-});
-
 const engine = new Engine({
-  claudeExecutable,
-  dataDir: process.env.SOLLINE_DATA_DIR,
-  packaged: process.env.SOLLINE_PACKAGED === '1',
-  // Testes e smoke: sem hooks, plugins nem definições do utilizador.
-  isolated: process.env.SOLLINE_ISOLATED === '1',
-  // O smoke com SDK real liga o revisor mesmo isolado, para o provar de ponta a ponta.
-  ...(process.env.SOLLINE_REVIEWER === '1'
-    ? { reviewer: claudeReviewer({ claudeExecutable }) }
-    : {}),
-  // E as verificações do projeto, que isolado ficam desligadas.
-  ...(process.env.SOLLINE_CHECKS === '1' ? { checks: {} } : {}),
+  ...engineOptions(),
   emit: (event) => {
     // Validado antes de sair; o main volta a validar ao receber.
     const checked = EngineEvent.safeParse(event);

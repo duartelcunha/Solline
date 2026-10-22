@@ -20,8 +20,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SIZES = [256, 64, 48, 40, 36, 32, 30, 24, 20, 16];
 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-const GROUND = hex('#1b1916');
-const SUN = hex('#e8ae45');
+const GROUND = hex('#213c35');
+const SUN = hex('#b0e5c7');
 
 /* ---------- formas (na grelha de 44, como o Logo) ---------- */
 

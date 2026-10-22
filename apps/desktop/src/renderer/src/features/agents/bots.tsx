@@ -5,11 +5,20 @@ import { useApp, useSession } from '../../stores/app.ts';
 import { hoodOf, moodOf, nextMoodChange } from './bot-mood.ts';
 
 /**
- * O bot de cada sessão: a cor do capuz diz o agente, a cara e a bainha dizem o estado. Aqui
+ * O bot de cada sessão: silhueta e cor dizem o agente, expressão e rótulo dizem o estado. Aqui
  * só se traduz a sessão para o bot; o desenho vive em @solline/ui/bot.
  */
 
 const NAMES: Partial<Record<Hood, string>> = { claude: 'Claude', codex: 'Codex' };
+const MOOD_LABEL: Record<Mood, string> = {
+  waiting: 'à espera',
+  working: 'a trabalhar',
+  'needs-you': 'precisa de ti',
+  done: 'concluído',
+  crashed: 'erro',
+  sleeping: 'em repouso',
+  reading: 'a ler',
+};
 
 /** O humor de uma sessão, que muda sozinho no fim dos olhos contentes e ao adormecer. */
 function useSessionMood(sessionId: string): Mood {
@@ -41,12 +50,13 @@ export function SessionBot({
   const agent = useSession(sessionId, (s) => s.info.agent);
   const transport = useApp((s) => s.agents.find((a) => a.id === agent)?.transport);
   const hood = hoodOf(agent, transport);
+  const mood = useSessionMood(sessionId);
   return (
     <Bot
       hood={hood}
-      mood={useSessionMood(sessionId)}
+      mood={mood}
       size={size}
-      title={NAMES[hood]}
+      title={`${NAMES[hood] ?? agent}: ${MOOD_LABEL[mood]}`}
       alive={alive}
     />
   );
@@ -55,7 +65,7 @@ export function SessionBot({
 /**
  * A marca de uma sessão na lista: só o capuz, sem cara. O bot inteiro fica no cabeçalho da
  * sessão aberta; aqui basta a cor do agente e o estado (âmbar precisa de ti, vermelho caiu,
- * a pulsar enquanto trabalha, apagado a dormir).
+ * estático enquanto trabalha, apagado a dormir).
  */
 export function SessionMark({ sessionId, size = 12 }: { sessionId: string; size?: number }) {
   const agent = useSession(sessionId, (s) => s.info.agent);
@@ -75,7 +85,7 @@ export function SessionMark({ sessionId, size = 12 }: { sessionId: string; size?
       viewBox="0 0 12 8"
       data-testid="session-mark"
       data-mood={mood}
-      className={`shrink-0 transition-opacity duration-300 ${mood === 'working' ? 'mark-pulse' : ''} ${mood === 'sleeping' ? 'opacity-40' : ''}`}
+      className={`shrink-0 transition-opacity duration-300 ${mood === 'sleeping' ? 'opacity-40' : ''}`}
     >
       <path d="M0 7.5a6 6 0 0 1 12 0z" fill={fill} style={{ transition: 'fill 200ms ease' }} />
     </svg>
@@ -95,11 +105,11 @@ export function AgentBot({ agent, size = 22 }: { agent: AgentDescriptor; size?: 
   );
 }
 
-/** O familiar: o bot cinzento da Solline, que te recebe no início e nos projetos vazios. */
+/** O familiar amarelo recebe-te no início e nos projetos vazios. */
 export function Familiar({ size = 120 }: { size?: number }) {
   return (
     <span data-testid="familiar" className="sl-enter sl-motion select-none">
-      <Bot hood="familiar" mood="waiting" size={size} />
+      <Bot hood="familiar" mood="waiting" size={size} alive />
     </span>
   );
 }

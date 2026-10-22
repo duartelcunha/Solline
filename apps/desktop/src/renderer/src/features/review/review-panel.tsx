@@ -31,9 +31,26 @@ const NO_FINDINGS: readonly Finding[] = [];
 export function ReviewPanel({ sessionId }: { sessionId: string }) {
   const open = useApp((s) => s.reviewOpen);
   const { mounted, state } = usePresence(open);
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    panel.current?.focus({ preventScroll: true });
+    return () => {
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+    };
+  }, [open]);
   if (!mounted) return null;
   return (
     <aside
+      ref={panel}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !event.defaultPrevented) {
+          event.preventDefault();
+          actions.toggleReview();
+        }
+      }}
       data-state={state}
       aria-label="Rever alterações"
       className="sl-panel sl-motion flex w-[32rem] max-w-[45vw] min-w-[22rem] shrink-0 flex-col border-l border-line bg-bg"

@@ -10,6 +10,10 @@
     "build": "electron-vite build",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
     "lint": "eslint .",
+    "qa:renderer": "playwright test --config playwright.qa.config.ts",
+    "qa:electron": "playwright test --config playwright.electron-qa.config.ts",
+    "qa:canary": "node qa/canary.mjs",
+    "qa:verify": "node qa/verify.mjs",
     "test": "vitest run && electron-vite build && playwright test",
     "dist": "electron-vite build && electron-builder --win nsis --x64 --config electron-builder.config.mjs"
   },

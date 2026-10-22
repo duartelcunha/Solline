@@ -223,16 +223,23 @@ export class WorktreeManager {
 
   /** O que a sessão mudou desde a base, contando os ficheiros por gravar e os novos. */
   async stats(wt: Worktree): Promise<WorktreeStats> {
-    // Conta num índice à parte: o índice da worktree é do agente (o git diff dele não muda).
-    const index = { GIT_INDEX_FILE: `${wt.path}.index` };
-    await this.#run(wt.path, ['read-tree', 'HEAD'], false, index);
-    await this.#run(wt.path, ['add', '-A'], false, index);
-    const { out } = await this.#run(
-      wt.path,
-      ['diff', '--cached', '--numstat', wt.base],
-      false,
-      index,
-    );
+    // Cada contagem tem o seu índice: atualizar o cabeçalho e fechar uma sessão podem
+    // contar ao mesmo tempo. Um read-tree partilhado apagava as mudanças da outra contagem.
+    const file = `${wt.path}.${randomBytes(8).toString('hex')}.index`;
+    const index = { GIT_INDEX_FILE: file };
+    let out: string;
+    try {
+      await this.#run(wt.path, ['read-tree', 'HEAD'], false, index);
+      await this.#run(wt.path, ['add', '-A'], false, index);
+      ({ out } = await this.#run(
+        wt.path,
+        ['diff', '--cached', '--numstat', wt.base],
+        false,
+        index,
+      ));
+    } finally {
+      await rm(file, { force: true });
+    }
     let files = 0;
     let additions = 0;
     let deletions = 0;
