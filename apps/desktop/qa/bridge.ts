@@ -1,4 +1,7 @@
 import {
+  emptySpaces,
+  type SpaceTask,
+  type SpaceMemory,
   commandSchemas,
   applyDelta,
   EngineEvent,
@@ -58,6 +61,7 @@ export function installBridge(scene: Scene) {
   const failures: string[] = [];
   const sessions = new Map<string, SessionInfo>();
   const canonical = new Map<string, RecoverySession>();
+  let spaces = emptySpaces();
   const races = new Map<string, EngineSnapshot['races'][number]>();
   const windowListeners = new Set<(state: WindowState) => void>();
   const closeListeners = new Set<() => Promise<void>>();
@@ -118,6 +122,7 @@ export function installBridge(scene: Scene) {
       sessions: [...canonical.values()].reverse(),
       races: [...races.values()],
       operations: [],
+      spaces,
       durability: { status: 'saved' },
     });
   }
@@ -137,6 +142,7 @@ export function installBridge(scene: Scene) {
   if (saved !== null) {
     const record = JSON.parse(saved) as Record<string, unknown>;
     const recovered = EngineSnapshot.parse(record.snapshot);
+    spaces = recovered.spaces ?? emptySpaces();
     if (recovered.epoch !== epoch) throw new Error('QA: epoch de recuperação inesperado');
     ui = UiRecoverySchema.parse(record.ui);
     sequence = recovered.sequence;
@@ -393,6 +399,101 @@ export function installBridge(scene: Scene) {
       throw new Error(`QA: sessão inesperada: ${id}`);
     const review = () => required(reviews.get(id), `revisão da sessão ${id}`);
     switch (command) {
+      case 'spaces.snapshot':
+        return structuredClone(spaces);
+      case 'spaces.taskCreate': {
+        const task: SpaceTask = {
+          id: crypto.randomUUID(),
+          projectId: payload.projectId as string | null,
+          title: String(payload.title),
+          description: String(payload.description ?? ''),
+          status: 'todo',
+          attempts: [],
+          sourceId: null,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        spaces.tasks.unshift(task);
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return task;
+      }
+      case 'spaces.taskUpdate': {
+        const task = required(
+          spaces.tasks.find((t) => t.id === payload.id),
+          'tarefa',
+        );
+        Object.assign(task, payload);
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return task;
+      }
+      case 'spaces.delegate': {
+        const task = required(
+          spaces.tasks.find((t) => t.id === payload.id),
+          'tarefa',
+        );
+        const target = payload.target as
+          { kind: 'new'; agent: string } | { kind: 'existing'; sessionId: string };
+        const sessionId =
+          target.kind === 'existing'
+            ? target.sessionId
+            : (
+                (await handle('session.create', {
+                  agent: target.agent,
+                  projectId: task.projectId,
+                })) as { session: SessionInfo }
+              ).session.id;
+        if (task.projectId === null) {
+          required(sessions.get(sessionId), 'sessão geral').projectId = '__general__';
+        }
+        const result = (await handle('session.send', { sessionId, text: payload.text })) as {
+          turnId: string;
+          how: string;
+        };
+        task.status = 'active';
+        task.attempts.push({
+          id: String(payload.requestId),
+          sessionId,
+          turnId: result.turnId,
+          text: String(payload.text),
+          state: result.how === 'queued' ? 'queued' : 'running',
+          at: Date.now(),
+          error: null,
+        });
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return task;
+      }
+      case 'spaces.configure':
+        spaces.settings = commandSchemas['spaces.configure'].payload.parse(payload);
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return spaces;
+      case 'spaces.memorySave': {
+        const input = commandSchemas['spaces.memorySave'].payload.parse(payload);
+        const memory: SpaceMemory = {
+          ...input,
+          id: input.id ?? crypto.randomUUID(),
+          createdAt: Date.now(),
+        };
+        spaces.memories = [memory, ...spaces.memories.filter((m) => m.id !== memory.id)];
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return spaces;
+      }
+      case 'spaces.memoryDelete':
+        spaces.memories = spaces.memories.filter((m) => m.id !== payload.id);
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return spaces;
+      case 'spaces.tick':
+        return spaces;
+      case 'spaces.analyze':
+        spaces.analysis = { ...spaces.analysis, state: 'idle', lastAt: Date.now() };
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return spaces;
       case 'engine.snapshot':
         return snapshot();
       case 'engine.flush':

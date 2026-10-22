@@ -1,5 +1,5 @@
 import { Logo } from '../../components/logo.tsx';
-import { Folder, LayoutGrid, Plus, ShieldCheck, ShieldOff, X } from 'lucide-react';
+import { Folder, Globe2, LayoutGrid, Plus, ShieldCheck, ShieldOff, X } from 'lucide-react';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { useNeedsYouCount } from '../desk/desk.tsx';
 import { APP_NAME } from '@solline/protocol/app';
@@ -67,7 +67,7 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
       <div className="group flex items-center gap-1 pr-1">
         <button
           type="button"
-          onClick={() => actions.selectProject(project.id)}
+          onClick={() => actions.openSpace(project.id)}
           title={project.path}
           aria-label={`Projeto ${project.name}`}
           data-testid="project-row"
@@ -137,6 +137,15 @@ export function Sidebar({
       </div>
 
       <div className="px-2 pt-1">
+        <button
+          type="button"
+          onClick={() => actions.openSpace(null)}
+          data-testid="open-general"
+          className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-[13px] text-muted hover:bg-surface-hover hover:text-fg"
+        >
+          <Globe2 size={15} strokeWidth={1.75} />
+          Geral
+        </button>
         <DeskButton />
       </div>
 
