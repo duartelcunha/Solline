@@ -70,7 +70,7 @@ export const Checkpoint = z.object({
   title: z.string(),
   at: z.number(),
   /** running: o turno ainda corre (o diff vai mudando). */
-  state: z.enum(['running', 'done']),
+  state: z.enum(['running', 'done', 'interrupted']),
   stats: DiffStats,
 });
 export type Checkpoint = z.infer<typeof Checkpoint>;

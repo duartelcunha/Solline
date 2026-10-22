@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
+import { removeRecoveryKey } from '../../src/main/recovery-key';
+import { observePrompts, type PromptRecord } from './custom-prompts';
 import {
   _electron as electron,
   test as base,
@@ -18,6 +20,8 @@ type Qa = {
   restart: () => Promise<Page>;
   shot: (name: string) => Promise<void>;
   setWindowVisible: (visible: boolean) => Promise<{ visible: boolean; focused: boolean }>;
+  trustChoice: (trusted: boolean) => void;
+  prompts: () => PromptRecord[];
 };
 async function removeFixture(root: string) {
   if (dirname(root) !== resolve(tmpdir()) || !basename(root).startsWith('solline-redesign-qa-')) {
@@ -61,6 +65,37 @@ const test = base.extend<{ qa: Qa }>({
         } as Record<string, string>,
       });
     let app = await launch();
+    const promptRecords: PromptRecord[] = [];
+    const promptFailures: string[] = [];
+    const promptPlan = {
+      directory: project,
+      confirmations: {
+        'Confiança no projeto': { button: 'Confiar', choice: 'accept' as 'accept' | 'cancel' },
+        'Preparação das worktrees': { button: 'Preparar', choice: 'accept' as const },
+        'Deitar fora': { button: 'Deitar fora', choice: 'accept' as const },
+      },
+    };
+    let prompts = observePrompts(app, promptPlan);
+    const collectPrompts = async () => {
+      await prompts.settle();
+      prompts.stop();
+      promptRecords.push(...prompts.records);
+      promptFailures.push(...prompts.failures);
+    };
+    const safeClose = async () => {
+      const main = app
+        .windows()
+        .find((page) => new URL(page.url()).pathname.endsWith('/index.html'));
+      if (!main || main.isClosed()) return;
+      await main.evaluate(() => window.solline.window.action('close'));
+      await expect
+        .poll(() => app.windows().some((page) => page.url().endsWith('/recovery.html')))
+        .toBe(true);
+      const recovery = app.windows().find((page) => page.url().endsWith('/recovery.html'));
+      if (!recovery) throw new Error('Recovery window missing');
+      await recovery.getByRole('button', { name: 'Fechar com segurança' }).click();
+      await app.close();
+    };
     const errors: string[] = [];
     const processLog: { at: string; stream: string; text: string }[] = [];
     const eventJournal: { generation: number; events: unknown[] }[] = [];
@@ -99,16 +134,6 @@ const test = base.extend<{ qa: Qa }>({
         if (entry.type() === 'error') errors.push(entry.text());
       });
       await app.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
-      await app.evaluate(({ dialog }, folder) => {
-        dialog.showOpenDialog = (async () => ({
-          canceled: false,
-          filePaths: [folder],
-        })) as typeof dialog.showOpenDialog;
-        dialog.showMessageBox = (async () => ({
-          response: 0,
-          checkboxChecked: false,
-        })) as typeof dialog.showMessageBox;
-      }, project);
       await expect(page.getByTestId('ping-reply')).toBeAttached();
       const descriptors = await page.evaluate(() => window.solline.request('agents.list', {}));
       expect(descriptors.agents.map((a) => a.label)).toEqual(['Claude QA']);
@@ -124,8 +149,10 @@ const test = base.extend<{ qa: Qa }>({
           path: info.outputPath('before-restart.zip'),
           contentType: 'application/zip',
         });
-        await app.close();
+        await safeClose();
+        await collectPrompts();
         app = await launch();
+        prompts = observePrompts(app, promptPlan);
         page = await connect();
         return page;
       };
@@ -151,7 +178,22 @@ const test = base.extend<{ qa: Qa }>({
           return { visible: window.isVisible(), focused: window.isFocused() };
         }, visible);
       };
-      await use({ page, project, git, restart, shot, setWindowVisible });
+      const trustChoice = (trusted: boolean) => {
+        promptPlan.confirmations['Confiança no projeto'] = {
+          button: trusted ? 'Confiar' : 'Não confiar',
+          choice: trusted ? 'accept' : 'cancel',
+        };
+      };
+      await use({
+        page,
+        project,
+        git,
+        restart,
+        shot,
+        setWindowVisible,
+        trustChoice,
+        prompts: () => [...promptRecords, ...prompts.records],
+      });
       expect(
         await page.evaluate(() => ({
           node: typeof (globalThis as { require?: unknown }).require,
@@ -192,6 +234,14 @@ const test = base.extend<{ qa: Qa }>({
             contentType: 'application/json',
           });
         });
+        await capture('custom-prompts', async () => {
+          await collectPrompts();
+          await info.attach('custom-prompts', {
+            body: JSON.stringify({ records: promptRecords, failures: promptFailures }, null, 2),
+            contentType: 'application/json',
+          });
+          expect(promptFailures).toEqual([]);
+        });
         await capture('main-utility-output', async () => {
           await info.attach('main-utility-output', {
             body: JSON.stringify(processLog, null, 2),
@@ -228,8 +278,9 @@ const test = base.extend<{ qa: Qa }>({
         expect(evidenceErrors, 'Required QA evidence collection').toEqual([]);
       } finally {
         try {
-          await app.close();
+          await safeClose();
         } finally {
+          await removeRecoveryKey(join(root, 'data'));
           // Delete only this fixture's mkdtemp directory, never a user project.
           await removeFixture(root);
         }
@@ -307,6 +358,21 @@ async function send(page: Page, text = 'Atualiza as notas.') {
   await page.getByTestId('composer-input').fill(text);
   await page.getByTestId('composer-input').press('Enter');
 }
+
+test('confirmação própria permite recusar confiança sem a ativar', async ({ qa }) => {
+  const trust = qa.page.getByTestId('project-trust');
+  await expect(trust).toHaveAttribute('aria-pressed', 'true');
+  await trust.click();
+  await expect(trust).toHaveAttribute('aria-pressed', 'false');
+  qa.trustChoice(false);
+  await trust.click();
+  await expect.poll(() => qa.prompts().at(-1)?.button).toBe('Não confiar');
+  await expect(trust).toHaveAttribute('aria-pressed', 'false');
+  expect(
+    (await qa.page.evaluate(() => window.solline.request('projects.list', {}))).projects[0]
+      ?.trusted,
+  ).toBe(false);
+});
 test('janela nativa oculta cancela animações e recupera o olhar ao voltar', async ({
   qa,
 }, info) => {

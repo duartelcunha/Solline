@@ -18,10 +18,19 @@ export class SessionQuality {
   readonly #reviewer: Reviewer;
   readonly #emit: (quality: Quality) => void;
 
-  constructor(options: { reviewer: Reviewer; emit: (quality: Quality) => void; enabled: boolean }) {
+  constructor(options: {
+    reviewer: Reviewer;
+    emit: (quality: Quality) => void;
+    enabled: boolean;
+    recovery?: Quality;
+  }) {
     this.#reviewer = options.reviewer;
     this.#emit = options.emit;
-    this.#state = { available: true, enabled: options.enabled, review: NO_REVIEW };
+    this.#state = options.recovery ?? {
+      available: true,
+      enabled: options.enabled,
+      review: NO_REVIEW,
+    };
   }
 
   get state(): Quality {

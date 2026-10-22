@@ -14,6 +14,7 @@ import { qualityCommandSchemas } from './quality.ts';
 import { Race, RaceStartPayload } from './race.ts';
 import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
+import { EngineSnapshot } from './recovery.ts';
 
 /**
  * Contrato dos comandos da Ponte: interface -> main -> motor.
@@ -95,6 +96,9 @@ export const SessionCreateResult = z.object({
 });
 
 export const commandSchemas = {
+  'engine.snapshot': { payload: Empty, result: EngineSnapshot },
+  'engine.flush': { payload: Empty, result: Empty },
+  'engine.shutdown': { payload: Empty, result: Empty },
   'engine.ping': { payload: PingPayload, result: PingResult },
   /**
    * Os agentes que o motor conhece e o estado de cada um nesta máquina. refresh volta a

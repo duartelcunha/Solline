@@ -3,8 +3,8 @@ import type { EngineEvent, SessionInfo, SessionState } from '@solline/protocol';
 /**
  * Quando avisar fora da app, e só com a janela sem foco (com foco, o bot já o mostra): uma
  * sessão que passa a precisar de ti, que acaba um turno, que cai, ou cujas verificações falham.
- * Calma: um aviso por acontecimento, e só o "precisa de ti" faz piscar a barra de tarefas. Função pura; o main mostra o aviso
- * do Windows e faz piscar a barra de tarefas.
+ * Um aviso por acontecimento. Função pura; o main mostra a janela própria da Solline
+ * sem roubar foco, e a ação explícita abre a conversa correspondente.
  */
 
 export interface Tracked {
@@ -19,7 +19,7 @@ export interface Attention {
   sessionId: string;
   title: string;
   body: string;
-  /** Precisa de ti: além do aviso, a barra de tarefas pisca até voltares. */
+  /** Identifica pedidos que precisam de intervenção. */
   urgent: boolean;
 }
 

@@ -1,0 +1,103 @@
+@import '@solline/ui/tokens.css';
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--sl-bg);
+  color: var(--sl-text);
+  font: 14px/1.5 var(--sl-font-sans);
+}
+main {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 26px;
+}
+.wordmark {
+  font-size: 12px;
+  font-weight: 650;
+  -webkit-app-region: drag;
+  display: block;
+}
+h1 {
+  font-size: 23px;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+  margin: 14px 0 10px;
+}
+#message {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  margin: 0;
+  scrollbar-width: thin;
+}
+.detail {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--sl-text-muted);
+  margin: 10px 0 0;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  flex-shrink: 0;
+}
+button {
+  min-height: 40px;
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 9px;
+  padding: 8px 12px;
+  background: var(--sl-surface);
+  color: var(--sl-text);
+  cursor: pointer;
+}
+button:hover {
+  background: var(--sl-surface-hover);
+}
+button:focus-visible {
+  outline: 2px solid var(--sl-focus);
+  outline-offset: 3px;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+#restore {
+  background: var(--sl-text);
+  color: var(--sl-bg);
+}
+#error {
+  flex-shrink: 0;
+  max-height: 48px;
+  overflow: auto;
+  color: var(--sl-danger);
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+#error:empty {
+  display: none;
+}
+[hidden] {
+  display: none !important;
+}
+@media (pointer: coarse) {
+  button {
+    min-height: 44px;
+  }
+}
+@media (forced-colors: active) {
+  button {
+    border: 1px solid ButtonText;
+  }
+  #restore {
+    background: ButtonFace;
+    color: ButtonText;
+  }
+}

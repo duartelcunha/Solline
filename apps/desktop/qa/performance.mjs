@@ -23,24 +23,22 @@ import { chromium } from '@playwright/test';
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repo = resolve(desktop, '../..');
-const output = join(desktop, 'qa-evidence/performance');
-const baseline = '9fb1cb047e06e0d613cc2ec5f1edf32b65971425';
+const label = process.argv[2] ?? 'performance-porcelain';
+if (!/^[a-z0-9-]{1,48}$/.test(label)) throw new Error('Invalid evidence label');
+const output = join(desktop, 'qa-evidence', label);
+const baseline = 'f35c02aa94933d558b50c88153b12e1350816d23';
 const browserPath =
   process.env.SOLLINE_QA_BROWSER ??
   join(process.env.LOCALAPPDATA, 'ms-playwright/chromium-1247/chrome-win64/chrome.exe');
 const warmups = 1;
 const samples = Number(process.env.SOLLINE_PERF_SAMPLES ?? 5);
-// The original baseline cannot contain the long fixture. Apply the same minimal
-// height constraints to both disposable copies; this is a normalized comparison,
-// not the untouched historical layout. Preserve its failed geometry separately.
-const containmentCSS = `#root > div > main,
-#root > div > main > div > div { min-height: 0; }`;
+// Compare the previous stable layout without altering either version's containment.
+const containmentCSS = '';
 const normalization = {
-  kind: 'explicitly-normalized-layout',
+  kind: 'unmodified-layout',
   css: containmentCSS,
   reason:
-    'Untouched baseline long-conversation layout overflows the viewport; identical containment is applied to both disposable copies.',
-  invalidatedEvidence: 'qa-evidence/performance-diagnostic/DIAGNOSIS.md',
+    'The previous stable build already contains the long-conversation layout fix; neither version receives layout patches.',
 };
 // These thresholds are written before building or measuring. Noise does not count as a win.
 const policy = {
@@ -65,7 +63,8 @@ const policy = {
 if (process.env.SOLLINE_PERF_EXCLUSIVE !== '1')
   throw new Error('Run only after other test/build jobs stop; set SOLLINE_PERF_EXCLUSIVE=1.');
 assert(samples >= 3 && samples <= 15, 'Use 3–15 measured samples per version');
-await mkdir(output, { recursive: true });
+await mkdir(dirname(output), { recursive: true });
+await mkdir(output);
 await writeFile(
   join(output, 'policy.json'),
   JSON.stringify(
@@ -162,6 +161,12 @@ async function prepare(label) {
   await symlink(join(repo, 'node_modules'), deps, 'junction');
   junctions.push(deps);
   const target = join(root, 'apps/desktop');
+  // Both versions use the same strictly validated test transport. The baseline UI
+  // ignores the newer recovery methods; its authored components/styles stay untouched.
+  await cp(join(repo, 'packages/protocol/src'), join(root, 'packages/protocol/src'), {
+    recursive: true,
+  });
+  await cp(join(desktop, 'src/main/window-schemas.ts'), join(target, 'src/main/window-schemas.ts'));
   await cp(harnessSnapshot, join(target, 'qa'), { recursive: true });
   // Alias workspace exports to this snapshot: shared node_modules must not resolve current UI into baseline.
   const aliases = [];
@@ -216,7 +221,6 @@ await import('../src/renderer/src/main');
   for (const directive of ["@source '.';", "@source '../../../../../packages/ui/src';"]) {
     if (!styleSource.includes(directive)) styleSource += `\n${directive}\n`;
   }
-  styleSource += `\n/* Identical benchmark-only containment normalization. */\n${containmentCSS}\n`;
   await writeFile(stylePath, styleSource);
   await writeFile(
     join(output, `${label}-style-discovery.json`),
@@ -385,7 +389,9 @@ async function validateLayout(page, label, index) {
     };
     const conversation = document.querySelector('[data-testid="conversation"]');
     return {
-      root: describe(document.querySelector('#root')?.firstElementChild),
+      root: describe(
+        document.querySelector('.app-shell') ?? document.querySelector('#root')?.firstElementChild,
+      ),
       main: describe(document.querySelector('main')),
       panel: describe(document.querySelector('[data-testid="review-panel"]')),
       conversation: describe(conversation),
@@ -664,7 +670,7 @@ try {
     comparisons,
     teardown,
     limitations: [
-      'Explicitly normalized layout: identical harness-only containment fixes the historical baseline overflow. This is not the untouched baseline rendering.',
+      'Compared against the previous stable build with identical synthetic workload and no layout normalization.',
       'Synthetic renderer comparison, not native Electron or SDK throughput.',
       'Input/state are deterministic; real elapsed time and browser scheduling are inherently noisy.',
       'Two-frame click-to-paint proxy is not field INP.',

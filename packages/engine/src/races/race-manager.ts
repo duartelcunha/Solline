@@ -44,6 +44,9 @@ type SessionCreateResult = CommandResult<'session.create'>;
 const STOPPED: ReadonlySet<SessionState> = new Set(['idle', 'error']);
 
 export class RaceManager {
+  readonly #ranking = new Map<string, AbortController>();
+  #stopping = false;
+  readonly #beforeEffect: (command: string, raceId: string) => () => void;
   readonly #races = new Map<string, Race>();
   readonly #sessions: RaceSessions;
   readonly #emit: (event: EngineEvent) => void;
@@ -52,12 +55,14 @@ export class RaceManager {
   readonly #judge: Judge | undefined;
 
   constructor(options: {
+    beforeEffect?: (command: string, raceId: string) => () => void;
     sessions: RaceSessions;
     emit: (event: EngineEvent) => void;
     /** Sem juiz, os empates do topo ficam para ti. */
     judge?: Judge;
   }) {
     this.#sessions = options.sessions;
+    this.#beforeEffect = options.beforeEffect ?? (() => () => undefined);
     this.#emit = options.emit;
     this.#judge = options.judge;
   }
@@ -112,8 +117,21 @@ export class RaceManager {
     return race;
   }
 
+  recovery(): Race[] {
+    return structuredClone([...this.#races.values()]);
+  }
+
+  restoreRecovery(races: Race[]): void {
+    for (const race of structuredClone(races)) {
+      if (race.phase === 'running' || race.phase === 'ranking') race.phase = 'done';
+      for (const lane of race.lanes) lane.state = 'error';
+      this.#races.set(race.id, race);
+    }
+  }
+
   /** O que as sessões fazem chega aqui: o estado de cada pista e o fim da corrida. */
   observe(event: EngineEvent): void {
+    if (this.#stopping) return;
     if (event.type !== 'session.state') return;
     for (const race of this.#races.values()) {
       const lane = race.lanes.find((l) => l.sessionId === event.sessionId);
@@ -126,7 +144,13 @@ export class RaceManager {
       ) {
         race.phase = 'done';
         this.#changed(race);
-        void this.rank(race.id);
+        void this.rank(race.id).catch((error) =>
+          this.#emit({
+            kind: 'event',
+            type: 'engine.error',
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
         continue;
       }
       this.#changed(race);
@@ -139,21 +163,35 @@ export class RaceManager {
    */
   async rank(raceId: string): Promise<Race> {
     const race = this.get(raceId);
-    if (race.phase !== 'done') return race;
+    if (this.#stopping || race.phase !== 'done') return race;
+    const abort = new AbortController();
+    this.#ranking.set(raceId, abort);
+    try {
+      return await this.#rank(race, abort.signal);
+    } finally {
+      this.#ranking.delete(raceId);
+    }
+  }
+
+  async #rank(race: Race, signal: AbortSignal): Promise<Race> {
+    const raceId = race.id;
+    const completed = this.#beforeEffect('race.rank', raceId);
     race.phase = 'ranking';
     this.#changed(race);
     const outcomes: (LaneOutcome & { cwd: string })[] = await Promise.all(
       race.lanes.map(async (lane) => {
         const outcome = await this.#sessions
-          .outcome(lane.sessionId)
+          .outcome(lane.sessionId, signal)
           .catch(() => ({ cwd: '', files: [], checks: [] }));
         return { sessionId: lane.sessionId, ...outcome };
       }),
     );
+    if (signal.aborted) return race;
     const tied = needsJudge(outcomes);
     let judged: { verdict: Verdict } | { error: string } | undefined;
     if (tied.length > 1 && this.#judge) {
       judged = await judgeBothWays(this.#judge, {
+        signal,
         cwd: outcomes.find((o) => o.cwd)?.cwd ?? '',
         request: race.text,
         candidates: tied.map((o) => ({
@@ -168,11 +206,18 @@ export class RaceManager {
         }));
     }
     // Fechada entretanto: o veredicto já não interessa.
-    if (race.phase !== 'ranking') return race;
+    if (signal.aborted || race.phase !== 'ranking') return race;
     race.verdict = rankLanes(outcomes, judged);
     race.phase = 'ranked';
     this.#changed(race);
+    completed();
     return race;
+  }
+
+  stopForRecovery(): void {
+    this.#stopping = true;
+    for (const abort of this.#ranking.values()) abort.abort();
+    for (const race of this.#races.values()) if (race.phase === 'ranking') race.phase = 'done';
   }
 
   setPhase(raceId: string, phase: RacePhase): void {

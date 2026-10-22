@@ -1,6 +1,8 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   RequestEnvelope,
+  RecoveryOperationDetails,
   engineCommandSchemas,
   type AgentId,
   type EngineCommandName,
@@ -8,7 +10,12 @@ import {
   type EngineCommandResult,
   type EngineEvent,
   type ResponseEnvelope,
+  type EngineSnapshot,
+  type RecoveryOperation,
 } from '@solline/protocol';
+import { DurableJournal } from './recovery/journal.ts';
+import { RecoveryRecord, replay } from './recovery/records.ts';
+import type { RecoveryState } from './recovery/state.ts';
 import type { AgentAdapterFactory } from './adapters/types.ts';
 import { LoginManager } from './agents/login.ts';
 import { builtinRegistry, withFactories, type AgentRegistry } from './agents/registry.ts';
@@ -26,6 +33,8 @@ import { WorktreeManager } from './worktrees/worktrees.ts';
 import { ENGINE_VERSION } from './version.ts';
 
 export interface EngineOptions {
+  /** Main supplies this in memory over MessagePort; never environment, argv or plaintext disk. */
+  recoveryKey?: Uint8Array | undefined;
   claudeExecutable?: string | undefined;
   /** Pasta de dados da app (perfis de fornecedor guardam lá a config do Claude Code). */
   dataDir?: string | undefined;
@@ -66,8 +75,28 @@ export class Engine {
   readonly logins: LoginManager;
   readonly #handlers: Handlers;
   readonly #checkpoints: CheckpointStore | undefined;
+  readonly #epoch = randomUUID();
+  readonly #journal: DurableJournal<RecoveryRecord> | undefined;
+  readonly #operations = new Map<string, RecoveryOperation>();
+  readonly #recordedSessions = new Set<string>();
+  readonly #inFlight = new Set<Promise<unknown>>();
+  readonly #ready: Promise<void>;
+  #sequence = 0;
+  #persistenceError: Error | undefined;
+  #stopping = false;
+  #disposed = false;
 
   constructor(options: EngineOptions = {}) {
+    if (options.dataDir && !options.recoveryKey)
+      throw new Error('A chave protegida de recuperação não está disponível.');
+    this.#journal =
+      options.dataDir && options.recoveryKey
+        ? new DurableJournal(
+            path.join(options.dataDir, 'recovery', 'engine-v1'),
+            (value) => RecoveryRecord.parse(value),
+            options.recoveryKey,
+          )
+        : undefined;
     const base =
       options.registry ??
       builtinRegistry({
@@ -83,6 +112,7 @@ export class Engine {
         ? undefined
         : new CheckpointStore({
             root: options.dataDir ? path.join(options.dataDir, 'checkpoints') : undefined,
+            durable: Boolean(options.dataDir),
             ...options.checkpoints,
           });
     const emit = options.emit ?? (() => undefined);
@@ -93,10 +123,33 @@ export class Engine {
     // As corridas seguem as sessões pelos eventos delas (o estado de cada pista).
     const box: { races?: RaceManager } = {};
     const emitAll = (event: EngineEvent) => {
-      emit(event);
+      if (this.#disposed) return;
+      this.sessions?.observeRecovery(event);
+      const sequenced = { ...event, epoch: this.#epoch, sequence: ++this.#sequence };
+      try {
+        this.#requirePersistence();
+        const sessionId = 'sessionId' in event ? event.sessionId : undefined;
+        const capture =
+          sessionId &&
+          (!this.#recordedSessions.has(sessionId) ||
+            event.type === 'session.timeline' ||
+            event.type === 'session.workspace');
+        const session = capture
+          ? this.sessions?.recovery().find((saved) => saved.view.session.id === sessionId)
+          : undefined;
+        this.#journal?.append({ kind: 'event', event: sequenced, ...(session ? { session } : {}) });
+        if (sessionId && session) this.#recordedSessions.add(sessionId);
+      } catch (error) {
+        this.#persistenceError = error instanceof Error ? error : new Error(String(error));
+        emit({ kind: 'event', type: 'engine.error', message: this.#persistenceError.message });
+        return;
+      }
+      emit(sequenced);
       box.races?.observe(event);
     };
     this.sessions = new SessionManager({
+      beforeEffect: (command, sessionId, text) =>
+        this.#prepare(command, { sessionId, ...(text ? { text } : {}) }),
       emit: emitAll,
       registry,
       mcp,
@@ -124,6 +177,7 @@ export class Engine {
           : (options.checks ?? (options.isolated ? undefined : {})),
     });
     this.races = new RaceManager({
+      beforeEffect: (command, raceId) => this.#prepare(command, { raceId }),
       sessions: this.sessions,
       emit: emitAll,
       // O juiz só desempata; nos testes isolados não se gasta a subscrição com ele.
@@ -132,6 +186,24 @@ export class Engine {
         : { judge: claudeJudge({ claudeExecutable: options.claudeExecutable }) }),
     });
     box.races = this.races;
+    const restored = replay(this.#journal?.records ?? [], this.#state());
+    if (this.#journal) this.#journal.records.length = 0;
+    this.sessions.restoreRecovery(restored.sessions, restored.setups);
+    this.races.restoreRecovery(restored.snapshot.races);
+    for (const operation of restored.snapshot.operations)
+      this.#operations.set(operation.id, operation);
+    for (const saved of restored.sessions) this.#recordedSessions.add(saved.view.session.id);
+    this.#ready = this.sessions
+      .reconcileRecovery()
+      .then(() => this.sessions.preserveRecovery())
+      .then(() => {
+        if (this.#journal) this.#journal.snapshot({ kind: 'snapshot', state: this.#state() });
+      });
+    // Startup failure remains observable to every request without an unhandled rejection.
+    void this.#ready.catch((error) => {
+      this.#persistenceError = error instanceof Error ? error : new Error(String(error));
+      emit({ kind: 'event', type: 'engine.error', message: this.#persistenceError.message });
+    });
     this.logins = new LoginManager({
       onChange: (agent, error) =>
         emit({ kind: 'event', type: 'agents.changed', agent, ...(error ? { error } : {}) }),
@@ -150,6 +222,15 @@ export class Engine {
     const s = this.sessions;
     const ok = {} as Record<string, never>;
     this.#handlers = {
+      'engine.snapshot': async () => this.#state().snapshot,
+      'engine.flush': async () => {
+        await this.flush();
+        return {};
+      },
+      'engine.shutdown': async () => {
+        await this.shutdown();
+        return {};
+      },
       'engine.ping': async () => ({
         pong: true,
         engineVersion: ENGINE_VERSION,
@@ -254,20 +335,161 @@ export class Engine {
     }
     const { id, payload, command } = parsed.data;
     try {
+      await this.#ready;
+      if (
+        this.#stopping &&
+        command !== 'engine.snapshot' &&
+        command !== 'engine.flush' &&
+        command !== 'engine.shutdown'
+      )
+        throw new Error('O motor está a fechar; o trabalho foi preservado.');
       const schema = engineCommandSchemas[command];
       const input = schema.payload.parse(payload ?? {});
+      const readOnly = READ_ONLY.has(command);
+      if (!readOnly && command !== 'engine.flush') this.#requirePersistence();
+      if (!readOnly && 'sessionId' in input && typeof input.sessionId === 'string')
+        this.sessions.assertRecoveryReady(input.sessionId);
+      const finish =
+        !readOnly && !command.startsWith('engine.') ? this.#prepare(command, input, id) : undefined;
       const handler = this.#handlers[command] as (payload: unknown) => Promise<unknown>;
-      const result = schema.result.parse(await handler(input));
-      return { kind: 'response', id, ok: true, result };
+      const execution = (async () => {
+        const result = schema.result.parse(await handler(input));
+        if (finish) {
+          finish();
+          await this.flush();
+        }
+        return result;
+      })();
+      if (finish) this.#inFlight.add(execution);
+      try {
+        const result = await execution;
+        return { kind: 'response', id, ok: true, result };
+      } finally {
+        this.#inFlight.delete(execution);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { kind: 'response', id, ok: false, error: { message } };
     }
   }
 
+  ready(): Promise<void> {
+    return this.#ready;
+  }
+
   async dispose(): Promise<void> {
+    if (this.#disposed) return;
+    await this.shutdown();
+  }
+
+  #requirePersistence(): void {
+    if (this.#persistenceError) throw this.#persistenceError;
+    if (this.#journal?.error) throw this.#journal.error;
+  }
+
+  #prepare(command: string, payload: unknown, id: string = randomUUID()): () => void {
+    if (this.#stopping) throw new Error('O motor está a fechar; nenhuma ação nova foi iniciada.');
+    this.#requirePersistence();
+    if (this.#operations.has(id))
+      throw new Error('Este pedido já foi recebido. Confirma o resultado antes de o repetir.');
+    const input = payload as {
+      sessionId?: unknown;
+      raceId?: unknown;
+      projectId?: unknown;
+      text?: unknown;
+      id?: unknown;
+      answer?: { decision?: unknown };
+    };
+    // Zod's object strips all non-allowlisted keys, particularly keys/env/provider secrets.
+    // This is explanatory metadata only; recovered operations are never executed.
+    const details = RecoveryOperationDetails.parse({
+      ...input,
+      itemId: typeof input?.id === 'string' ? input.id : undefined,
+      decision: input?.answer?.decision,
+    });
+    const operation: RecoveryOperation = {
+      id,
+      command,
+      state: 'prepared',
+      at: Date.now(),
+      ...(typeof input?.sessionId === 'string' ? { sessionId: input.sessionId } : {}),
+      ...(typeof input?.raceId === 'string' ? { raceId: input.raceId } : {}),
+      ...(typeof input?.projectId === 'string' ? { projectId: input.projectId } : {}),
+      ...(typeof input?.text === 'string' ? { text: input.text } : {}),
+      ...(Object.keys(details).length ? { details } : {}),
+    };
+    this.#journal?.append({ kind: 'operation', operation });
+    this.#operations.set(id, operation);
+    return () => {
+      this.#requirePersistence();
+      const completed: RecoveryOperation = { ...operation, state: 'completed' };
+      this.#journal?.append({ kind: 'snapshot', state: this.#state() });
+      this.#journal?.append({ kind: 'operation', operation: completed });
+      this.#operations.set(id, completed);
+    };
+  }
+
+  #state(): RecoveryState {
+    const sessions = this.sessions?.recovery() ?? [];
+    const snapshot: EngineSnapshot = {
+      version: 1,
+      epoch: this.#epoch,
+      sequence: this.#sequence,
+      lifecycle: this.#disposed ? 'stopped' : this.#stopping ? 'stopping' : 'running',
+      sessions: sessions.map((saved) => saved.view),
+      races: this.races?.recovery() ?? [],
+      operations: [...this.#operations.values()],
+      durability:
+        this.#persistenceError || this.#journal?.error
+          ? { status: 'failed', error: (this.#persistenceError ?? this.#journal?.error)?.message }
+          : { status: 'saved' },
+    };
+    return { snapshot, sessions, setups: this.sessions?.recoverySetups() ?? [] };
+  }
+
+  async flush(): Promise<void> {
+    await this.sessions.preserveRecovery();
+    if (this.#journal && (this.#journal.error || this.#persistenceError)) {
+      this.#journal.retrySnapshot({ kind: 'snapshot', state: this.#state() });
+      this.#persistenceError = undefined;
+    }
+    this.#requirePersistence();
+    this.#journal?.snapshot({ kind: 'snapshot', state: this.#state() });
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.#disposed) return;
+    this.#stopping = true;
+    this.races.stopForRecovery();
     await this.logins.cancelAll();
-    await this.sessions.disposeAll();
+    await this.sessions.stopForRecovery();
+    // An accepted start/send/merge can still be awaiting a provider or Git. Its final
+    // state must reach the journal before shutdown is acknowledged. A timeout belongs
+    // to the caller and must keep the window open, never skip this preservation step.
+    await Promise.allSettled([...this.#inFlight]);
+    await this.logins.cancelAll();
+    await this.sessions.stopForRecovery();
+    await this.flush();
+    this.#disposed = true;
+    await this.sessions.disposeAll(true);
     await this.#checkpoints?.dispose();
+    this.#journal?.close();
   }
 }
+
+const READ_ONLY = new Set<EngineCommandName>([
+  'engine.ping',
+  'engine.snapshot',
+  'agents.list',
+  'agents.keys',
+  'agents.keyCandidates',
+  'mcp.list',
+  'worktrees.list',
+  'race.get',
+  'projects.detectChecks',
+  'projects.detectSetup',
+  'review.timeline',
+  'review.diff',
+  'quality.get',
+  'checks.get',
+]);

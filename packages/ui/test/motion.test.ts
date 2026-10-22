@@ -5,6 +5,7 @@ import {
   SPRING,
   Spring,
   isSettled,
+  isForeground,
   project,
   rubberband,
   shouldAnimate,
@@ -122,6 +123,14 @@ describe('gestos', () => {
 });
 
 describe('pausa do que se repete', () => {
+  it('uma janela visível restaurada em segundo plano continua inativa', () => {
+    const state = { hidden: false, hasFocus: () => false };
+    expect(isForeground(state)).toBe(false);
+    state.hasFocus = () => true;
+    expect(isForeground(state)).toBe(true);
+    state.hidden = true;
+    expect(isForeground(state)).toBe(false);
+  });
   it('fica em pausa com a janela escondida ou sem foco, e volta', async () => {
     const { trackAmbient } = await import('../src/motion.ts');
     const listeners: Record<string, () => void> = {};

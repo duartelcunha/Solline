@@ -2,7 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { removeRecoveryKey } from '../src/main/recovery-key';
+import { observePrompts, type PromptChoice } from '../qa/electron/custom-prompts';
 import {
   _electron as electron,
   expect,
@@ -23,6 +25,12 @@ const shots = process.env.SOLLINE_SHOTS;
 let app: ElectronApplication;
 let userData: string;
 let project: string;
+let promptObserver: ReturnType<typeof observePrompts> | undefined;
+const rendererErrors: string[] = [];
+const confirmations: Record<string, PromptChoice> = {
+  'Confiança no projeto': { button: 'Não confiar', choice: 'cancel' },
+  'Variáveis do agente': { button: 'Cancelar', choice: 'cancel' },
+};
 
 test.beforeAll(async () => {
   userData = await mkdtemp(join(tmpdir(), 'solline-e2e-data-'));
@@ -57,7 +65,13 @@ test.beforeAll(async () => {
   git('add', '-A');
   git('commit', '--quiet', '-m', 'início');
   const env = {
-    ...process.env,
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([key]) =>
+        /^(?:PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH|COMSPEC|PROGRAMFILES|PROGRAMFILES\(X86\)|PROGRAMDATA|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE|SOLLINE_SKIP_SDK)$/i.test(
+          key,
+        ),
+      ),
+    ),
     SOLLINE_USER_DATA: userData,
     SOLLINE_ISOLATED: '1',
     // Com o SDK real, o revisor também corre (lê o turno e deixa achados).
@@ -66,12 +80,71 @@ test.beforeAll(async () => {
   app = exe
     ? await electron.launch({ executablePath: exe, env })
     : await electron.launch({ args: [join(__dirname, '..', 'out', 'main', 'index.js')], env });
+  promptObserver = observePrompts(app, { directory: project, confirmations });
+  app.on('window', (page) => {
+    page.on('pageerror', (error) => rendererErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') rendererErrors.push(message.text());
+    });
+  });
+});
+
+test.afterEach(async ({ browserName }, info) => {
+  expect(browserName).toBe('chromium');
+  const diagnostics = info.outputPath('custom-prompts.json');
+  await writeFile(
+    diagnostics,
+    JSON.stringify(
+      { records: promptObserver?.records, failures: promptObserver?.failures, rendererErrors },
+      null,
+      2,
+    ),
+  );
+  await info.attach('custom-prompts', {
+    path: diagnostics,
+    contentType: 'application/json',
+  });
+  if (info.status !== info.expectedStatus && app) {
+    for (const [index, page] of app.windows().entries()) {
+      const screenshot = info.outputPath(`window-${index}.png`);
+      const contents = info.outputPath(`window-${index}.txt`);
+      await page.screenshot({ path: screenshot });
+      await writeFile(contents, await page.locator('body').innerText());
+      await info.attach(`window-${index}`, { path: screenshot, contentType: 'image/png' });
+      await info.attach(`window-${index}-text`, { path: contents, contentType: 'text/plain' });
+    }
+  }
 });
 
 test.afterAll(async () => {
-  await app?.close();
-  await rm(userData, { recursive: true, force: true }).catch(() => undefined);
-  await rm(project, { recursive: true, force: true }).catch(() => undefined);
+  if (app) {
+    const page = app.windows().find((window) => !window.url().endsWith('/recovery.html'));
+    if (page) {
+      await page.evaluate(() =>
+        (
+          globalThis as unknown as {
+            solline: { window: { action(action: 'close'): Promise<void> } };
+          }
+        ).solline.window.action('close'),
+      );
+      await expect
+        .poll(() => app.windows().some((window) => window.url().endsWith('/recovery.html')))
+        .toBe(true);
+      const recovery = app.windows().find((window) => window.url().endsWith('/recovery.html'));
+      if (!recovery) throw new Error('Recovery window missing');
+      await recovery.getByRole('button', { name: 'Fechar com segurança' }).click();
+    }
+    await app.close();
+  }
+  await promptObserver?.settle();
+  promptObserver?.stop();
+  for (const path of [userData, project])
+    if (dirname(resolve(path)) !== resolve(tmpdir()) || !path.includes('solline-e2e-'))
+      throw new Error('Unsafe fixture cleanup');
+  await removeRecoveryKey(userData);
+  await rm(userData, { recursive: true, force: true });
+  await rm(project, { recursive: true, force: true });
+  expect(promptObserver?.failures ?? []).toEqual([]);
 });
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -118,7 +191,7 @@ test('a interface não tem acesso ao Node', async () => {
   expect(surface).toEqual({
     require: 'undefined',
     process: 'undefined',
-    api: ['onEvent', 'onFocusSession', 'request', 'window'],
+    api: ['onEvent', 'onFocusSession', 'recovery', 'request', 'window'],
   });
 });
 
@@ -157,36 +230,24 @@ test('só links https abrem fora e as permissões do browser vêm negadas', asyn
   expect(opened).toEqual(['https://example.com/']);
 });
 
-/**
- * Os diálogos nativos não se conduzem por Playwright: trocam-se no main. trust é o botão
- * do diálogo de confiança (0 = Confiar, 1 = Não confiar).
- */
-async function stubDialogs(folder: string, trust: number): Promise<void> {
-  await app.evaluate(
-    ({ dialog }, { folder, trust }) => {
-      const g = globalThis as { trustDialogs?: number };
-      g.trustDialogs ??= 0;
-      dialog.showOpenDialog = (async () => ({
-        canceled: false,
-        filePaths: [folder],
-      })) as typeof dialog.showOpenDialog;
-      dialog.showMessageBox = (async () => {
-        g.trustDialogs = (g.trustDialogs ?? 0) + 1;
-        return { response: trust, checkboxChecked: false };
-      }) as typeof dialog.showMessageBox;
-    },
-    { folder, trust },
-  );
+async function chooseTrust(trust: boolean): Promise<void> {
+  await promptObserver?.settle();
+  confirmations['Confiança no projeto'] = trust
+    ? { button: 'Confiar', choice: 'accept' }
+    : { button: 'Não confiar', choice: 'cancel' };
 }
 
 /** Quantas vezes o main mostrou o diálogo de confiança. */
-function trustDialogs(): Promise<number> {
-  return app.evaluate(() => (globalThis as { trustDialogs?: number }).trustDialogs ?? 0);
+async function trustDialogs(): Promise<number> {
+  await promptObserver?.settle();
+  return (
+    promptObserver?.records.filter((record) => record.title === 'Confiança no projeto').length ?? 0
+  );
 }
 
 test('um projeto novo pergunta pela confiança e o escudo muda-a', async () => {
   const page = await app.firstWindow();
-  await stubDialogs(project, 1);
+  await chooseTrust(false);
   await page.getByTestId('add-project').click();
   await expect(page.getByTestId('project-row')).toHaveCount(1);
   const shield = page.getByTestId('project-trust');
@@ -198,7 +259,7 @@ test('um projeto novo pergunta pela confiança e o escudo muda-a', async () => {
   await expect.poll(trustDialogs).toBe(2);
   await expect(shield).toHaveAttribute('data-trusted', 'false');
   // Aceitar liga a confiança.
-  await stubDialogs(project, 0);
+  await chooseTrust(true);
   await shield.click();
   await expect(shield).toHaveAttribute('data-trusted', 'true');
   expect(await trustDialogs()).toBe(3);
@@ -238,17 +299,13 @@ test('o painel de agentes mostra o estado e guarda as variáveis só depois de c
   await page.getByTestId('agents-refresh').click();
   await expect(page.getByTestId('agents-refresh')).toBeEnabled({ timeout: 45_000 });
 
-  // O diálogo nativo de confirmação troca-se no main: primeiro recusas, depois aceitas.
-  const answer = (response: number) =>
-    app.evaluate(({ dialog }, response) => {
-      const g = globalThis as { keyDialogs?: string[] };
-      g.keyDialogs ??= [];
-      dialog.showMessageBox = (async (...args: unknown[]) => {
-        const options = args.at(-1) as { detail?: string };
-        g.keyDialogs!.push(options.detail ?? '');
-        return { response, checkboxChecked: false };
-      }) as typeof dialog.showMessageBox;
-    }, response);
+  const answer = async (response: number) => {
+    await promptObserver?.settle();
+    confirmations['Variáveis do agente'] =
+      response === 0
+        ? { button: 'Dar', choice: 'accept' }
+        : { button: 'Cancelar', choice: 'cancel' };
+  };
   const input = page.getByTestId('keys-input-opencode');
   await input.fill('nome inválido');
   await expect(panel.getByRole('button', { name: 'Juntar' }).first()).toBeDisabled();
@@ -267,9 +324,11 @@ test('o painel de agentes mostra o estado e guarda as variáveis só depois de c
   await page.getByTestId('keys-save-opencode').click();
   await expect(page.getByTestId('keys-save-opencode')).toHaveText('Guardar', { timeout: 15_000 });
   await expect(page.getByTestId('panel-agent-opencode')).toContainText('SOLLINE_E2E_API_KEY');
-  const dialogs = await app.evaluate(
-    () => (globalThis as { keyDialogs?: string[] }).keyDialogs ?? [],
-  );
+  await promptObserver?.settle();
+  const dialogs =
+    promptObserver?.records
+      .filter((record) => record.title === 'Variáveis do agente')
+      .map((record) => record.detail) ?? [];
   expect(dialogs).toHaveLength(2);
   expect(dialogs[1]).toContain('SOLLINE_E2E_API_KEY');
   const saved = JSON.parse(await readFile(join(userData, 'agent-settings.json'), 'utf8')) as {
@@ -340,7 +399,7 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   await setTheme(page, 'light');
 
   // O projeto já foi adicionado (e ficou de confiança) no teste anterior.
-  await stubDialogs(project, 0);
+  await chooseTrust(true);
   await page.getByTestId('add-project').click();
   await expect(page.getByTestId('project-row')).toHaveCount(1);
 

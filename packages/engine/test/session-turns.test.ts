@@ -98,7 +98,7 @@ describe('o dono do turno', () => {
     expect(started).toEqual(['depois de trazer']);
   });
 
-  it('um envio que falha não deixa a fila presa', async () => {
+  it('um envio da fila que falha preserva o texto e exige retoma explícita', async () => {
     let fail = true;
     const started: string[] = [];
     const turns = new SessionTurns({
@@ -119,7 +119,13 @@ describe('o dono do turno', () => {
     turns.release();
     await tick();
     await tick();
-    expect(started).toEqual(['dois']);
+    expect(started).toEqual([]);
+    expect(turns.queue.paused).toBe(true);
+    expect(turns.queue.items.map((item) => item.text)).toEqual(['um', 'dois']);
+    expect(turns.settled()).toBe(false);
+    turns.resume();
+    await tick();
+    expect(started).toEqual(['um']);
   });
 
   it('tirar, reordenar e o exclusivo que recusa a meio', async () => {

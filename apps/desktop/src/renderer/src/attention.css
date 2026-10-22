@@ -1,0 +1,90 @@
+@import '@solline/ui/tokens.css';
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--sl-bg);
+  color: var(--sl-text);
+  font-family: var(--sl-font-sans);
+}
+main {
+  height: 144px;
+  padding: 16px 20px;
+  border: 1px solid var(--sl-border-strong);
+  background: var(--sl-surface);
+}
+.wordmark {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--sl-text-muted);
+}
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+button:focus-visible {
+  outline: 2px solid var(--sl-focus);
+  outline-offset: 2px;
+}
+#dismiss {
+  position: absolute;
+  right: 12px;
+  top: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 22px;
+  border-radius: 8px;
+}
+#dismiss:hover {
+  background: var(--sl-surface-hover);
+}
+#open {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  width: 100%;
+  padding: 10px 0 0;
+}
+strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#body {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--sl-text-muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+@media (pointer: coarse) {
+  #dismiss {
+    width: 44px;
+    height: 44px;
+    top: 0;
+    right: 4px;
+  }
+}
+.hint {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--sl-text-muted);
+}
+@media (forced-colors: active) {
+  main {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+  }
+  button {
+    color: ButtonText;
+  }
+}

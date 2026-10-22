@@ -1,7 +1,7 @@
 import { createContext, useContext, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { EngineEvent } from '@solline/protocol';
-import { prefersReducedMotion } from '@solline/ui/motion';
+import { isForeground, prefersReducedMotion } from '@solline/ui/motion';
 
 /** Superseding an animation rejects ready, even when its DOM update succeeded. */
 export function observeTransition(transition: ViewTransition): void {
@@ -10,46 +10,96 @@ export function observeTransition(transition: ViewTransition): void {
   });
 }
 
-/**
- * Uma mudança de estado que se transforma em vez de saltar: o browser fotografa o antes,
- * aplica a mudança e transforma cada elemento com o mesmo view-transition-name no novo
- * (tamanho, posição e conteúdo). As regras de tempo vivem no motion.css.
- *
- * A mudança só se aplica no frame seguinte, por isso o que chega entretanto espera na fila:
- * a ordem dos eventos do motor nunca se troca.
- */
-export function createMorphQueue(): (update: () => void, transform: boolean) => void {
-  let tail: Promise<void> = Promise.resolve();
-  let waiting = 0;
-  const settle = () => {
-    waiting -= 1;
+interface MorphLifecycle {
+  prepare: () => void;
+  cleanup: () => void;
+}
+
+/** A newer update wins immediately, without overtaking an older deferred DOM update. */
+export function createMorphQueue(): (
+  update: () => void,
+  transform: boolean,
+  lifecycle?: MorphLifecycle,
+) => void {
+  interface Active {
+    transition?: ViewTransition;
+    pending: (() => void) | null;
+    cleanup: () => void;
+  }
+  let active: Active | null = null;
+  const apply = (entry: Active) => {
+    const pending = entry.pending;
+    entry.pending = null;
+    if (pending) flushSync(pending);
   };
-  return (update, transform) => {
-    if (waiting > 0) {
-      waiting += 1;
-      tail = tail
-        .then(update)
-        .catch(() => undefined)
-        .finally(settle);
-      return;
+  const finish = (entry: Active) => {
+    if (active === entry) active = null;
+    entry.cleanup();
+  };
+  const interrupt = () => {
+    const previous = active;
+    if (!previous) return;
+    active = null;
+    previous.transition?.skipTransition();
+    try {
+      apply(previous);
+    } finally {
+      finish(previous);
     }
-    // O teclado só trava o que ele próprio provoca: o que chega do motor transforma-se sempre,
-    // menos com movimento reduzido ou a janela escondida.
+  };
+  return (update, transform, lifecycle) => {
+    const supersedes = active !== null;
+    interrupt();
     if (
+      supersedes ||
       !transform ||
       typeof document.startViewTransition !== 'function' ||
       prefersReducedMotion() ||
-      document.hidden
+      !isForeground()
     ) {
       update();
       return;
     }
-    waiting += 1;
-    const transition = document.startViewTransition(() => flushSync(update));
-    observeTransition(transition);
-    tail = transition.updateCallbackDone.catch(() => undefined).finally(settle);
+    const media =
+      typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+    const suspend = () => {
+      if (!isForeground() || media?.matches) interrupt();
+    };
+    let cleaned = false;
+    const entry: Active = {
+      pending: update,
+      cleanup: () => {
+        if (cleaned) return;
+        cleaned = true;
+        window.removeEventListener('blur', interrupt);
+        document.removeEventListener('visibilitychange', suspend);
+        media?.removeEventListener('change', suspend);
+        lifecycle?.cleanup();
+      },
+    };
+    active = entry;
+    window.addEventListener('blur', interrupt);
+    document.addEventListener('visibilitychange', suspend);
+    media?.addEventListener('change', suspend);
+    try {
+      lifecycle?.prepare();
+      const transition = document.startViewTransition(() => apply(entry));
+      entry.transition = transition;
+      observeTransition(transition);
+      void transition.finished.finally(() => finish(entry)).catch(console.error);
+    } catch (error) {
+      try {
+        apply(entry);
+      } finally {
+        finish(entry);
+      }
+      console.error(error);
+    }
   };
 }
+
+/** Engine updates and navigation share this coordinator so their captures cannot compete. */
+export const morphUpdate = createMorphQueue();
 
 /**
  * Se o valor já mudou desde o primeiro desenho: o que se transforma ao mudar fica quieto ao

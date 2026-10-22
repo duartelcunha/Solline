@@ -18,14 +18,17 @@ import type {
   Project,
   ReviewAction,
   ReviewComment,
+  EngineSnapshot,
+  RecoveryOperation,
 } from '@solline/protocol';
+import type { ReviewDraft, UiRecoveryState } from '@solline/protocol/bridge';
 import {
   createSessionStore,
   reduceSession,
   type SessionData,
   type SessionStore,
 } from './session.ts';
-import { createMorphQueue, morphs } from '../lib/morph.ts';
+import { morphUpdate, morphs } from '../lib/morph.ts';
 
 /**
  * Estado da app: projetos, a lista de sessões e qual está aberta. Cada sessão tem o
@@ -46,6 +49,9 @@ interface AppState {
   creatingIn: string | null;
   notice: string | null;
   engineOffline: boolean;
+  recoveryStatus: 'loading' | 'ready' | 'failed';
+  recoveryOperations: RecoveryOperation[];
+  closePending: boolean;
   /** O painel de rever está aberto (vale para a sessão ativa). */
   reviewOpen: boolean;
   /** O painel de agentes está aberto. */
@@ -87,7 +93,10 @@ export const useApp = create<AppState>(() => ({
   activeSessionId: null,
   creatingIn: null,
   notice: null,
-  engineOffline: false,
+  engineOffline: true,
+  recoveryStatus: 'loading',
+  recoveryOperations: [],
+  closePending: false,
   reviewOpen: false,
   agentsPanel: false,
   checkingAgents: false,
@@ -100,6 +109,183 @@ export const useApp = create<AppState>(() => ({
 }));
 
 const sessionStores = new Map<string, SessionStore>();
+const draftSubscriptions = new Map<string, () => void>();
+const draftWrites = new Map<string, Promise<unknown>>();
+
+function persistDraft(id: string, store: SessionStore): Promise<unknown> {
+  const { composerText, pendingSend, reviewDraft } = store.getState();
+  const write = window.solline.recovery.saveDraft({
+    sessionId: id,
+    text: composerText,
+    pendingSend,
+    review: reviewDraft,
+  });
+  draftWrites.set(id, write);
+  void write.catch(() =>
+    store.setState({
+      actionError: 'O rascunho ainda não está guardado. Mantém a Solline aberta e tenta novamente.',
+    }),
+  );
+  return write;
+}
+
+/** Used before an effect and by the main-owned close handshake. */
+export async function flushDrafts(): Promise<void> {
+  for (const [id, store] of sessionStores) persistDraft(id, store);
+  await Promise.all(draftWrites.values());
+}
+
+export function restoreSnapshot(snapshot: EngineSnapshot, ui: UiRecoveryState): void {
+  if (snapshot.durability.status === 'failed')
+    throw new Error(snapshot.durability.error ?? 'O estado não está guardado');
+  for (const unsubscribe of draftSubscriptions.values()) unsubscribe();
+  draftSubscriptions.clear();
+  draftWrites.clear();
+  sessionStores.clear();
+  earlyEvents.clear();
+  for (const item of snapshot.sessions) {
+    const store = createSessionStore(item.session, item.session.projectId, item.capabilities);
+    const draft = ui.drafts[item.session.id];
+    store.setState({
+      turns: item.turns,
+      usage: item.usage,
+      queue: item.queue,
+      timeline: item.timeline,
+      quality: item.quality,
+      checks: item.checks,
+      conflicts: item.conflicts,
+      error: item.error,
+      interrupted: item.interrupted,
+      composerText: draft?.pendingSend
+        ? [draft.pendingSend, draft.text].filter(Boolean).join('\n')
+        : (draft?.text ?? ''),
+      pendingSend: null,
+      ...(draft?.review ? { reviewDraft: draft.review } : {}),
+      actionError: draft?.pendingSend
+        ? 'Um envio anterior ficou sem confirmação na interface. O texto foi preservado; verifica a conversa antes de reenviar.'
+        : null,
+    });
+    adoptStore(item.session.id, store);
+  }
+  const ids = snapshot.sessions.map((item) => item.session.id);
+  const current = useApp.getState();
+  const selected =
+    current.activeSessionId && ids.includes(current.activeSessionId)
+      ? current.activeSessionId
+      : (ids[0] ?? null);
+  useApp.setState({
+    sessionIds: ids,
+    races: Object.fromEntries(snapshot.races.map((race) => [race.id, race])),
+    engineOffline: false,
+    recoveryOperations: snapshot.operations.filter((operation) => operation.state === 'unknown'),
+    activeSessionId: selected,
+    activeProjectId: selected ? (sessionStores.get(selected)?.getState().projectId ?? null) : null,
+    view: selected ? 'session' : 'desk',
+  });
+}
+
+/** Subscribe before snapshot; snapshots and queued events share an epoch/sequence boundary. */
+export function connectRecovery(): () => void {
+  let disposed = false;
+  let syncing = false;
+  let epoch: string | undefined;
+  let sequence = -1;
+  let buffered: EngineEvent[] = [];
+  const accept = (event: EngineEvent): boolean => {
+    if (event.epoch && event.sequence !== undefined) {
+      if (event.epoch !== epoch) return false;
+      if (event.sequence <= sequence) return true;
+      if (event.sequence !== sequence + 1) return false;
+      sequence = event.sequence;
+    }
+    dispatch(event);
+    return true;
+  };
+  const sync = async () => {
+    if (syncing || disposed) return;
+    syncing = true;
+    useApp.setState({ recoveryStatus: 'loading' });
+    try {
+      if (sessionStores.size) await flushDrafts();
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const [snapshot, ui] = await Promise.all([
+          request('engine.snapshot', {}),
+          window.solline.recovery.ui(),
+        ]);
+        if (disposed) return;
+        const events = buffered;
+        buffered = [];
+        const newest = events.findLast((event) => event.epoch);
+        if (newest?.epoch && newest.epoch !== snapshot.epoch) continue;
+        epoch = snapshot.epoch;
+        sequence = snapshot.sequence;
+        restoreSnapshot(snapshot, ui);
+        let complete = true;
+        for (const event of events)
+          if (!accept(event)) {
+            complete = false;
+            break;
+          }
+        if (complete) {
+          useApp.setState({ recoveryStatus: 'ready' });
+          return;
+        }
+      }
+      throw new Error(
+        'A sequência de eventos mudou durante a recuperação. Tenta restaurar a interface novamente.',
+      );
+    } catch (error) {
+      if (!disposed)
+        useApp.setState({
+          recoveryStatus: 'failed',
+          engineOffline: true,
+          notice: `Não foi possível restaurar o estado em segurança. ${message(error)}`,
+        });
+    } finally {
+      syncing = false;
+    }
+  };
+  const off = window.solline.onEvent((event) => {
+    if (disposed) return;
+    if (syncing || !epoch) buffered.push(event);
+    else if (!accept(event)) {
+      buffered.push(event);
+      void sync();
+    }
+  });
+  // Main keeps the acknowledgement barrier until close/reload or explicit cancellation.
+  // Apply inert synchronously: React's next render must not leave one editable frame.
+  const freeze = () => {
+    document.getElementById('root')?.setAttribute('inert', '');
+    useApp.setState({ closePending: true });
+  };
+  const thaw = () => {
+    document.getElementById('root')?.removeAttribute('inert');
+    useApp.setState({ closePending: false });
+  };
+  const blockInput = (event: Event) => {
+    if (!useApp.getState().closePending) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  const inputEvents = ['keydown', 'beforeinput', 'pointerdown', 'click'] as const;
+  for (const name of inputEvents) document.addEventListener(name, blockInput, true);
+  const offClose = window.solline.window.onPrepareClose(async () => {
+    freeze();
+    await flushDrafts();
+  });
+  const offCancelled = window.solline.window.onCloseCancelled(thaw);
+  void sync();
+  return () => {
+    disposed = true;
+    buffered = [];
+    off();
+    offClose();
+    offCancelled();
+    for (const name of inputEvents) document.removeEventListener(name, blockInput, true);
+    thaw();
+  };
+}
 
 export function sessionStore(id: string): SessionStore | undefined {
   return sessionStores.get(id);
@@ -147,7 +333,19 @@ const earlyEvents = new Map<string, EngineEvent[]>();
 
 /** Regista a loja de uma sessão nova e aplica-lhe o que já tinha chegado. */
 function adoptStore(id: string, store: SessionStore): void {
+  draftSubscriptions.get(id)?.();
   sessionStores.set(id, store);
+  draftSubscriptions.set(
+    id,
+    store.subscribe((next, previous) => {
+      if (
+        next.composerText !== previous.composerText ||
+        next.pendingSend !== previous.pendingSend ||
+        next.reviewDraft !== previous.reviewDraft
+      )
+        void persistDraft(id, store);
+    }),
+  );
   const early = earlyEvents.get(id);
   earlyEvents.delete(id);
   for (const event of early ?? []) store.setState(reduceSession(store.getState(), event));
@@ -212,7 +410,7 @@ export function dispatch(event: EngineEvent): void {
 }
 
 /** Todos os eventos de sessão passam pela mesma fila, para uma transformação não trocar a ordem. */
-const enqueue = createMorphQueue();
+const enqueue = morphUpdate;
 
 /** O agente das sessões abertas sem escolher: o primeiro pronto, senão o Claude. */
 function defaultAgent(): AgentId {
@@ -560,6 +758,9 @@ export const actions = {
         return;
       }
       sessionStores.delete(sessionId);
+      draftSubscriptions.get(sessionId)?.();
+      draftSubscriptions.delete(sessionId);
+      draftWrites.delete(sessionId);
       useApp.setState((s) => {
         const sessionIds = s.sessionIds.filter((id) => id !== sessionId);
         return {
@@ -696,6 +897,11 @@ export const actions = {
       store.setState({
         composerText: typeof value === 'function' ? value(store.getState().composerText) : value,
       });
+  },
+
+  editReview(sessionId: string, patch: Partial<ReviewDraft>): void {
+    const store = sessionStores.get(sessionId);
+    if (store) store.setState({ reviewDraft: { ...store.getState().reviewDraft, ...patch } });
   },
 
   beginComposerSend(sessionId: string, text: string): boolean {

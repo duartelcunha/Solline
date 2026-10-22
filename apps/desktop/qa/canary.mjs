@@ -1,4 +1,4 @@
-import { cp, mkdtemp, mkdir, readFile, writeFile, symlink, rm } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, writeFile, symlink, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,11 +17,15 @@ const target = join(scratch, 'apps/desktop');
 if (!resolve(scratch).startsWith(resolve(tmpdir()) + '\\solline-canary-'))
   throw new Error('Invalid temporary directory');
 await mkdir(target, { recursive: true });
+const junctions = [];
 try {
   // Copy only authored source/config. No user data, secrets or live working tree mutations.
   for (const item of ['src', 'qa', 'vite.qa.config.ts', 'playwright.qa.config.ts', 'package.json'])
     await cp(join(desktop, item), join(target, item), { recursive: true });
   await symlink(join(repo, 'node_modules'), join(scratch, 'node_modules'), 'junction');
+  junctions.push(join(scratch, 'node_modules'));
+  await symlink(join(desktop, 'node_modules'), join(target, 'node_modules'), 'junction');
+  junctions.push(join(target, 'node_modules'));
   const asks = join(target, 'src/renderer/src/features/conversation/asks.tsx');
   const before = await readFile(asks, 'utf8');
   const wrong = before.replaceAll(
@@ -38,6 +42,11 @@ try {
   );
   if (focus === brokenFocus) throw new Error('Focus canary target disappeared');
   await writeFile(agents, brokenFocus);
+  const diff = join(target, 'src/renderer/src/features/review/diff-view.tsx');
+  const diffSource = await readFile(diff, 'utf8');
+  const hiddenMarker = diffSource.replace("'diff-direction'", "'diff-direction opacity-0'");
+  if (hiddenMarker === diffSource) throw new Error('Diff marker canary target disappeared');
+  await writeFile(diff, hiddenMarker);
   const reportPath = join(output, 'results.json');
   const result = spawnSync(
     process.execPath,
@@ -48,7 +57,7 @@ try {
       'playwright.qa.config.ts',
       'renderer.spec.ts',
       '--grep',
-      'a decisão de negar|o diálogo devolve',
+      'a decisão de negar|o diálogo devolve|marcadores do diff permanecem visíveis',
       '--reporter=json',
     ],
     {
@@ -71,15 +80,18 @@ try {
   const specs = report.suites.flatMap(
     (s) => s.specs ?? s.suites?.flatMap((child) => child.specs ?? []) ?? [],
   );
-  if (result.status !== 1 || specs.length !== 2 || specs.some((s) => s.ok))
-    throw new Error('Canaries did not produce exactly the two expected failures');
+  if (result.status !== 1 || specs.length !== 3 || specs.some((s) => s.ok))
+    throw new Error('Canaries did not produce exactly the three expected failures');
   const details = specs.map((s) => ({
     title: s.title,
     errors: s.tests.flatMap((t) => t.results.flatMap((r) => r.errors?.map((e) => e.message) ?? [])),
   }));
   if (
     !details.some((d) => d.errors.some((e) => e.includes('denied') && e.includes('allowed'))) ||
-    !details.some((d) => d.errors.some((e) => e.includes('focused') && e.includes('inactive')))
+    !details.some((d) => d.errors.some((e) => e.includes('focused') && e.includes('inactive'))) ||
+    !details.some(
+      (d) => d.title.includes('marcadores do diff') && d.errors.some((e) => e.includes('opacity')),
+    )
   )
     throw new Error('Failures were not the intended behavioral assertions');
   await writeFile(
@@ -91,6 +103,7 @@ try {
         originals: {
           permission: createHash('sha256').update(before).digest('hex'),
           focus: createHash('sha256').update(focus).digest('hex'),
+          diff: createHash('sha256').update(diffSource).digest('hex'),
         },
         mutations: details,
       },
@@ -98,9 +111,9 @@ try {
       2,
     ),
   );
-  console.log('Both intentional defects were detected by their behavioral assertions.');
+  console.log('All three intentional defects were detected by their behavioral assertions.');
 } finally {
   // Remove junction itself first, so recursive cleanup cannot traverse shared dependencies.
-  await rm(join(scratch, 'node_modules'), { force: true }).catch(() => undefined);
+  for (const path of junctions.reverse()) await unlink(path);
   await rm(scratch, { recursive: true, force: true });
 }

@@ -27,6 +27,8 @@ interface Props {
   /** Só no "Por rever" há aceitar e rejeitar. */
   actionable: boolean;
   comments: ReadonlyMap<CommentKey, ReviewComment>;
+  editingDraft?: ReviewComment | null;
+  onEditDraft?: (draft: ReviewComment | null) => void;
   /** Texto vazio tira o comentário dessa linha. */
   onComment: (at: { path: string; side: 'old' | 'new'; line: number }, text: string) => void;
   /** Devolve se correu bem. */
@@ -47,6 +49,8 @@ export function FileDiffView({
   file,
   actionable,
   comments,
+  editingDraft,
+  onEditDraft,
   onComment,
   onAction,
   findings = [],
@@ -55,7 +59,23 @@ export function FileDiffView({
 }: Props) {
   const [open, setOpen] = useState(true);
   const [leaving, setLeaving] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ side: 'old' | 'new'; line: number } | null>(null);
+  const [localEditing, setLocalEditing] = useState<{ side: 'old' | 'new'; line: number } | null>(
+    null,
+  );
+  const editing = onEditDraft ? editingDraft : localEditing;
+  const setEditing = (at: { side: 'old' | 'new'; line: number } | null) => {
+    if (onEditDraft)
+      onEditDraft(
+        at
+          ? {
+              ...at,
+              path: file.path,
+              text: comments.get(commentKey({ ...at, path: file.path }))?.text ?? '',
+            }
+          : null,
+      );
+    else setLocalEditing(at);
+  };
   const slash = file.path.lastIndexOf('/');
   const dir = slash === -1 ? '' : file.path.slice(0, slash + 1);
   const name = file.path.slice(slash + 1);
@@ -111,8 +131,8 @@ export function FileDiffView({
           </span>
         ) : null}
         <span className="shrink-0 font-mono text-[11px] tabular-nums">
-          <span className="text-success">+{file.additions}</span>{' '}
-          <span className="text-danger">−{file.deletions}</span>
+          <span className="diff-count">+{file.additions}</span>{' '}
+          <span className="diff-count">−{file.deletions}</span>
         </span>
         {actionable ? (
           <span className="flex shrink-0 items-center gap-0.5">
@@ -196,7 +216,12 @@ export function FileDiffView({
                           : null}
                         {isEditing ? (
                           <CommentEditor
-                            initial={comment?.text ?? ''}
+                            initial={editingDraft?.text ?? comment?.text ?? ''}
+                            onChange={
+                              onEditDraft && editingDraft
+                                ? (text) => onEditDraft({ ...editingDraft, text })
+                                : undefined
+                            }
                             onCancel={() => setEditing(null)}
                             onSave={(text) => {
                               onComment({ path: file.path, side, line: no }, text);
@@ -228,24 +253,35 @@ function Line({ line, onComment }: { line: DiffLine; onComment: (() => void) | u
   const marker = line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' ';
   return (
     <div
-      className={`group grid grid-cols-[2.75rem_2.75rem_1.25rem_1fr] ${tone}`}
+      className={`group grid grid-cols-[2.75rem_2.75rem_1rem_1.5rem_1fr] ${tone}`}
       data-kind={line.kind}
     >
-      <span className="pr-1.5 text-right text-subtle/80 tabular-nums select-none">
+      <span className="pr-1.5 text-right text-subtle tabular-nums select-none">
         {line.oldNo ?? ''}
       </span>
-      <span className="pr-1.5 text-right text-subtle/80 tabular-nums select-none">
+      <span className="pr-1.5 text-right text-subtle tabular-nums select-none">
         {line.newNo ?? ''}
       </span>
+      <span
+        className={`text-center text-fg select-none ${line.kind === 'context' ? '' : 'diff-direction'}`}
+        title={
+          line.kind === 'add'
+            ? 'Linha adicionada'
+            : line.kind === 'del'
+              ? 'Linha removida'
+              : undefined
+        }
+      >
+        {marker}
+      </span>
       <span className="relative text-center text-subtle select-none">
-        <span className="group-hover:opacity-0">{marker}</span>
         {onComment ? (
           <button
             type="button"
             onClick={onComment}
             aria-label={`Comentar a linha ${line.newNo ?? line.oldNo}`}
             data-testid="comment-line"
-            className="absolute inset-0 grid place-items-center text-accent-text opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            className="diff-comment absolute inset-0 grid place-items-center rounded-sm text-accent-text opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           >
             <MessageSquarePlus size={12} />
           </button>
@@ -260,10 +296,12 @@ function CommentEditor({
   initial,
   onSave,
   onCancel,
+  onChange,
 }: {
   initial: string;
   onSave: (text: string) => void;
   onCancel: () => void;
+  onChange?: (text: string) => void;
 }) {
   const [text, setText] = useState(initial);
   return (
@@ -271,9 +309,16 @@ function CommentEditor({
       <textarea
         autoFocus
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onChange?.(e.target.value);
+        }}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') onCancel();
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            onCancel();
+          }
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim()) onSave(text.trim());
         }}
         rows={2}

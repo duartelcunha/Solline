@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, CornerDownRight, ListPlus, Square } from 'lucide-react';
 import type { Checks, TokenUsage } from '@solline/protocol';
 import { IconSwap } from '@solline/ui/icon-swap';
-import { actions, useApp, useSession } from '../../stores/app.ts';
+import { actions, flushDrafts, useApp, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { SettingsPills } from './pills.tsx';
 import { RacePill } from '../race/race-pill.tsx';
@@ -128,6 +128,12 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
     if (!canSend) return;
     const message = text.trim();
     if (!actions.beginComposerSend(sessionId, message)) return;
+    try {
+      await flushDrafts();
+    } catch {
+      actions.finishComposerSend(sessionId, false);
+      return;
+    }
     if (lanes.length > 1 && !busy) {
       // N×: o mesmo pedido em várias pistas, cada uma na sua worktree.
       const started = await actions.startRace(projectId, message, lanes);

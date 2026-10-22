@@ -25,7 +25,10 @@ import {
   type WorktreeStats,
   type Timeline,
   type Turn,
+  type RecoverySession,
 } from '@solline/protocol';
+import type { SavedSession } from './recovery/state.ts';
+import { interruptedAdapter } from './recovery/interrupted-adapter.ts';
 import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/types.ts';
 import type { SessionCheckpoints } from './checkpoints/session-checkpoints.ts';
 import type { CheckpointStore } from './checkpoints/store.ts';
@@ -127,10 +130,15 @@ const DISABLED_TIMELINE = (rewind: ConversationRewind): Timeline => ({
 /**
  * Todas as conversas vivas do motor. Cada uma tem o seu adaptador; o que o adaptador
  * conta passa a eventos da Ponte com o id da sessão.
- * shortcut: as sessões só vivem em memória e desaparecem ao fechar a app; o M3 traz o
- * histórico (listSessions/getSessionMessages).
+ * A projeção canónica e os checkpoints podem ser guardados pelo motor. Recuperar esta
+ * projeção nunca cria um adaptador nem retoma uma ação por iniciativa própria.
  */
 export class SessionManager {
+  #stopping = false;
+  readonly #recoveryViews = new Map<string, RecoverySession>();
+  readonly #unavailableHistory = new Map<string, SavedSession>();
+  readonly #unresolvedWorktrees = new Set<string>();
+  readonly #beforeEffect: (command: string, sessionId: string, text?: string) => () => void;
   readonly #sessions = new Map<string, Entry>();
   readonly #memory = new Map<string, Memory>();
   readonly #emit: (event: EngineEvent) => void;
@@ -153,6 +161,7 @@ export class SessionManager {
   readonly #setups = new Map<string, SetupSpec | null>();
 
   constructor(options: {
+    beforeEffect?: (command: string, sessionId: string, text?: string) => () => void;
     emit: (event: EngineEvent) => void;
     /** Os agentes que se podem abrir: modos, ambiente e adaptador de cada um. */
     registry: AgentRegistry;
@@ -172,6 +181,7 @@ export class SessionManager {
     worktrees?: WorktreeManager | undefined;
   }) {
     this.#emit = options.emit;
+    this.#beforeEffect = options.beforeEffect ?? (() => () => undefined);
     this.#registry = options.registry;
     this.#mcp = options.mcp;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
@@ -366,10 +376,27 @@ export class SessionManager {
   /** Abre de novo uma sessão que caiu, com resume no agente e as mesmas definições. */
   async resume(sessionId: string): Promise<SessionResult> {
     const entry = this.#get(sessionId);
+    await this.#checkCwd(entry.info.cwd);
+    if (!entry.adapter.capabilities().features.resume)
+      throw new Error('Este agente não permite retomar esta sessão. O histórico foi preservado.');
     const resumeId = entry.adapter.agentSessionId();
     if (!resumeId) throw new Error('Esta sessão ainda não tem histórico no agente para retomar');
     await entry.adapter.close();
-    return this.#start(entry.info, entry.definition, entry.trusted, entry.mcp, resumeId);
+    const result = await this.#start(
+      entry.info,
+      entry.definition,
+      entry.trusted,
+      await this.#mcpFor(entry.definition, entry.info.mcpServers ?? []),
+      resumeId,
+    );
+    const view = this.#recoveryViews.get(sessionId);
+    if (view) {
+      view.interrupted = false;
+      view.error = null;
+    }
+    // The queue remains paused until its own explicit continue action.
+    this.#memoryOf(sessionId).cycle.release();
+    return result;
   }
 
   /**
@@ -378,6 +405,8 @@ export class SessionManager {
    */
   async send(sessionId: string, text: string, how: How = 'queue'): Promise<Submitted> {
     this.#get(sessionId);
+    if (this.#recoveryViews.get(sessionId)?.interrupted)
+      throw new Error('Retoma a sessão recuperada antes de enviar.');
     return this.#memoryOf(sessionId).cycle.submit(text, how);
   }
 
@@ -385,6 +414,7 @@ export class SessionManager {
   async #startTurn(sessionId: string, text: string): Promise<string> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
+    const completed = this.#beforeEffect('session.turn', sessionId, text);
     // Um turno novo muda os ficheiros: a ronda de verificações a meio deixa de valer.
     this.#checks.get(entry.info.cwd)?.cancel();
     {
@@ -415,6 +445,7 @@ export class SessionManager {
         memory.named = true;
         memory.naming = this.#nameBranch(sessionId, text);
       }
+      completed();
       return sent;
     }
   }
@@ -460,6 +491,8 @@ export class SessionManager {
 
   resumeQueue(sessionId: string): void {
     this.#get(sessionId);
+    if (this.#recoveryViews.get(sessionId)?.interrupted)
+      throw new Error('Retoma a sessão recuperada antes de continuar a fila.');
     this.#memoryOf(sessionId).cycle.resume();
   }
 
@@ -626,17 +659,253 @@ export class SessionManager {
     if (!answered) throw new Error('Este pedido já não está à espera de resposta');
   }
 
-  async disposeAll(): Promise<void> {
+  async disposeAll(alreadyStopped = false): Promise<void> {
     const entries = [...this.#sessions.values()];
     const memories = [...this.#memory.values()];
     this.#sessions.clear();
     this.#memory.clear();
-    await Promise.all(entries.map((entry) => entry.adapter.close()));
+    if (!alreadyStopped) await Promise.all(entries.map((entry) => entry.adapter.close()));
     for (const m of memories) m.quality?.dispose();
     for (const c of this.#checks.values()) c.dispose();
     this.#checks.clear();
     this.#checkProjects.clear();
     await Promise.all(memories.map((m) => m.checkpoints?.dispose()));
+  }
+
+  /** The UI projection also captures events which adapters do not put into their transcript. */
+  observeRecovery(event: EngineEvent): void {
+    if (!('sessionId' in event) || !event.sessionId) return;
+    const id = event.sessionId;
+    const entry = this.#sessions.get(id);
+    const memory = this.#memory.get(id);
+    if (!entry || !memory) return;
+    let view = this.#recoveryViews.get(id);
+    if (!view) {
+      view = {
+        session: structuredClone(entry.info),
+        capabilities: null,
+        turns: [],
+        usage: { costUsd: null, models: [], context: null, tokens: null },
+        queue: memory.cycle.queue,
+        timeline: null,
+        quality: null,
+        checks: null,
+        conflicts: null,
+        interrupted: false,
+        error: null,
+      };
+      this.#recoveryViews.set(id, view);
+    }
+    if (event.type === 'session.event') {
+      const delta = event.delta;
+      if (delta.type === 'usage') view.usage = { ...view.usage, ...delta.usage };
+      if (delta.type === 'capabilities') view.capabilities = delta.capabilities;
+    } else if (event.type === 'permission.request') {
+      memory.turns = applyDelta(memory.turns, {
+        type: 'block.upsert',
+        turnId: event.turnId,
+        block: event.request,
+      });
+    } else if (event.type === 'session.timeline') view.timeline = event.timeline;
+    else if (event.type === 'session.checks') view.checks = event.checks;
+    else if (event.type === 'session.quality') view.quality = event.quality;
+    else if (event.type === 'session.state') view.error = event.error ?? null;
+  }
+
+  recovery(): SavedSession[] {
+    return [
+      ...this.#unavailableHistory.values(),
+      ...[...this.#sessions.values()].map((entry) => {
+        const memory = this.#memoryOf(entry.info.id);
+        const saved = this.#recoveryViews.get(entry.info.id);
+        let capabilities = saved?.capabilities ?? null;
+        try {
+          capabilities ??= entry.adapter.capabilities();
+        } catch {
+          /* Startup has no capabilities yet. */
+        }
+        const view: RecoverySession = {
+          session: entry.info,
+          capabilities,
+          turns: memory.turns,
+          usage: saved?.usage ?? { costUsd: null, models: [], context: null, tokens: null },
+          queue: memory.cycle.queue,
+          timeline: memory.checkpoints?.timeline() ?? saved?.timeline ?? null,
+          quality: memory.quality?.state ?? saved?.quality ?? null,
+          checks: this.#checks.get(entry.info.cwd)?.state ?? saved?.checks ?? null,
+          conflicts: saved?.conflicts ?? null,
+          interrupted: saved?.interrupted ?? false,
+          error: saved?.error ?? null,
+        };
+        return {
+          view,
+          trusted: entry.trusted,
+          points: [...memory.points],
+          ...(memory.context ? { context: memory.context } : {}),
+          named: memory.named,
+          ...(memory.worktree ? { worktree: memory.worktree } : {}),
+          checkpoints: memory.checkpoints?.recovery() ?? null,
+        };
+      }),
+    ].map((saved) => structuredClone(saved));
+  }
+
+  recoverySetups(): [string, SetupSpec | null][] {
+    return structuredClone([...this.#setups]);
+  }
+
+  restoreRecovery(records: SavedSession[], setups: [string, SetupSpec | null][]): void {
+    for (const [id, setup] of setups) this.#setups.set(id, setup);
+    for (const record of structuredClone(records)) {
+      const view = record.view;
+      view.interrupted = true;
+      view.error = 'Sessão recuperada após interrupção. Nenhuma ação foi retomada automaticamente.';
+      view.session.state = 'error';
+      delete view.session.port;
+      if (view.session.setup?.state === 'running')
+        view.session.setup = {
+          ...view.session.setup,
+          state: 'failed',
+          tail: 'Preparação interrompida; repete-a explicitamente.',
+        };
+      view.queue.paused = true;
+      for (const turn of view.turns)
+        for (const block of turn.blocks) {
+          if (
+            (block.kind === 'permission' || block.kind === 'plan' || block.kind === 'question') &&
+            block.status === 'pending'
+          )
+            block.status = 'cancelled';
+          if (block.kind === 'tool' && block.state === 'running') block.state = 'error';
+        }
+      if (view.quality?.review.state === 'running')
+        view.quality.review = {
+          ...view.quality.review,
+          state: 'error',
+          error: 'Revisão interrompida.',
+        };
+      if (view.checks)
+        for (const result of view.checks.results)
+          if (result.state === 'running' || result.state === 'pending') {
+            result.state = 'failed';
+            result.tail = 'Verificação interrompida; resultado desconhecido.';
+          }
+      const definition = this.#registry.get(view.session.agent);
+      if (!definition || !view.capabilities) {
+        this.#unavailableHistory.set(view.session.id, record);
+        continue;
+      }
+      const info = view.session;
+      const cycle = this.#turnsFor(() => info);
+      cycle.restore(view.queue);
+      const memory: Memory = {
+        turns: view.turns,
+        points: new Map(record.points),
+        context: record.context,
+        openTurn: null,
+        cycle,
+        checkpoints: undefined,
+        quality: undefined,
+        worktree: record.worktree,
+        named: record.named,
+        naming: undefined,
+        bringing: undefined,
+        preparing: undefined,
+        closing: false,
+      };
+      if (this.#reviewer && view.quality)
+        memory.quality = new SessionQuality({
+          reviewer: this.#reviewer,
+          enabled: view.quality.enabled,
+          recovery: view.quality,
+          emit: (quality) =>
+            this.#emit({ kind: 'event', type: 'session.quality', sessionId: info.id, quality }),
+        });
+      if (record.checkpoints)
+        memory.checkpoints = this.#store?.open(
+          info.id,
+          info.cwd,
+          () => this.#rewindKind(info.id),
+          record.checkpoints,
+        );
+      this.#memory.set(info.id, memory);
+      this.#sessions.set(info.id, {
+        info,
+        definition,
+        trusted: record.trusted,
+        mcp: [],
+        adapter: interruptedAdapter(view.capabilities, info.agentSessionId),
+      });
+      this.#recoveryViews.set(info.id, view);
+      if (this.#checksOptions && view.checks && !this.#checks.has(info.cwd)) {
+        this.#checks.set(
+          info.cwd,
+          new ProjectChecks({
+            cwd: info.cwd,
+            saved: view.checks.detected ? null : view.checks.specs,
+            trusted: record.trusted,
+            recovery: view.checks,
+            ...this.#checksOptions,
+            emit: (checks) => {
+              for (const entry of this.#sessions.values())
+                if (entry.info.cwd === info.cwd)
+                  this.#emit({
+                    kind: 'event',
+                    type: 'session.checks',
+                    sessionId: entry.info.id,
+                    checks,
+                  });
+            },
+          }),
+        );
+        this.#checkProjects.set(info.cwd, info.projectId);
+      }
+    }
+  }
+
+  async preserveRecovery(): Promise<void> {
+    await Promise.all(
+      [...this.#memory.values()].map(async (memory) => {
+        await memory.naming;
+        await memory.checkpoints?.preserve();
+      }),
+    );
+  }
+
+  async reconcileRecovery(): Promise<void> {
+    for (const [id, memory] of this.#memory) {
+      if (!memory.worktree || !this.#worktrees) continue;
+      try {
+        memory.worktree = await this.#worktrees.recover(memory.worktree);
+        const entry = this.#sessions.get(id);
+        if (entry?.info.workspace?.kind === 'worktree')
+          entry.info.workspace = { ...entry.info.workspace, branch: memory.worktree.branch };
+      } catch (error) {
+        this.#unresolvedWorktrees.add(id);
+        const view = this.#recoveryViews.get(id);
+        if (view) view.error = error instanceof Error ? error.message : String(error);
+      }
+    }
+  }
+
+  assertRecoveryReady(sessionId: string): void {
+    if (this.#unresolvedWorktrees.has(sessionId))
+      throw new Error(
+        this.#recoveryViews.get(sessionId)?.error ??
+          'A worktree recuperada precisa de confirmação manual.',
+      );
+  }
+
+  async stopForRecovery(): Promise<void> {
+    this.#stopping = true;
+    for (const memory of this.#memory.values()) {
+      memory.cycle.hold();
+      memory.cycle.interrupted();
+      memory.preparing?.abort();
+      memory.quality?.dispose();
+    }
+    for (const checks of this.#checks.values()) checks.dispose();
+    await Promise.all([...this.#sessions.values()].map((entry) => entry.adapter.close()));
   }
 
   #memoryOf(sessionId: string): Memory {
@@ -675,8 +944,14 @@ export class SessionManager {
     memory.openTurn = null;
     void memory.checkpoints.endTurn(turnId).then(() => {
       this.#emitTimeline(sessionId);
-      if (memory.quality?.state.enabled) void this.#review(sessionId, turnId);
-      void this.#check(sessionId, turnId);
+      if (this.#stopping) return;
+      if (memory.quality?.state.enabled)
+        void this.#review(sessionId, turnId).catch((error) =>
+          this.#backgroundFailure(sessionId, error),
+        );
+      void this.#check(sessionId, turnId).catch((error) =>
+        this.#backgroundFailure(sessionId, error),
+      );
       if (memory.worktree) void this.#emitWorkspace(sessionId);
     });
   }
@@ -689,6 +964,7 @@ export class SessionManager {
     if (!entry || !memory?.quality || !checkpoints?.available) return;
     const checkpoint = checkpoints.timeline().checkpoints.find((c) => c.turnId === turnId);
     if (!checkpoint || checkpoint.stats.files === 0) return;
+    const completed = this.#beforeEffect('quality.run', sessionId);
     const turn = memory.turns.find((t) => t.id === turnId && t.role === 'user');
     // Uma falha do diff chega ao estado como erro: o revisor nunca parece ter aprovado.
     await memory.quality.review(turnId, async () => {
@@ -697,6 +973,7 @@ export class SessionManager {
         ? null
         : { cwd: entry.info.cwd, diff, request: turn ? textOf(turn) : '' };
     });
+    completed();
   }
 
   /** As verificações do projeto depois de um turno que mudou ficheiros. */
@@ -717,7 +994,20 @@ export class SessionManager {
       entry.info.state !== 'idle'
     )
       return;
-    await this.#checks.get(entry.info.cwd)?.run(turnId);
+    const checks = this.#checks.get(entry.info.cwd);
+    if (!checks) return;
+    const completed = this.#beforeEffect('checks.autoRun', sessionId);
+    await checks.run(turnId);
+    completed();
+  }
+
+  #backgroundFailure(sessionId: string, error: unknown): void {
+    this.#emit({
+      kind: 'event',
+      type: 'engine.error',
+      sessionId,
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 
   /**
@@ -844,6 +1134,9 @@ export class SessionManager {
     const title = (first ? textOf(first).split('\n')[0] : undefined)?.slice(0, 72) || 'sessão';
     const { result, wt } = await this.#worktrees.bring(memory.worktree, `Solline: ${title}`);
     memory.worktree = wt;
+    const view = this.#recoveryViews.get(sessionId);
+    if (view)
+      view.conflicts = result.merged ? null : { files: result.conflicts, into: result.into };
     await this.#emitWorkspace(sessionId);
     return result;
   }
@@ -1218,6 +1511,7 @@ export class SessionManager {
     let started: Awaited<ReturnType<AgentAdapter['start']>> | undefined;
     try {
       started = await adapter.start();
+      info.agentSessionId = adapter.agentSessionId() ?? info.agentSessionId;
       if (requested) checkRequested(started.capabilities, requested);
       info.settings = started.settings;
       info.state = 'idle';
@@ -1289,6 +1583,16 @@ export class SessionManager {
     return (delta) => {
       if (delta.type === 'settings') info.settings = { ...info.settings, ...delta.settings };
       if (delta.type === 'meta') info.agentSessionId = delta.agentSessionId;
+      if (
+        memory &&
+        delta.type === 'turn.start' &&
+        delta.turn.role === 'user' &&
+        memory.turns.length === 0
+      ) {
+        const text = delta.turn.blocks.find((block) => block.kind === 'text');
+        if (text?.kind === 'text')
+          info.title = text.text.replace(/\s+/g, ' ').trim().slice(0, 80) || info.title;
+      }
       if (memory) memory.turns = applyDelta(memory.turns, delta);
       this.#emit({ kind: 'event', type: 'session.event', sessionId: info.id, delta });
     };

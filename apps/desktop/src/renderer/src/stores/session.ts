@@ -1,4 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import type { ReviewDraft } from '@solline/protocol/bridge';
 import {
   applyDelta,
   type AgentCapabilities,
@@ -29,6 +30,8 @@ export interface SessionData {
   draft: string | null;
   composerText: string;
   pendingSend: string | null;
+  reviewDraft: ReviewDraft;
+  interrupted: boolean;
   /** A segunda opinião: se está ligada e o que o revisor achou do último turno. */
   quality: Quality | null;
   /** As verificações do projeto (tipos, lint, testes) depois do último turno que mudou ficheiros. */
@@ -64,6 +67,8 @@ export function createSessionStore(
     draft: null,
     composerText: '',
     pendingSend: null,
+    reviewDraft: { scope: { kind: 'review' }, comments: [], note: '', editing: null },
+    interrupted: false,
     quality: null,
     checks: null,
     conflicts: null,
@@ -128,6 +133,7 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       return {
         ...data,
         info: { ...data.info, state: event.state },
+        interrupted: event.state === 'error' ? data.interrupted : false,
         stateSince: now,
         turnEndedAt:
           (data.info.state === 'running' || data.info.state === 'needs-you') &&

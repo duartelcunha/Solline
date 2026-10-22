@@ -1,13 +1,22 @@
 import {
   commandSchemas,
+  applyDelta,
   EngineEvent,
+  EngineSnapshot,
+  FileDiff,
+  type RecoverySession,
   type CommandName,
   type CommandPayload,
   type CommandResult,
   type Quality,
   type SessionInfo,
 } from '@solline/protocol';
-import type { SollineApi } from '@solline/protocol/bridge';
+import type { SollineApi, UiRecoveryState, WindowState, Theme } from '@solline/protocol/bridge';
+import {
+  DraftUpdateSchema,
+  UiRecoverySchema,
+  WindowActionSchema,
+} from '../src/main/window-schemas';
 import {
   agents as initialAgents,
   blocks,
@@ -48,6 +57,23 @@ export function installBridge(scene: Scene) {
   const journal: { kind: string; name: string; data: unknown }[] = [];
   const failures: string[] = [];
   const sessions = new Map<string, SessionInfo>();
+  const canonical = new Map<string, RecoverySession>();
+  const races = new Map<string, EngineSnapshot['races'][number]>();
+  const windowListeners = new Set<(state: WindowState) => void>();
+  const closeListeners = new Set<() => Promise<void>>();
+  const closeCancelledListeners = new Set<() => void>();
+  let closeRequested = false;
+  let closing: Promise<void> | undefined;
+  let windowState: WindowState = { maximized: false, customControls: true, revision: 0 };
+  let minimized = false;
+  let closed = false;
+  let theme: Theme = 'light';
+  let ui: UiRecoveryState = { version: 1, revision: 0, drafts: {} };
+  const epoch = `qa-${scene}`;
+  let sequence = 0;
+  // Synthetic QA fixtures only. This simulates the main process surviving a renderer reload.
+  // Production never imports this entry or stores application drafts in browser storage.
+  const storageKey = `solline-qa-recovery-v1:${scene}`;
   let agents = structuredClone(initialAgents);
   if (scene === 'untrusted')
     agents = agents.map((agent) => (agent.id === 'codex' ? { ...agent, status: 'ready' } : agent));
@@ -56,7 +82,12 @@ export function installBridge(scene: Scene) {
   const queues = new Map<string, { paused: boolean; items: { id: string; text: string }[] }>();
   let count = 0;
   let queuedSequence = 2;
-  let failNext: string | null = null;
+  let failNext: string | null = new URLSearchParams(window.location?.search ?? '').has(
+    'failRecovery',
+  )
+    ? 'engine.snapshot'
+    : null;
+  let recoveryOpened = false;
   const held = new Map<string, { promise: Promise<void>; release: () => void }>();
   const checks = {
     trusted: true,
@@ -79,8 +110,148 @@ export function installBridge(scene: Scene) {
           },
         };
   const qualities = new Map<string, typeof quality>();
+  function snapshot(): EngineSnapshot {
+    return EngineSnapshot.parse({
+      version: 1,
+      epoch,
+      sequence,
+      sessions: [...canonical.values()].reverse(),
+      races: [...races.values()],
+      operations: [],
+      durability: { status: 'saved' },
+    });
+  }
+  function persist() {
+    sessionStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        snapshot: snapshot(),
+        ui,
+        reviews: [...reviews.entries()],
+        count,
+        queuedSequence,
+      }),
+    );
+  }
+  const saved = sessionStorage.getItem(storageKey);
+  if (saved !== null) {
+    const record = JSON.parse(saved) as Record<string, unknown>;
+    const recovered = EngineSnapshot.parse(record.snapshot);
+    if (recovered.epoch !== epoch) throw new Error('QA: epoch de recuperação inesperado');
+    ui = UiRecoverySchema.parse(record.ui);
+    sequence = recovered.sequence;
+    if (!Number.isSafeInteger(record.count) || !Number.isSafeInteger(record.queuedSequence))
+      throw new Error('QA: sequência de fixtures inválida');
+    count = record.count as number;
+    queuedSequence = record.queuedSequence as number;
+    // Snapshot ordering is most recent first; Map insertion order stays oldest first.
+    for (const item of recovered.sessions.toReversed()) {
+      canonical.set(item.session.id, item);
+      sessions.set(item.session.id, item.session);
+      queues.set(item.session.id, item.queue);
+      if (item.quality) qualities.set(item.session.id, item.quality);
+      if (
+        item.turns.some((turn) =>
+          turn.blocks.some((block) => 'status' in block && block.status === 'pending'),
+        )
+      )
+        pending.add(item.session.id);
+    }
+    for (const race of recovered.races) races.set(race.id, race);
+    if (!Array.isArray(record.reviews)) throw new Error('QA: revisões guardadas inválidas');
+    for (const entry of record.reviews) {
+      if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !sessions.has(entry[0]))
+        throw new Error('QA: revisão de sessão inesperada');
+      const item = required(canonical.get(entry[0]), 'sessão recuperada');
+      const review = entry[1] as { files?: unknown };
+      if (!item.timeline) throw new Error('QA: timeline recuperada ausente');
+      reviews.set(entry[0], {
+        timeline: item.timeline,
+        files: FileDiff.array().parse(review.files),
+      });
+    }
+  }
+  function recordEvent(event: EngineEvent) {
+    if (event.type === 'race.state') {
+      races.set(event.race.id, event.race);
+      return;
+    }
+    if (!('sessionId' in event) || !event.sessionId) return;
+    const item = required(canonical.get(event.sessionId), `sessão do evento ${event.sessionId}`);
+    switch (event.type) {
+      case 'session.event': {
+        const delta = event.delta;
+        if (delta.type === 'usage') item.usage = { ...item.usage, ...delta.usage };
+        else if (delta.type === 'settings')
+          item.session.settings = { ...item.session.settings, ...delta.settings };
+        else if (delta.type === 'meta') item.session.agentSessionId = delta.agentSessionId;
+        else if (delta.type === 'capabilities') item.capabilities = delta.capabilities;
+        else {
+          if (
+            delta.type === 'turn.start' &&
+            delta.turn.role === 'user' &&
+            item.turns.length === 0
+          ) {
+            const block = delta.turn.blocks.find((block) => block.kind === 'text');
+            if (block?.kind === 'text') {
+              const text = block.text.replace(/\s+/g, ' ').trim();
+              item.session.title =
+                text.length > 60 ? `${text.slice(0, 59)}…` : text || 'Nova sessão';
+            }
+          }
+          item.turns = applyDelta(item.turns, delta);
+        }
+        break;
+      }
+      case 'permission.request':
+        item.turns = applyDelta(item.turns, {
+          type: 'block.upsert',
+          turnId: event.turnId,
+          block: event.request,
+        });
+        pending.add(event.sessionId);
+        break;
+      case 'session.state':
+        item.session.state = event.state;
+        item.error = event.state === 'error' ? (event.error ?? 'A sessão parou.') : null;
+        break;
+      case 'session.timeline':
+        item.timeline = event.timeline;
+        break;
+      case 'session.quality':
+        item.quality = event.quality;
+        qualities.set(event.sessionId, event.quality);
+        break;
+      case 'session.checks':
+        item.checks = event.checks;
+        break;
+      case 'session.setup':
+        item.session.setup = event.setup;
+        break;
+      case 'session.workspace':
+        item.session.workspace = event.workspace;
+        break;
+      case 'session.queue':
+        item.queue = event.queue;
+        queues.set(event.sessionId, event.queue);
+        break;
+      case 'engine.error':
+        item.error = event.message;
+        break;
+    }
+    if (
+      item.turns.some((turn) =>
+        turn.blocks.some((block) => 'status' in block && block.status === 'pending'),
+      )
+    )
+      pending.add(event.sessionId);
+    else pending.delete(event.sessionId);
+  }
   function emit(raw: unknown) {
-    const event = EngineEvent.parse(raw);
+    const parsed = EngineEvent.parse(raw);
+    const event = EngineEvent.parse({ ...parsed, epoch, sequence: ++sequence });
+    recordEvent(event);
+    persist();
     journal.push({ kind: 'event', name: event.type, data: event });
     for (const listener of listeners) listener(event);
   }
@@ -222,6 +393,11 @@ export function installBridge(scene: Scene) {
       throw new Error(`QA: sessão inesperada: ${id}`);
     const review = () => required(reviews.get(id), `revisão da sessão ${id}`);
     switch (command) {
+      case 'engine.snapshot':
+        return snapshot();
+      case 'engine.flush':
+        persist();
+        return {};
       case 'engine.ping':
         return { pong: true, engineVersion: 'qa', pid: 1, receivedAt: 1792663200000 };
       case 'projects.list':
@@ -293,6 +469,19 @@ export function installBridge(scene: Scene) {
             stats: { files: 1, additions: 1, deletions: 1 },
           };
         sessions.set(session.id, session);
+        canonical.set(session.id, {
+          session,
+          capabilities: structuredClone(capabilities),
+          turns: [],
+          usage: { costUsd: null, models: [], context: null, tokens: null },
+          queue: { items: [], paused: false },
+          timeline: null,
+          quality: structuredClone(quality),
+          checks: null,
+          conflicts: null,
+          interrupted: false,
+          error: null,
+        });
         qualities.set(session.id, structuredClone(quality));
         reviews.set(session.id, {
           timeline: {
@@ -543,6 +732,12 @@ export function installBridge(scene: Scene) {
         reviews.delete(id);
         qualities.delete(id);
         sessions.delete(id);
+        canonical.delete(id);
+        ui = {
+          ...ui,
+          drafts: Object.fromEntries(Object.entries(ui.drafts).filter(([key]) => key !== id)),
+        };
+        persist();
         return { closed: true };
       }
       default:
@@ -582,9 +777,97 @@ export function installBridge(scene: Scene) {
         focusListeners.delete(listener);
       };
     },
-    window: { async setTheme() {} },
+    window: {
+      async setTheme(next) {
+        if (next !== 'light' && next !== 'dark') throw new Error('QA: tema inesperado');
+        theme = next;
+      },
+      async state() {
+        return structuredClone(windowState);
+      },
+      async action(raw) {
+        const action = WindowActionSchema.parse(raw);
+        journal.push({ kind: 'window', name: action, data: null });
+        await held.get(`window.${action}`)?.promise;
+        if (failNext === `window.${action}`) {
+          failNext = null;
+          throw new Error('Falha simulada: tenta de novo.');
+        }
+        if (action === 'minimize') minimized = true;
+        else if (action === 'toggle-maximize') {
+          windowState = {
+            ...windowState,
+            maximized: !windowState.maximized,
+            revision: windowState.revision + 1,
+          };
+          for (const listener of windowListeners) listener(structuredClone(windowState));
+        } else closeRequested = true;
+      },
+      onState(listener) {
+        windowListeners.add(listener);
+        return () => {
+          windowListeners.delete(listener);
+        };
+      },
+      onPrepareClose(listener) {
+        closeListeners.add(listener);
+        return () => {
+          closeListeners.delete(listener);
+        };
+      },
+      onCloseCancelled(listener) {
+        closeCancelledListeners.add(listener);
+        return () => {
+          closeCancelledListeners.delete(listener);
+        };
+      },
+    },
+    recovery: {
+      async open() {
+        journal.push({ kind: 'recovery', name: 'recovery-open', data: null });
+        recoveryOpened = true;
+      },
+      async ui() {
+        return structuredClone(ui);
+      },
+      async saveDraft(raw) {
+        const update = DraftUpdateSchema.parse(raw);
+        journal.push({ kind: 'recovery', name: 'saveDraft', data: structuredClone(update) });
+        await held.get('recovery.saveDraft')?.promise;
+        if (failNext === 'recovery.saveDraft') {
+          failNext = null;
+          throw new Error('Falha simulada: tenta de novo.');
+        }
+        if (!sessions.has(update.sessionId)) throw new Error('QA: rascunho de sessão inesperada');
+        const { sessionId, ...draft } = update;
+        ui = {
+          ...ui,
+          revision: ui.revision + 1,
+          drafts: { ...ui.drafts, [sessionId]: structuredClone(draft) },
+        };
+        persist();
+        return ui.revision;
+      },
+    },
   };
   window.solline = api;
+  function confirmClose(): Promise<void> {
+    if (closing) return closing;
+    if (!closeRequested) return Promise.reject(new Error('QA: fecho sem confirmação pendente'));
+    closing = (async () => {
+      try {
+        for (const listener of closeListeners) await listener();
+        await api.request('engine.flush', {});
+        closed = true;
+      } catch (error) {
+        for (const listener of closeCancelledListeners) listener();
+        throw error;
+      } finally {
+        closing = undefined;
+      }
+    })();
+    return closing;
+  }
   const controller = {
     emit,
     state,
@@ -608,6 +891,16 @@ export function installBridge(scene: Scene) {
     failures,
     subscriptions: () => listeners.size,
     focusSubscriptions: () => focusListeners.size,
+    windowSubscriptions: () => windowListeners.size,
+    closeSubscriptions: () => closeListeners.size,
+    confirmClose,
+    cancelClose() {
+      if (closing) throw new Error('QA: não é possível cancelar durante a gravação');
+      closeRequested = false;
+      for (const listener of closeCancelledListeners) listener();
+    },
+    recoveryOpened: () => recoveryOpened,
+    windowState: () => ({ ...windowState, minimized, closed, closeRequested, theme }),
     focus(id: string) {
       for (const listener of focusListeners) listener(id);
     },

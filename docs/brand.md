@@ -1,31 +1,29 @@
 # Marca da Solline
 
-Direção atual: **vidro suave e personagens de papel**, escolhida a partir das referências do Duarte em 22/10/2026. O contrato visual é `DESIGN.md`; substitui a direção Meridiano anterior.
+Direção atual: **porcelana, vidro e personagens de papel**, aprovada em 22/10/2026. O contrato visual é `DESIGN.md`. Substitui Meridiano, robôs de visor e a proposta com menta. Nenhuma aprovação visual dessas direções se transfere para esta.
 
 ## Material e cor
 
-Claro: papel quente, superfícies quase brancas e menta. Escuro: grafite e vidro fumado. O brilho fica nas bordas e nas ações; conversa e código mantêm fundos estáveis. Sombras curtas indicam profundidade. Nada se anima atrás do texto.
+A interface usa porcelana clara e carvão escuro. Botões principais invertem o tom neutro; leitura, código e diffs têm fundos estáveis. O compositor e o enquadramento recebem vidro quase opaco, luz na borda e sombras neutras. Uma iridescência estática discreta no bordo do compositor usa reflexos frios e pêssego. Não há verde, hue de marca ou efeitos animados atrás do texto.
 
-Geist e Geist Mono são locais. Os tokens vivem em `packages/ui/src/tokens.css`. Âmbar indica decisão pendente, vermelho erro, verde conclusão, sempre acompanhados por texto ou forma. Contraste de leitura e decisões tem verificação automatizada.
+Geist e Geist Mono são locais. Tokens em `packages/ui/src/tokens.css`. Âmbar indica decisão pendente; coral indica erro ou ação destrutiva. Conclusão é um check neutro. Seleção, foco e direção de diff têm sinais próprios, não apenas cor. Os sinais +/− permanecem visíveis ao comentar. Sintaxe usa peso, itálico e luminosidade.
 
-A marca conserva o sol e o reflexo, em verde profundo com menta. `Logo` e `scripts/brand-icons.mjs` partilham a geometria e as cores. Os ícones pequenos mantêm desenho por pixel.
+A marca conserva o sol e o reflexo, em porcelana sobre carvão. `Logo` e `scripts/brand-icons.mjs` partilham geometria e cores. Ícones até 24 px conservam desenho por pixel; os restantes usam amostragem da geometria original. A cor das personagens não entra no ícone da aplicação.
 
 ## Personagens
 
-SVG originais na grelha 256 × 224. Silhueta e cor identificam o agente: estrela laranja Claude, flor azul Codex, recorte verde revisor, figura rosa ACP, nuvem violeta outros e familiar amarelo.
+SVG originais na grelha 256 × 224. Silhueta e cor identificam o agente: estrela coral Claude, flor azul Codex, recorte mauve revisor, figura pêssego ACP, nuvem violeta outros e familiar ocre. As referências inspiram material e expressão, sem cópia de figuras.
 
-Olhos brancos com pupilas escuras seguem rato ou caneta, limitados à órbita. Um listener partilhado agrupa eventos num frame; não há renders React por movimento. Toque não provoca seguimento. Movimento reduzido, perda de foco e invisibilidade suspendem o movimento; a última desmontagem remove listeners e frames pendentes.
+Olhos brancos e pupilas escuras; gaze limitado à órbita. Listener partilhado e frames agrupados, sem renders React por movimento. Estados: espera, trabalho, atenção, conclusão, erro, sono e leitura. Rótulos e expressão permanecem legíveis sem animação; a cor do corpo não significa erro ou sucesso. A família deve funcionar em claro/escuro e nos tamanhos reais da lista, mesa, sessão e entrada.
 
-Estados: espera, trabalho, atenção, conclusão, erro, sono e leitura. A expressão e o rótulo continuam legíveis sem movimento. Conclusão e sono fecham os olhos; erro tem expressão própria. Trabalho usa três pontos; os restantes estados não têm loops decorativos. O bot ativo pisca ao receber o cursor. As marcas compactas da lista ficam estáticas.
+Motion é curto, interrompível e subordinado à leitura. Movimento reduzido, ausência de foco e invisibilidade suspendem os efeitos; desmontar liberta recursos. A galeria e os clips da versão atual precisam de revisão independente. Não apresentar intenções do contrato como testes já aprovados.
 
-A entrada mostra a família; a mesa usa personagens compactas; o cabeçalho acompanha a sessão. A galeria de QA verifica poses a tamanhos reais e inclui frames intermédios e vídeo.
+## Voz e comportamento
 
-## Voz e ritmo
+- Verbos concretos e ações curtas, em pt-PT; sem marketing inventado ou urgência artificial.
+- Contexto suficiente para permitir, recusar, trazer ou descartar trabalho.
+- Feedback imediato; animação não bloqueia a ação nem rouba a posição de leitura.
+- Barras de scroll finas disponíveis; teclado, toque e ausência de hover mantêm as ações acessíveis.
+- Redução de transparência usa superfícies opacas. Forced colors preserva sinais, seleção e foco com cores de sistema.
 
-- Dizer o que aconteceu, com verbos concretos e ações curtas, em pt-PT.
-- Não prometer certezas, inventar marketing ou urgência.
-- Dar contexto suficiente para permitir, recusar, trazer ou descartar trabalho.
-- Responder ao clique de imediato; movimento curto, interrompível, sem deslocar a leitura.
-- Sem brilho arbitrário, cartões sem função ou efeitos que prejudiquem contraste.
-
-Cor e forma distinguem a gravidade dos achados: erro em octógono, risco em triângulo, ruído em círculo. A revisão independente avalia composição e personalidade; testes verdes, por si, não certificam qualidade visual.
+A aprovação exige capturas da nova direção, clips naturais e comportamento verificado, ligados à mesma versão. Testes verdes, por si, não certificam composição ou personalidade.

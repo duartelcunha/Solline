@@ -69,7 +69,7 @@ body {
 
   /* O que o browser desenha sozinho também leva as cores da app. */
   ::selection {
-    background: var(--sl-accent-soft);
+    background: var(--sl-selection);
     color: var(--sl-text);
   }
   textarea,
@@ -97,7 +97,7 @@ body {
   background:
     radial-gradient(
       ellipse at 8% 100%,
-      color-mix(in srgb, var(--sl-accent) 24%, transparent),
+      color-mix(in srgb, var(--sl-surface) 60%, transparent),
       transparent 48%
     ),
     var(--sl-ground);
@@ -123,34 +123,32 @@ body {
   background: var(--sl-surface);
   box-shadow:
     inset 0 1px 0 var(--sl-glass-edge),
-    0 3px 8px #213c3510;
+    0 3px 8px #19181610;
 }
 .composer {
-  border: 1px solid var(--sl-glass-edge);
+  border: 1px solid transparent;
   border-radius: 24px;
-  background: var(--sl-glass);
+  background:
+    linear-gradient(var(--sl-glass), var(--sl-glass)) padding-box,
+    var(--sl-glass-rim) border-box;
   backdrop-filter: blur(20px);
   box-shadow:
     inset 0 1px 0 var(--sl-glass-edge),
-    0 10px 24px -12px #20352d35;
+    0 10px 24px -12px #19181635;
 }
 .composer:focus-within {
   border-color: var(--sl-focus);
   box-shadow:
     inset 0 1px 0 var(--sl-glass-edge),
-    0 10px 24px -12px #20352d35;
+    0 10px 24px -12px #19181635;
 }
 [data-testid='send']:not(:disabled),
 [data-testid='welcome-new-session'] {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--sl-accent), white 13%),
-    var(--sl-accent)
-  );
+  background: var(--sl-accent);
   color: var(--sl-on-accent);
   box-shadow:
-    inset 0 1px 0 #ffffff70,
-    0 3px 8px #163e2920;
+    inset 0 1px 0 #ffffff18,
+    0 3px 8px #19181620;
 }
 [data-testid='permission-card'],
 [data-testid='question-card'],
@@ -162,7 +160,7 @@ body {
 }
 .welcome h2 {
   font-size: clamp(28px, 3vw, 40px);
-  letter-spacing: -0.045em;
+  letter-spacing: -0.035em;
   font-weight: 550;
 }
 .welcome [data-testid='familiar'] {
@@ -173,7 +171,7 @@ body {
 }
 .dialog-content {
   box-shadow:
-    0 24px 96px -24px #0d281d50,
+    0 24px 96px -24px #19181650,
     var(--sl-shadow-raised);
 }
 .session-state-chip {
@@ -220,8 +218,14 @@ body {
 }
 @media (prefers-reduced-transparency: reduce) {
   .composer,
-  .app-shell > aside {
+  .app-shell > aside,
+  [data-testid='desk-card'] {
     background: var(--sl-surface);
+    border-color: var(--sl-border-strong);
+    box-shadow: none;
+  }
+  .composer,
+  .dialog-overlay {
     backdrop-filter: none;
   }
 }
@@ -362,25 +366,16 @@ body {
   margin: 1.2em 0;
 }
 
-/* Realce de código (classes do highlight.js), com cores que seguem o tema. */
+/* Código neutro: peso, itálico e luminosidade distinguem a sintaxe, sem cor de marca. */
 :root {
-  --hl-keyword: oklch(0.5 0.16 300);
-  --hl-string: oklch(0.5 0.12 150);
-  --hl-number: oklch(0.55 0.14 55);
+  --hl-keyword: var(--sl-text);
+  --hl-string: var(--sl-text-muted);
+  --hl-number: var(--sl-text);
   --hl-comment: var(--sl-text-subtle);
-  --hl-title: oklch(0.5 0.14 250);
-  --hl-attr: oklch(0.52 0.12 200);
-  --diff-add-bg: oklch(0.6 0.13 155 / 0.12);
-  --diff-del-bg: oklch(0.6 0.18 27 / 0.1);
-}
-:root[data-theme='dark'] {
-  --hl-keyword: oklch(0.78 0.12 300);
-  --hl-string: oklch(0.8 0.12 150);
-  --hl-number: oklch(0.82 0.12 70);
-  --hl-title: oklch(0.8 0.11 250);
-  --hl-attr: oklch(0.8 0.1 200);
-  --diff-add-bg: oklch(0.7 0.13 155 / 0.14);
-  --diff-del-bg: oklch(0.7 0.17 27 / 0.14);
+  --hl-title: var(--sl-text);
+  --hl-attr: var(--sl-text-muted);
+  --diff-add-bg: var(--sl-surface-sunken);
+  --diff-del-bg: var(--sl-surface);
 }
 .hljs-keyword,
 .hljs-built_in,
@@ -388,6 +383,7 @@ body {
 .hljs-selector-tag,
 .hljs-doctag {
   color: var(--hl-keyword);
+  font-weight: 600;
 }
 .hljs-string,
 .hljs-regexp,
@@ -420,7 +416,7 @@ body {
   color: var(--hl-attr);
 }
 .hljs-deletion {
-  color: var(--sl-danger);
+  color: var(--sl-text-muted);
 }
 
 .diff-add {
@@ -428,6 +424,26 @@ body {
 }
 .diff-del {
   background: var(--diff-del-bg);
+}
+.diff-direction {
+  align-self: start;
+  margin-top: 2px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+}
+.diff-del .diff-direction {
+  border-style: dashed;
+}
+.diff-count {
+  color: var(--sl-text-muted);
+}
+@media (hover: none) {
+  .diff-comment {
+    opacity: 1;
+  }
 }
 
 /* Texto selecionável onde faz sentido (o body é user-select: none). */
@@ -584,6 +600,39 @@ body {
   animation-duration: 0ms !important;
 }
 
+.effort-help-group {
+  position: relative;
+  display: inline-flex;
+}
+.effort-help {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  padding: 5px 9px;
+  border: 1px solid var(--sl-border-strong);
+  border-radius: 7px;
+  background: var(--sl-surface);
+  color: var(--sl-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.effort-help::after {
+  content: '';
+  position: absolute;
+  inset: 100% 0 auto;
+  height: 8px;
+}
+.effort-help-group:not([data-help-dismissed='true']):focus-within .effort-help {
+  display: block;
+}
+@media (hover: hover) and (pointer: fine) {
+  .effort-help-group:not([data-help-dismissed='true']):hover .effort-help {
+    display: block;
+  }
+}
+
 /* A conversa desvanece por baixo do cabeçalho em vez de uma linha dura. */
 .scroll-fade {
   mask-image: linear-gradient(to bottom, transparent 0, black 16px);
@@ -599,12 +648,23 @@ body {
   );
 }
 
-/* Sem barras de scroll em lado nenhum: desloca-se com a roda, o trackpad ou arrastando. */
+/* A barra continua disponível para descobrir e arrastar conteúdo longo. */
 * {
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--sl-border-strong) transparent;
 }
 *::-webkit-scrollbar {
-  display: none;
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--sl-border-strong);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 /* Abrir uma sessão pela mesa: só durante essa transição o bot do cabeçalho recebe o capuz. */
 :root[data-opening] .session-bot-target {
@@ -640,7 +700,8 @@ body {
     border-right-color: currentColor;
     opacity: 0.6;
   }
-  .dot-pulse {
+  .dot-pulse,
+  .mark-pulse {
     animation: none !important;
   }
   /* Menos movimento: o estado novo só aparece em fade; o anel e o giro saem. */
@@ -652,5 +713,62 @@ body {
   }
   .icon-spin {
     animation: none !important;
+  }
+}
+
+/* System colours retain focus, selection and direction when the material is unavailable. */
+@media (forced-colors: active) {
+  :root,
+  :root[data-theme='dark'] {
+    --sl-bg: Canvas;
+    --sl-sidebar: Canvas;
+    --sl-surface: Canvas;
+    --sl-surface-hover: Canvas;
+    --sl-surface-sunken: Canvas;
+    --sl-ground: Canvas;
+    --sl-text: CanvasText;
+    --sl-text-muted: CanvasText;
+    --sl-text-subtle: CanvasText;
+    --sl-border: ButtonBorder;
+    --sl-border-strong: ButtonBorder;
+    --sl-accent: Highlight;
+    --sl-accent-soft: Canvas;
+    --sl-accent-text: CanvasText;
+    --sl-on-accent: HighlightText;
+    --sl-selection: Highlight;
+    --sl-focus: Highlight;
+    --sl-attention: CanvasText;
+    --sl-attention-soft: Canvas;
+    --sl-success: CanvasText;
+    --sl-danger: CanvasText;
+  }
+  .app-shell,
+  .app-shell > aside,
+  .app-shell > main,
+  .composer,
+  [data-testid='desk-card'],
+  .session-state-chip {
+    background: Canvas;
+    border-color: ButtonBorder;
+    box-shadow: none;
+  }
+  .composer,
+  .dialog-overlay {
+    backdrop-filter: none;
+  }
+  .scroll-fade,
+  .scroll-fade-y {
+    mask-image: none;
+  }
+  ::selection {
+    color: HighlightText;
+  }
+  [aria-current='page'] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+  [aria-checked='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 }

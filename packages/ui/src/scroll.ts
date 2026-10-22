@@ -1,8 +1,15 @@
 import { useEffect, type RefObject } from 'react';
-import { SPRING, Spring, prefersReducedMotion, project, rubberband } from './motion.ts';
+import {
+  SPRING,
+  Spring,
+  isForeground,
+  prefersReducedMotion,
+  project,
+  rubberband,
+} from './motion.ts';
 
 /**
- * Deslocar sem barras: a app segue sozinha o que acontece com uma mola suave, e qualquer zona
+ * A app segue o fundo com uma mola suave, e qualquer zona
  * vazia se arrasta com o rato, com inércia ao largar e resistência nas pontas. Um gesto teu
  * (roda, arrasto) para logo a mola: nada te puxa enquanto mexes.
  */
@@ -68,10 +75,11 @@ export function scrollToSmooth(
   el: HTMLElement,
   to: number,
   axis: Axis = 'y',
-  options: { velocity?: number; release?: boolean } = {},
+  options: { velocity?: number; release?: boolean; instant?: boolean } = {},
 ): void {
   const target = Math.min(Math.max(to, 0), Math.max(0, maxOf(el, axis)));
-  if (prefersReducedMotion()) {
+  if (options.instant || prefersReducedMotion() || !isForeground()) {
+    stopAll(el);
     set(el, axis, target);
     return;
   }
@@ -108,6 +116,7 @@ export function scrollIntoViewSmooth(
   target: Element,
   block: 'nearest' | 'center' | 'end' = 'nearest',
   margin = 24,
+  options: { instant?: boolean } = {},
 ): void {
   const box = container.getBoundingClientRect();
   const rect = target.getBoundingClientRect();
@@ -119,7 +128,7 @@ export function scrollIntoViewSmooth(
   else if (block === 'end') to = bottom - view + margin;
   else if (top < container.scrollTop + margin) to = top - margin;
   else if (bottom > container.scrollTop + view - margin) to = bottom - view + margin;
-  if (to !== null) scrollToSmooth(container, to);
+  if (to !== null) scrollToSmooth(container, to, 'y', options);
 }
 
 const INTERACTIVE =
@@ -159,17 +168,55 @@ export function useDragScroll(
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    let start: { x: number; y: number; left: number; top: number } | null = null;
+    let start: { x: number; y: number; left: number; top: number; pointerId: number } | null = null;
     let dragging = false;
     let samples: { x: number; y: number; t: number }[] = [];
     let stretch = { x: 0, y: 0 };
+    let resetTimer: ReturnType<typeof setTimeout> | null = null;
+    let clickTimer: ReturnType<typeof setTimeout> | null = null;
+    const styled = new Map<HTMLElement, { transition: string; transform: string }>();
     const content = () => Array.from(el.children) as HTMLElement[];
+    const restoreStyles = () => {
+      if (resetTimer !== null) clearTimeout(resetTimer);
+      resetTimer = null;
+      for (const [child, style] of styled) {
+        child.style.transition = style.transition;
+        child.style.transform = style.transform;
+      }
+      styled.clear();
+    };
+    const suppressClick = (event: Event) => event.stopPropagation();
+    const clearClick = () => {
+      if (clickTimer !== null) clearTimeout(clickTimer);
+      clickTimer = null;
+      el.removeEventListener('click', suppressClick, true);
+    };
+    const cancel = () => {
+      const pointerId = start?.pointerId;
+      start = null;
+      dragging = false;
+      stretch = { x: 0, y: 0 };
+      delete el.dataset.dragging;
+      if (pointerId !== undefined && el.hasPointerCapture(pointerId))
+        el.releasePointerCapture(pointerId);
+      restoreStyles();
+      clearClick();
+      stopAll(el);
+    };
 
     const onDown = (e: PointerEvent) => {
-      if (e.button !== 0 || e.pointerType !== 'mouse') return;
+      if (start || e.button !== 0 || e.pointerType !== 'mouse') return;
       if (!canDragFrom(e.target, e.clientX, e.clientY)) return;
       stopAll(el);
-      start = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
+      restoreStyles();
+      clearClick();
+      start = {
+        x: e.clientX,
+        y: e.clientY,
+        left: el.scrollLeft,
+        top: el.scrollTop,
+        pointerId: e.pointerId,
+      };
       samples = [{ x: e.clientX, y: e.clientY, t: e.timeStamp }];
     };
 
@@ -189,7 +236,7 @@ export function useDragScroll(
     };
 
     const onMove = (e: PointerEvent) => {
-      if (!start) return;
+      if (!start || e.pointerId !== start.pointerId) return;
       const dx = e.clientX - start.x;
       const dy = e.clientY - start.y;
       if (!dragging) {
@@ -202,6 +249,8 @@ export function useDragScroll(
       if (allowX) axisMove('x', start.left - dx);
       if (prefersReducedMotion()) stretch = { x: 0, y: 0 };
       for (const c of content()) {
+        if (!styled.has(c))
+          styled.set(c, { transition: c.style.transition, transform: c.style.transform });
         c.style.transition = 'none';
         c.style.transform =
           stretch.x || stretch.y ? `translate(${stretch.x}px, ${stretch.y}px)` : '';
@@ -211,7 +260,7 @@ export function useDragScroll(
     };
 
     const onUp = (e: PointerEvent) => {
-      if (!start) return;
+      if (!start || e.pointerId !== start.pointerId) return;
       const wasDragging = dragging;
       start = null;
       dragging = false;
@@ -219,7 +268,8 @@ export function useDragScroll(
       if (!wasDragging) return;
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
       // O clique que acaba o arrasto não abre nem escolhe nada.
-      el.addEventListener('click', (c) => c.stopPropagation(), { capture: true, once: true });
+      el.addEventListener('click', suppressClick, { capture: true, once: true });
+      clickTimer = setTimeout(clearClick, 0);
       if (stretch.x || stretch.y) {
         // Volta da ponta elástica como uma mola curta (só transform); depois limpa tudo, para
         // não estragar as transições próprias dos blocos.
@@ -228,12 +278,11 @@ export function useDragScroll(
           c.style.transition = 'transform 240ms cubic-bezier(0.23, 1, 0.32, 1)';
           c.style.transform = '';
         }
-        setTimeout(() => {
-          for (const c of children) c.style.transition = '';
-        }, 260);
+        resetTimer = setTimeout(restoreStyles, 260);
         stretch = { x: 0, y: 0 };
         return;
       }
+      restoreStyles();
       const first = samples[0];
       const last = samples.at(-1);
       const dt = first && last ? (last.t - first.t) / 1000 : 0;
@@ -248,16 +297,35 @@ export function useDragScroll(
         scrollToSmooth(el, el.scrollLeft + project(v, 0.995), 'x', { velocity: v, release: true });
       }
     };
+    const onCancel = (e: PointerEvent) => {
+      if (start?.pointerId === e.pointerId) cancel();
+    };
+    const onVisibility = () => {
+      if (!isForeground()) cancel();
+    };
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    const onReduced = () => {
+      if (reduced.matches) cancel();
+    };
 
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
-    el.addEventListener('pointercancel', onUp);
+    el.addEventListener('pointercancel', onCancel);
+    el.addEventListener('lostpointercapture', onCancel);
+    window.addEventListener('blur', cancel);
+    document.addEventListener('visibilitychange', onVisibility);
+    reduced.addEventListener('change', onReduced);
     return () => {
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('pointercancel', onUp);
+      el.removeEventListener('pointercancel', onCancel);
+      el.removeEventListener('lostpointercapture', onCancel);
+      window.removeEventListener('blur', cancel);
+      document.removeEventListener('visibilitychange', onVisibility);
+      reduced.removeEventListener('change', onReduced);
+      cancel();
     };
   }, [ref, allowX, allowY]);
 }

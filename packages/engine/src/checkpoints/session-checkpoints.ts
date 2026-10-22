@@ -11,6 +11,8 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
+import { z } from 'zod';
+import { Checkpoint as CheckpointSchema, DiffStats as DiffStatsSchema } from '@solline/protocol';
 import path from 'node:path';
 import type {
   Checkpoint,
@@ -65,6 +67,34 @@ interface UndoEntry {
   write?: { before: string; after: string; paths: string[] };
 }
 
+const TreeId = z.string().regex(/^[0-9a-f]{40,64}$/);
+export const CheckpointRecovery = z.object({
+  base: TreeId,
+  baseline: TreeId,
+  entries: z.array(
+    z.object({
+      checkpoint: CheckpointSchema,
+      before: TreeId,
+      after: TreeId.nullable(),
+      baseline: TreeId,
+    }),
+  ),
+  undo: z.array(
+    z.object({
+      label: z.string(),
+      baseline: TreeId,
+      acceptedAt: z.array(z.tuple([z.string(), z.number()])),
+      rewoundTo: z.string().nullable(),
+      write: z.object({ before: TreeId, after: TreeId, paths: z.array(z.string()) }).optional(),
+    }),
+  ),
+  acceptedAt: z.array(z.tuple([z.string(), z.number()])),
+  pending: DiffStatsSchema,
+  rewoundTo: z.string().nullable(),
+  large: z.array(z.string()),
+});
+export type CheckpointRecovery = z.infer<typeof CheckpointRecovery>;
+
 interface RestoreStep {
   rel: string;
   target: string;
@@ -97,6 +127,7 @@ export class SessionCheckpoints {
   #lock: Promise<unknown> = Promise.resolve();
   /** Ficheiros grandes demais, que ficam fora dos checkpoints (ver #scanLarge). */
   #large = new Set<string>();
+  readonly #pinned = new Set<string>();
   readonly ready: Promise<void>;
 
   constructor(options: {
@@ -105,6 +136,7 @@ export class SessionCheckpoints {
     /** Init partilhado do repositório (um por projeto). */
     repoReady: Promise<void>;
     conversationRewind: () => ConversationRewind;
+    recovery?: CheckpointRecovery | undefined;
   }) {
     this.#git = options.git;
     this.#sessionId = options.sessionId;
@@ -113,6 +145,37 @@ export class SessionCheckpoints {
       try {
         await options.repoReady;
         await rm(path.join(this.#git.gitDir, `${this.#index}.lock`), { force: true });
+        if (options.recovery) {
+          const saved = CheckpointRecovery.parse(options.recovery);
+          for (const tree of new Set([
+            saved.base,
+            saved.baseline,
+            ...saved.entries.flatMap((e) => [e.before, e.baseline, ...(e.after ? [e.after] : [])]),
+            ...saved.undo.flatMap((e) => [
+              e.baseline,
+              ...(e.write ? [e.write.before, e.write.after] : []),
+            ]),
+          ])) {
+            await this.#git.run(['cat-file', '-e', `${tree}^{tree}`]);
+          }
+          this.#base = saved.base;
+          this.#baseline = saved.baseline;
+          this.#entries.push(
+            ...saved.entries.map((entry) => ({
+              ...entry,
+              checkpoint:
+                entry.checkpoint.state === 'running'
+                  ? { ...entry.checkpoint, state: 'interrupted' as const }
+                  : entry.checkpoint,
+            })),
+          );
+          this.#undo.push(...saved.undo.map((e) => ({ ...e, acceptedAt: new Map(e.acceptedAt) })));
+          this.#acceptedAt = new Map(saved.acceptedAt);
+          this.#pending = saved.pending;
+          this.#rewoundTo = saved.rewoundTo;
+          this.#large = new Set(saved.large);
+          return;
+        }
         const refused = refusedFolder(this.#git.workTree);
         if (refused) throw new Error(refused);
         const files = await this.#git.countFiles(MAX_FILES, this.#index);
@@ -134,6 +197,41 @@ export class SessionCheckpoints {
 
   get available(): boolean {
     return this.#unavailable === undefined;
+  }
+
+  recovery(): CheckpointRecovery | null {
+    if (!this.#base || !this.available) return null;
+    return structuredClone({
+      base: this.#base,
+      baseline: this.#baseline,
+      entries: this.#entries,
+      undo: this.#undo.map((e) => ({ ...e, acceptedAt: [...e.acceptedAt] })),
+      acceptedAt: [...this.#acceptedAt],
+      pending: this.#pending,
+      rewoundTo: this.#rewoundTo,
+      large: [...this.#large],
+    });
+  }
+
+  /** Finish in-flight snapshots, then pin every recoverable tree against explicit Git GC. */
+  async preserve(): Promise<void> {
+    await this.#lock;
+    const saved = this.recovery();
+    if (!saved) return;
+    const trees = new Set([
+      saved.base,
+      saved.baseline,
+      ...saved.entries.flatMap((e) => [e.before, e.baseline, ...(e.after ? [e.after] : [])]),
+      ...saved.undo.flatMap((e) => [
+        e.baseline,
+        ...(e.write ? [e.write.before, e.write.after] : []),
+      ]),
+    ]);
+    for (const tree of trees) {
+      if (this.#pinned.has(tree)) continue;
+      await this.#git.run(['update-ref', `refs/solline/recovery/${this.#sessionId}/${tree}`, tree]);
+      this.#pinned.add(tree);
+    }
   }
 
   timeline(): Timeline {

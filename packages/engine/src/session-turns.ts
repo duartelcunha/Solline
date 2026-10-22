@@ -53,6 +53,13 @@ export class SessionTurns {
     return { items: this.#items.map((i) => ({ ...i })), paused: this.#paused };
   }
 
+  /** Restore data only. In particular, an empty paused queue cannot send a fresh turn. */
+  restore(queue: SessionQueue): void {
+    this.#items = queue.items.map((item) => ({ ...item }));
+    this.#paused = true;
+    this.#held = true;
+  }
+
   /**
    * Manda uma mensagem. Parado e sem fila, segue logo. Ocupado: 'now' guia o turno se o agente
    * aceitar; senão (ou se já for tarde) vai para o fim da fila. Nunca se perde.
@@ -101,10 +108,21 @@ export class SessionTurns {
    */
   settled(): boolean {
     if (this.#held || this.#paused || this.#items.length === 0 || this.#busy) return false;
-    const next = this.#items.shift();
+    const next = this.#items[0];
     if (!next) return false;
+    // #start persists the turn intent synchronously before its first await. Keep the queue
+    // item until that point so a crash cannot erase it between dequeue and dispatch.
+    const started = this.#exclusiveStart(next.text, true);
+    this.#items.shift();
     this.#changed();
-    void this.#exclusiveStart(next.text).catch((error: unknown) => this.#failed(error));
+    void started.catch((error: unknown) => {
+      // The provider may have accepted the message before its reply failed. Keep the text
+      // and require an explicit decision; never automatically dispatch it or the next item.
+      this.#items.unshift(next);
+      this.#paused = true;
+      this.#changed();
+      this.#failed(error);
+    });
     return true;
   }
 
@@ -164,7 +182,7 @@ export class SessionTurns {
     this.#changed();
   }
 
-  async #exclusiveStart(text: string): Promise<string> {
+  async #exclusiveStart(text: string, fromQueue = false): Promise<string> {
     this.#busy = true;
     try {
       const turnId = await this.#start(text);
@@ -172,6 +190,7 @@ export class SessionTurns {
       return turnId;
     } catch (error) {
       this.#busy = false;
+      if (fromQueue) this.#paused = true;
       // O envio falhou: a fila não fica presa à espera de um turno que não começou.
       this.#drainIfIdle();
       throw error;

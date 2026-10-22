@@ -451,7 +451,8 @@ test('erro do revisor é legível e repetir recupera o estado', async ({ page },
   await page.getByTestId('quality-chip').click();
   await page.getByTestId('quality-again').click();
   await expect(page.getByTestId('quality-chip')).toHaveAttribute('data-quality', 'clean');
-  await expect(page.getByTestId('quality-chip').locator('svg.lucide-check')).toBeVisible();
+  await expect(page.getByTestId('quality-chip')).toHaveAccessibleName('Revisor sem achados');
+  await expect(page.getByTestId('quality-chip').locator('svg.lucide-badge-check')).toBeVisible();
   await page.clock.runFor(250);
   await capture(page, info, 'quality-clean-marker');
   expect(await commands(page, 'quality.review')).toEqual([{ sessionId: 'session-1' }]);

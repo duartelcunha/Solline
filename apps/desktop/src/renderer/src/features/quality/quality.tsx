@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Check, CircleAlert, Eye, EyeOff, RotateCw } from 'lucide-react';
+import { BadgeCheck, CircleAlert, Eye, EyeOff, RotateCw } from 'lucide-react';
 import type { Finding, FindingSeverity, Quality } from '@solline/protocol';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useSession } from '../../stores/app.ts';
@@ -81,7 +81,7 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
       : current === 'running'
         ? 'A rever…'
         : current === 'clean'
-          ? 'Sem achados'
+          ? 'Revisor sem achados'
           : current === 'found'
             ? `${review.findings.length} ${review.findings.length === 1 ? 'achado' : 'achados'}`
             : current === 'error'
@@ -110,7 +110,7 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
                 className="spinner block size-[12px] rounded-full border-[1.5px] border-current border-t-transparent text-subtle"
               />
             ) : current === 'clean' ? (
-              <Check size={14} strokeWidth={1.75} className="text-success" />
+              <BadgeCheck size={14} strokeWidth={1.75} className="text-success" />
             ) : current === 'found' ? (
               <Counts findings={review.findings} />
             ) : current === 'error' ? (

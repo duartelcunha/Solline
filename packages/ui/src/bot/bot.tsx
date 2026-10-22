@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { useReducedMotion } from '../react.ts';
+import { DURATION, EASE, cssEase, isForeground } from '../motion.ts';
 import { watchGaze } from './gaze.ts';
 import {
   EYE_STROKE,
@@ -11,6 +12,15 @@ import {
   type Hood,
   type Mood,
 } from './geometry.ts';
+
+const finePointer = () =>
+  typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches;
+function subscribePointer(changed: () => void): () => void {
+  if (typeof matchMedia !== 'function') return () => undefined;
+  const query = matchMedia('(hover: hover) and (pointer: fine)');
+  query.addEventListener('change', changed);
+  return () => query.removeEventListener('change', changed);
+}
 
 /** Original Solline companion. State remains legible when all motion is stopped. */
 export function Bot({
@@ -34,14 +44,15 @@ export function Bot({
   const animation = useRef<Animation | null>(null);
   const previous = useRef(mood);
   const reduced = useReducedMotion();
+  const fine = useSyncExternalStore(subscribePointer, finePointer, () => false);
   const [visible, setVisible] = useState(false);
-  const [foreground, setForeground] = useState(() => !document.hidden);
+  const [foreground, setForeground] = useState(() => isForeground());
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) =>
       setVisible(entry?.isIntersecting ?? false),
     );
     if (root.current) observer.observe(root.current);
-    const changed = () => setForeground(!document.hidden);
+    const changed = () => setForeground(isForeground());
     const blurred = () => setForeground(false);
     document.addEventListener('visibilitychange', changed);
     window.addEventListener('blur', blurred);
@@ -55,33 +66,38 @@ export function Bot({
   }, []);
   const live = alive && visible && foreground && !reduced;
   const gazeActive =
-    visible && foreground && !reduced && !['sleeping', 'done', 'crashed'].includes(mood);
+    fine && visible && foreground && !reduced && !['sleeping', 'done', 'crashed'].includes(mood);
   useEffect(() => {
     const target = pupils.current;
     if (!target) return;
     target.style.transform = 'translate(0px, 0px)';
     if (!gazeActive) return;
-    return watchGaze((x, y) => {
-      const rect = root.current?.getBoundingClientRect();
-      if (!rect || x === null || y === null) {
-        target.style.transform = 'translate(0px, 0px)';
-        return;
-      }
-      const dx = x - (rect.left + rect.width / 2),
-        dy = y - (rect.top + rect.height / 2);
-      const length = Math.hypot(dx, dy);
-      const radius = mood === 'reading' ? 3 : 6;
-      const scale = length ? Math.min(radius, length / 20) / length : 0;
-      target.style.transform = `translate(${(dx * scale).toFixed(2)}px, ${(dy * scale).toFixed(2)}px)`;
-    });
+    let rect: DOMRect | undefined;
+    return watchGaze(
+      (x, y) => {
+        if (!rect || x === null || y === null) {
+          target.style.transform = 'translate(0px, 0px)';
+          return;
+        }
+        const dx = x - (rect.left + rect.width / 2),
+          dy = y - (rect.top + rect.height / 2);
+        const length = Math.hypot(dx, dy);
+        const radius = mood === 'reading' ? 3 : 6;
+        const scale = length ? Math.min(radius, length / 20) / length : 0;
+        target.style.transform = `translate(${(dx * scale).toFixed(2)}px, ${(dy * scale).toFixed(2)}px)`;
+      },
+      () => {
+        rect = root.current?.getBoundingClientRect();
+      },
+    );
   }, [gazeActive, mood]);
   useEffect(() => {
     animation.current?.cancel();
     if (live && previous.current !== mood) {
       animation.current =
         eyes.current?.animate([{ transform: 'scaleY(.92)' }, { transform: 'scaleY(1)' }], {
-          duration: 180,
-          easing: 'ease-out',
+          duration: DURATION.fast,
+          easing: cssEase(EASE.out),
         }) ?? null;
     }
     previous.current = mood;
@@ -91,7 +107,7 @@ export function Bot({
     };
   }, [live, mood]);
   const blink = () => {
-    if (!live || !['waiting', 'needs-you'].includes(mood)) return;
+    if (!live || !fine || !['waiting', 'needs-you'].includes(mood)) return;
     animation.current?.cancel();
     animation.current =
       eyes.current?.animate(
@@ -100,7 +116,7 @@ export function Bot({
           { transform: 'scaleY(.12)', offset: 0.4 },
           { transform: 'scaleY(1)' },
         ],
-        { duration: 180, easing: 'ease-out' },
+        { duration: DURATION.fast, easing: cssEase(EASE.out) },
       ) ?? null;
   };
   const frame = botFrame(mood, hood);

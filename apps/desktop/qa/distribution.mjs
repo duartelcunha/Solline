@@ -30,6 +30,18 @@ async function scan(directory) {
   }
 }
 for (const directory of ['out/main', 'out/preload', 'out/renderer']) await scan(directory);
+for (const name of ['index', 'recovery', 'prompt', 'attention']) {
+  const preload = await readFile(`out/preload/${name}.js`, 'utf8');
+  assert(!/require\(["']\./.test(preload), `Sandbox preload depends on a local chunk: ${name}`);
+  const html = await readFile(`out/renderer/${name}.html`, 'utf8');
+  assert(html.includes('<html'), `Missing independent renderer: ${name}`);
+}
+const main = await readFile('out/main/index.js', 'utf8');
+assert(
+  !/\bshow(?:MessageBox|OpenDialog|SaveDialog|ErrorBox)(?:Sync)?\b/.test(main),
+  'Native dialog in application',
+);
+assert(!/new\s+(?:\w+\.)?Notification\(/.test(main), 'Native notification in application');
 assert(checked >= 4, 'Production build is incomplete');
 console.log(
   `Production entries checked (${checked} files); QA excluded, fuses preserved, renderer resources local.`,
@@ -46,6 +58,10 @@ if (process.argv[2]) {
   );
   assert(entries.includes('out/main/index.js'));
   assert(entries.includes('out/renderer/index.html'));
+  for (const name of ['recovery', 'prompt', 'attention']) {
+    assert(entries.includes(`out/renderer/${name}.html`));
+    assert(entries.includes(`out/preload/${name}.js`));
+  }
   assert(
     entries.every((entry) => /^(?:out(?:\/|$)|node_modules(?:\/|$)|package\.json$)/.test(entry)),
     'Unexpected top-level packaged source',

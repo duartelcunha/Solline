@@ -37,6 +37,17 @@ afterEach(async () => {
 });
 
 describe('worktrees das sessões', { timeout: 30_000 }, () => {
+  it('recupera o branch real após rename e recusa outro branch sem alterar ficheiros', async () => {
+    const original = (await manager.create(project, 'p1'))!;
+    const renamed = await manager.rename(original, 'Nome durável');
+    await writeFile(path.join(original.cwd, 'a.txt'), 'trabalho por guardar\n');
+    expect(await manager.recover(original)).toEqual(renamed);
+    git(original.path, 'branch', '-m', 'external-branch');
+    await expect(manager.recover(original)).rejects.toThrow('mudou fora da Solline');
+    expect(await readFile(path.join(original.cwd, 'a.txt'), 'utf8')).toBe('trabalho por guardar\n');
+    expect(await readFile(path.join(project, 'a.txt'), 'utf8')).toBe('um\n');
+    expect(git(original.path, 'branch', '--show-current')).toBe('external-branch');
+  });
   it('o nome do branch vem da primeira mensagem', () => {
     expect(slug('Corrige o login do Ângelo, por favor!')).toBe('corrige-o-login-do');
     expect(slug('???')).toBe('sessao');

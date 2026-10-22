@@ -130,6 +130,10 @@
 ::view-transition-new(root) {
   animation: none;
 }
+/* Captured pixels never become an invisible input shield over the live controls. */
+::view-transition {
+  pointer-events: none;
+}
 ::view-transition-group(.sl-morph) {
   animation-duration: var(--sl-dur-slow);
   animation-timing-function: var(--sl-ease-in-out);
@@ -264,8 +268,7 @@
 }
 
 /* ---------- Troca de ícone (IconSwap) ----------
- * O antigo sai desfocado e a encolher; o novo entra desse mesmo desfoque, no mesmo sítio.
- * Só opacity, transform e filter; nunca a partir de scale(0). */
+ * A short, local state change. Text and streamed tool output remain sharp. */
 .sl-swap {
   display: inline-grid;
   place-items: center;
@@ -278,15 +281,13 @@
 @keyframes sl-swap-out {
   to {
     opacity: 0;
-    filter: blur(4px);
-    transform: scale(0.8);
+    transform: scale(var(--sl-pop-scale));
   }
 }
 @keyframes sl-swap-in {
   from {
     opacity: 0;
-    filter: blur(4px);
-    transform: scale(0.8);
+    transform: scale(var(--sl-pop-scale));
   }
 }
 .sl-swap-out {

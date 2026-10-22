@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Recuperar Solline</title>
+  </head>
+  <body>
+    <main aria-labelledby="title">
+      <span class="wordmark">Solline</span>
+      <h1 id="title">Recuperar a Solline</h1>
+      <p id="message" role="status">A verificar o estado guardado…</p>
+      <p class="detail">
+        Só o estado confirmado como gravado está protegido. A recuperação não repete mensagens nem
+        alterações.
+      </p>
+      <div class="actions">
+        <button id="wait" type="button">Esperar</button
+        ><button id="restore" type="button">Restaurar interface</button
+        ><button id="close" type="button">Fechar com segurança</button>
+      </div>
+      <p id="error" role="alert"></p>
+    </main>
+    <script type="module" src="/src/recovery.ts"></script>
+  </body>
+</html>

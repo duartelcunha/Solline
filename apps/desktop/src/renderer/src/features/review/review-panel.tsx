@@ -70,7 +70,9 @@ function scopeLabel(scope: DiffScope, index: (turnId: string) => number | undefi
 function ReviewBody({ sessionId }: { sessionId: string }) {
   const timeline = useSession(sessionId, (s) => s.timeline);
   const busy = useSession(sessionId, (s) => s.info.state !== 'idle');
-  const [scope, setScope] = useState<DiffScope>({ kind: 'review' });
+  const draft = useSession(sessionId, (s) => s.reviewDraft);
+  const scope = draft.scope;
+  const setScope = (scope: DiffScope) => actions.editReview(sessionId, { scope });
   const [files, setFiles] = useState<FileDiff[] | null>(null);
   const filesBox = useRef<HTMLDivElement>(null);
   /** Depois de aceitar ou rejeitar, a vista desliza para o hunk que ficou nesse lugar. */
@@ -85,8 +87,20 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
     const target = hunks[Math.min(index, hunks.length - 1)];
     if (target) scrollIntoViewSmooth(box, target, 'nearest', 16);
   }, [files]);
-  const [comments, setComments] = useState<Map<CommentKey, ReviewComment>>(new Map());
-  const [note, setNote] = useState('');
+  const comments = useMemo(
+    () => new Map(draft.comments.map((comment) => [commentKey(comment), comment])),
+    [draft.comments],
+  );
+  const setComments = (
+    value:
+      | Map<CommentKey, ReviewComment>
+      | ((current: Map<CommentKey, ReviewComment>) => Map<CommentKey, ReviewComment>),
+  ) => {
+    const next = typeof value === 'function' ? value(comments) : value;
+    actions.editReview(sessionId, { comments: [...next.values()] });
+  };
+  const note = draft.note;
+  const setNote = (note: string) => actions.editReview(sessionId, { note });
   const [sending, setSending] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
   const findings = useSession(sessionId, (s) => s.quality?.review.findings ?? NO_FINDINGS);
@@ -242,8 +256,8 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
         {total && files && files.length > 0 ? (
           <span className="truncate font-mono text-[11px] text-muted tabular-nums">
             {files?.length ?? 0} {files?.length === 1 ? 'ficheiro' : 'ficheiros'} ·{' '}
-            <span className="text-success">+{total.add}</span>{' '}
-            <span className="text-danger">−{total.del}</span>
+            <span className="diff-count">+{total.add}</span>{' '}
+            <span className="diff-count">−{total.del}</span>
           </span>
         ) : null}
         <div className="ml-auto flex items-center gap-1">
@@ -330,6 +344,8 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               file={file}
               actionable={actionable}
               comments={comments}
+              editingDraft={draft.editing?.path === file.path ? draft.editing : null}
+              onEditDraft={(editing) => actions.editReview(sessionId, { editing })}
               onComment={setComment}
               onAction={(action, hunk) =>
                 act(action, { path: file.path, ...(hunk ? { hunk } : {}) })

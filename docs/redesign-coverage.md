@@ -2,6 +2,36 @@
 
 Estado deste inventário: 22/10/2026, durante a implementação. **Não é uma aprovação de entrega.** A direção atual está em [DESIGN.md](../DESIGN.md); a primeira aprovação visual da proposta com visores foi invalidada pela mudança de direção.
 
+## Extensão atual — porcelana e recuperação
+
+Esta execução parte de f35c02a no ramo `codex/solline-porcelain-recovery`. As linhas históricas abaixo conservam o âmbito anterior; nem a direção com menta nem os relatórios `final-4/final-5` aprovam o código atual. Todos os itens seguintes aguardam os dois runs finais e a revisão da mesma versão.
+
+O estado final de cada gate fica no índice local `apps/desktop/qa-evidence/delivery-recovery/index.html`, ligado aos manifestos imutáveis da mesma fonte. Este documento conserva a proveniência das falhas; resultados históricos não se tornam provas atuais por repetição no texto. REC-03 inclui agora `renderer-health.test.ts` e a integração do coordenador: watchdog privado main/preload com token, timeout, suspensão e desmontagem, suplementando o detector nativo após a sua falha num bloqueio real.
+
+| ID      | Estado → transição                            | Resultado verificável                                                    | Fonte de teste / evidência                                               |
+| ------- | --------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| REC-01  | Gravação pendente → fsync                     | Nenhuma confirmação antecipada                                           | `ui-recovery.test.ts`, `recovery-journal.test.ts`, canário de gravação   |
+| REC-02  | Crash do renderer → restauro explícito        | Rascunho e pedido exatos; mesmo PID do motor                             | `qa/electron/recovery.spec.ts`, trace e capturas                         |
+| REC-03  | Renderer bloqueado → janela independente      | Aviso utilizável noutro PID; restauro conserva motor                     | `qa/electron/recovery.spec.ts`                                           |
+| REC-04  | Fecho → reinício completo                     | Conversa, fila pausada e checkpoints preservados; sem reenvio            | `qa/electron/recovery.spec.ts`, `engine-recovery.test.ts`                |
+| REC-05  | Efeito sem resposta → reinício                | Intenção desconhecida visível; nenhum efeito repetido                    | `engine-recovery.test.ts`, `stores/recovery.test.ts`                     |
+| REC-06  | Snapshot corrompido / journal truncado        | Revalidar prefixo autenticado; preservar forense; nunca vazio silencioso | Testes de journal e UI recovery                                          |
+| REC-07  | Falha de escrita/sync/rename → retry          | Último estado confirmado permanece; erro bloqueia fecho                  | Falhas injetadas nos syscalls; não equivale a encher fisicamente o disco |
+| REC-08  | Evento duplicado / fora de ordem / nova época | Ignorar duplicado ou reidratar; não sobrescrever época nova              | `stores/recovery.test.ts`, canário de sequência                          |
+| REC-09  | Revogação de confiança → efeito após restauro | Política principal atual precede execução                                | `recovered-policy.test.ts`, integração Electron                          |
+| REC-10  | Fechar durante criação/turno                  | Esperar efeitos aceites, fechar adapters tardios, preservar checkpoint   | `engine-recovery.test.ts`, regressões com barreiras                      |
+| REC-11  | Chave ausente com dados existentes            | Recusar chave substituta, preservar cifra                                | `recovery-key.test.ts` com cofre Windows real                            |
+| REC-12  | Falha inicial transitória → Restaurar         | Repetir leitura/cofre só por ação; corrupção permanente bloqueia         | Coordenador de arranque e UI recovery                                    |
+| WIN-01  | Aproximar / afastar / Escape / reentrar       | Timings fixos, sem alvo oculto ativo nem reabertura por foco             | `qa/tests/recovery-window.spec.ts` com relógio fixo                      |
+| WIN-02  | Maximização externa / IPC inválido            | Estado autoritativo; ações enumeradas e origem validada                  | Integração Electron e testes de schemas                                  |
+| WIN-03  | Escolher pasta / confiar / recusar            | Janelas Solline reais; nonce e origem; cancelamento por defeito          | `prompt-window.test.ts`, `custom-prompts.ts`, Electron e smoke           |
+| WIN-04  | Aviso carregado tarde após dispensa           | Nunca reaparece; timers limpos; showInactive                             | `attention-window.test.ts`                                               |
+| READ-01 | Ler acima + pedido novo                       | Preservar scroll/foco/seleção; “Precisa de ti” salta explicitamente      | `recovery-window.spec.ts`, `scroll.test.ts`                              |
+| VIS-01  | Temas / hover / foco / zoom / opaco           | Tokens neutros, sinais +/- persistentes, contraste composto              | Matriz visual/usabilidade, canário de sinal                              |
+| MOT-01  | Ponteiro / blur / cancelamento / desmontar    | Sem gaze reduzido/coarse; sem listener, timer ou frame abandonado        | Gaze/motion unit, clips, canário de listener, benchmark                  |
+
+O índice final deve ligar estes IDs às provas atuais e conservar as lacunas externas: SDK/login real, DPI nativo, instalação endurecida e falha física de armazenamento.
+
 ## Como ler
 
 - **Implementado / final pendente:** existe teste ou suporte concreto, mas falta a execução final sobre uma versão congelada e identificada.

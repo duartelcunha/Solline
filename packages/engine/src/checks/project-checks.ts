@@ -25,6 +25,7 @@ export class ProjectChecks {
     env?: Record<string, string>;
     run?: RunCommand;
     detect?: (cwd: string) => Promise<CheckSpec[]>;
+    recovery?: Checks;
   }) {
     this.#cwd = options.cwd;
     this.#saved = options.saved;
@@ -32,7 +33,7 @@ export class ProjectChecks {
     this.#env = options.env ?? {};
     this.#run = options.run ?? runCommand;
     this.#detect = options.detect ?? detectChecks;
-    this.#state = {
+    this.#state = options.recovery ?? {
       trusted: options.trusted,
       specs: options.saved ?? [],
       detected: options.saved === null,

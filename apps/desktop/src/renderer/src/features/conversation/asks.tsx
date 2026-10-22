@@ -148,6 +148,7 @@ function Card({
   const morph = useMorphName(id);
   return (
     <section
+      tabIndex={-1}
       aria-label={label}
       data-testid={testId}
       data-ask={id}
@@ -162,19 +163,30 @@ function Card({
 export function PermissionCard({
   block,
   active,
+  autoFocus = true,
   onAnswer,
 }: {
   block: PermissionBlock;
   active: boolean;
+  autoFocus?: boolean;
   onAnswer: Answer;
 }) {
   const agentLabel = useAgentLabel();
   const first = useRef<HTMLButtonElement>(null);
+  const focusDecided = useRef(false);
   const [sent, answer] = useAnswer(onAnswer);
   const pending = block.status === 'pending';
   useEffect(() => {
-    if (pending && active) first.current?.focus({ preventScroll: true });
-  }, [pending, active]);
+    if (!pending || !active) {
+      focusDecided.current = false;
+      return;
+    }
+    if (focusDecided.current) return;
+    // Decide once when a request becomes active. Returning to the bottom must
+    // never replace the reader's explicit focus on its decision region.
+    focusDecided.current = true;
+    if (autoFocus) first.current?.focus({ preventScroll: true });
+  }, [pending, active, autoFocus]);
   useShortcuts(pending && active && !sent, {
     ...(block.defaultToNo ? {} : { '1': () => answer({ decision: 'allow-once' }) }),
     ...(block.canAlwaysAllow && !block.defaultToNo

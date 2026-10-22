@@ -12,13 +12,13 @@ export const MOODS: readonly Mood[] = [
 ];
 export type Tone = 'calm' | 'attention' | 'danger';
 export const HOODS = {
-  claude: '#e88451',
-  codex: '#728bce',
-  reviewer: '#79a879',
-  acp: '#c77aba',
-  other: '#8f78bf',
-  solline: '#d9ab36',
-  familiar: '#d9ab36',
+  claude: '#df826f',
+  codex: '#819bd1',
+  reviewer: '#bd94bd',
+  acp: '#e6b08f',
+  other: '#9c89b9',
+  solline: '#d2aa51',
+  familiar: '#d2aa51',
 } as const;
 export type Hood = keyof typeof HOODS;
 export const STATE_COLOURS = { attention: '#e8b64d', danger: '#d76464' };

@@ -32,9 +32,18 @@ const TIMEOUT_MS: Partial<Record<EngineCommandName, number>> = {
  * Se o motor morrer, avisa a interface.
  */
 export class EngineHost {
+  get running(): boolean {
+    return Boolean(this.#child);
+  }
+  get failedToStart(): boolean {
+    return this.#initializationFailed;
+  }
+  #ready = false;
+  #initializationFailed = false;
   #child: UtilityProcess | undefined;
   #port: Electron.MessagePortMain | undefined;
   #stopping = false;
+  #recoveryKey: Buffer | undefined;
   readonly #pending = new Map<string, Pending>();
   readonly #onEvent: (event: EngineEvent) => void;
 
@@ -42,7 +51,13 @@ export class EngineHost {
     this.#onEvent = onEvent;
   }
 
-  start(): void {
+  start(recoveryKey?: Buffer): void {
+    if (this.#child) return;
+    if (recoveryKey) this.#recoveryKey = Buffer.from(recoveryKey);
+    if (!this.#recoveryKey) throw new Error('Chave de recuperação indisponível');
+    this.#stopping = false;
+    this.#ready = false;
+    this.#initializationFailed = false;
     const child = utilityProcess.fork(join(__dirname, 'engine.js'), [], {
       serviceName: 'Solline Engine',
       stdio: 'inherit',
@@ -55,17 +70,18 @@ export class EngineHost {
     const { port1, port2 } = new MessageChannelMain();
     port1.on('message', (event) => this.#onMessage(event.data));
     port1.start();
-    child.postMessage({ type: 'connect' }, [port2]);
+    child.postMessage({ type: 'connect', recoveryKey: new Uint8Array(this.#recoveryKey) }, [port2]);
     child.on('exit', (code) => {
+      if (this.#child !== child) return;
       this.#failAll(new Error(`O motor parou (código ${code})`));
       this.#child = undefined;
       this.#port = undefined;
       if (this.#stopping) return;
-      // shortcut: sem reiniciar o motor nem recuperar sessões; o M5 trata da recuperação.
       this.#onEvent({
         kind: 'event',
         type: 'engine.error',
-        message: 'O motor parou. Fecha e volta a abrir a Solline.',
+        message:
+          'O motor parou. Restaura a interface para consultar o último estado guardado; os agentes só retomam por tua ação.',
       });
     });
     this.#child = child;
@@ -101,12 +117,43 @@ export class EngineHost {
     this.#child?.kill();
   }
 
+  async restartFailed(key?: Buffer): Promise<void> {
+    const child = this.#child;
+    if (!child || !this.#initializationFailed) return;
+    await this.#restart(child, key);
+  }
+
+  async restartStopped(key?: Buffer): Promise<void> {
+    const child = this.#child;
+    if (!child || (await this.request('engine.snapshot', {})).lifecycle !== 'stopped')
+      throw new Error('O motor ainda não confirmou que terminou.');
+    await this.#restart(child, key);
+  }
+
+  async #restart(child: UtilityProcess, key?: Buffer): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error('O motor anterior ainda não terminou.')),
+        5000,
+      );
+      child.once('exit', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+      this.stop();
+    });
+    this.start(key);
+  }
+
   #onMessage(data: unknown): void {
     const event = EngineEvent.safeParse(data);
     if (event.success) {
       if (event.data.type === 'engine.ready') {
+        this.#ready = true;
         console.info(`[engine] pronto v${event.data.engineVersion} pid ${event.data.pid}`);
       }
+      if (event.data.type === 'engine.error' && !event.data.sessionId && !this.#ready)
+        this.#initializationFailed = true;
       this.#onEvent(event.data);
       return;
     }

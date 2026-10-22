@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { IPC } from '../../packages/protocol/src/bridge.ts';
 
 export default defineConfig({
   main: {
@@ -18,9 +19,15 @@ export default defineConfig({
     },
   },
   preload: {
+    define: { __SOLLINE_IPC__: JSON.stringify(IPC) },
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/preload/index.ts') },
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          recovery: resolve(__dirname, 'src/preload/recovery.ts'),
+          prompt: resolve(__dirname, 'src/preload/prompt.ts'),
+          attention: resolve(__dirname, 'src/preload/attention.ts'),
+        },
       },
     },
   },
@@ -29,7 +36,12 @@ export default defineConfig({
     build: {
       minify: true,
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/renderer/index.html') },
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          recovery: resolve(__dirname, 'src/renderer/recovery.html'),
+          prompt: resolve(__dirname, 'src/renderer/prompt.html'),
+          attention: resolve(__dirname, 'src/renderer/attention.html'),
+        },
       },
     },
     plugins: [react(), tailwindcss()],

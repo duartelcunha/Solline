@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Solline</title>
+  </head>
+  <body>
+    <main aria-labelledby="title">
+      <header>
+        <span class="wordmark">Solline</span
+        ><button id="dismiss" type="button" aria-label="Cancelar e fechar">×</button>
+      </header>
+      <h1 id="title">Um momento…</h1>
+      <p id="message"></p>
+      <p id="detail"></p>
+      <section id="directory" hidden aria-label="Escolher pasta">
+        <form id="path-form">
+          <label for="path">Caminho da pasta</label>
+          <div class="path-row">
+            <input id="path" type="text" autocomplete="off" spellcheck="false" /><button
+              type="submit"
+            >
+              Abrir
+            </button>
+          </div>
+        </form>
+        <nav id="crumbs" aria-label="Caminho atual"></nav>
+        <div class="folder-toolbar">
+          <button id="home" class="icon-control" type="button" aria-label="Pasta pessoal">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m3 10 9-7 9 7M5 9v11h5v-6h4v6h5V9" />
+            </svg>
+            <span class="control-help" aria-hidden="true">Pasta pessoal</span>
+          </button>
+          <button id="up" class="icon-control" type="button" aria-label="Subir uma pasta">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 11 7-7 7 7M12 4v16" /></svg>
+            <span class="control-help" aria-hidden="true">Subir uma pasta</span>
+          </button>
+        </div>
+        <div id="folders" role="group" aria-label="Pastas" tabindex="0"></div>
+        <p id="folder-status" role="status"></p>
+      </section>
+      <p id="error" role="alert"></p>
+      <footer>
+        <button id="cancel" type="button">Cancelar</button
+        ><button id="accept" type="button">Continuar</button>
+      </footer>
+    </main>
+    <script type="module" src="/src/prompt.ts"></script>
+  </body>
+</html>

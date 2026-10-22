@@ -1,9 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx",
-    "types": ["node", "vite/client"]
-  },
-  "include": ["qa", "vite.qa.config.ts", "playwright.qa.config.ts", "src/renderer/src/env.d.ts"]
+  "extends": "./tsconfig.web.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["qa", "src/renderer/src"]
 }

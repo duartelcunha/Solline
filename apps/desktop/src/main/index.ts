@@ -2,11 +2,11 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   BrowserWindow,
-  Notification,
+  Menu,
   app,
-  dialog,
   ipcMain,
   nativeTheme,
+  safeStorage,
   session,
   shell,
   type IpcMainInvokeEvent,
@@ -28,27 +28,64 @@ import { AttentionTracker, type Attention } from './attention.ts';
 import { EngineHost } from './engine-host.ts';
 import { ProjectStore, newCommands } from './projects.ts';
 import { resolveSessionStart } from './session-policy.ts';
+import { reconcilePolicy } from './recovered-policy.ts';
+import { UiRecoveryStore } from './ui-recovery.ts';
+import { loadRecoveryKey } from './recovery-key.ts';
+import { RecoveryStartup } from './recovery-startup.ts';
+import { recoveryCodec } from './recovery-codec.ts';
+import { PromptWindows } from './prompt-window.ts';
+import { AttentionWindow } from './attention-window.ts';
+import { WindowRecovery } from './window-recovery.ts';
+import { DraftUpdateSchema, WindowActionSchema } from './window-schemas.ts';
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId(`app.${APP_NAME.toLowerCase()}`);
 // Testes e smoke usam uma pasta de dados própria para não tocar na do dia a dia.
 if (process.env.SOLLINE_USER_DATA) app.setPath('userData', process.env.SOLLINE_USER_DATA);
+const ownsInstance = app.requestSingleInstanceLock();
+if (!ownsInstance) app.quit();
 
 let mainWindow: BrowserWindow | undefined;
+let recovery: WindowRecovery | undefined;
+let prompts: PromptWindows | undefined;
+let attentionWindow: AttentionWindow | undefined;
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+let windowRevision = 0;
+const customControls = process.platform === 'win32';
+let draftKey: Buffer | undefined;
+const drafts = new UiRecoveryStore(
+  join(app.getPath('userData'), 'recovery-ui'),
+  recoveryCodec(
+    () => draftKey,
+    (text) => safeStorage.decryptString(Buffer.from(text, 'base64')),
+  ),
+);
 const attention = new AttentionTracker();
 const engine = new EngineHost((event) => {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
   win?.webContents.send(IPC.event, event);
   const notice = attention.observe(event, win?.isFocused() ?? false);
   if (notice) notify(notice);
+  if (event.type === 'engine.error' && !event.sessionId) recovery?.show('crashed', event.message);
+});
+const recoveryStartup = new RecoveryStartup(drafts, engine, async () => {
+  const key = await loadRecoveryKey(app.getPath('userData'));
+  draftKey?.fill(0);
+  draftKey = Buffer.from(key);
+  return key;
 });
 
 /** Na app instalada o ícone vem do executável; fora dela, da pasta build. */
 const devIcon = app.isPackaged ? undefined : join(__dirname, '../../build/icon.png');
 
 /**
- * Aviso do Windows para uma sessão que precisa de ti ou acabou um turno (só chega aqui com a
- * janela sem foco). Clicar abre essa sessão; "precisa de ti" também faz piscar a barra.
+ * Aviso próprio da Solline para uma sessão que precisa de ti ou acabou um turno,
+ * mostrado quando a janela está sem foco. Clicar abre essa sessão.
  */
 function notify(notice: Attention): void {
   // Nos testes (isolados) os avisos ficam numa lista em vez de aparecerem no ecrã.
@@ -56,23 +93,7 @@ function notify(notice: Attention): void {
     ((globalThis as { notices?: Attention[] }).notices ??= []).push(notice);
     return;
   }
-  const win = mainWindow;
-  if (notice.urgent) win?.flashFrame(true);
-  if (!Notification.isSupported()) return;
-  const toast = new Notification({
-    title: notice.title,
-    body: notice.body,
-    silent: true,
-    ...(devIcon ? { icon: devIcon } : {}),
-  });
-  toast.on('click', () => {
-    if (!win || win.isDestroyed()) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-    win.webContents.send(IPC.focusSession, notice.sessionId);
-  });
-  toast.show();
+  attentionWindow?.show(notice);
 }
 const projects = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
 
@@ -81,99 +102,52 @@ const TRUST_DETAIL =
   'da pasta (no Claude, o .claude/ e o CLAUDE.md). Sem confiança, só as tuas definições de ' +
   'utilizador, e "Permitir sempre" vale só na sessão. Vale para as sessões novas.';
 
-/** Diálogo nativo: a confiança nunca se liga sem um clique teu fora da interface. */
+/** Confirmation lives in an independent, main-owned Solline window. */
+function confirm(options: Parameters<PromptWindows['confirm']>[0]): Promise<boolean> {
+  if (!prompts) throw new Error('A confirmação ainda não está pronta.');
+  return prompts.confirm(options);
+}
 async function confirmTrust(name: string): Promise<boolean> {
-  const options = {
-    type: 'question' as const,
+  return confirm({
     title: 'Confiança no projeto',
     message: `Confias no projeto ${name}?`,
     detail: TRUST_DETAIL,
-    buttons: ['Confiar', 'Não confiar'],
-    defaultId: 1,
-    cancelId: 1,
-    noLink: true,
-  };
-  const { response } = mainWindow
-    ? await dialog.showMessageBox(mainWindow, options)
-    : await dialog.showMessageBox(options);
-  return response === 0;
+    acceptLabel: 'Confiar',
+    cancelLabel: 'Não confiar',
+  });
 }
-
-/** Diálogo nativo: um agente só recebe segredos novos depois de um clique teu fora da interface. */
 async function confirmKeys(label: string, keys: readonly string[]): Promise<boolean> {
-  const options = {
-    type: 'question' as const,
+  return confirm({
     title: 'Variáveis do agente',
     message: `Dar ao ${label} estas variáveis do teu ambiente?`,
-    detail:
-      `${keys.join('\n')}\n\nO agente recebe os valores destas variáveis em cada sessão nova. ` +
-      'A Solline só guarda os nomes.',
-    buttons: ['Dar', 'Cancelar'],
-    defaultId: 1,
-    cancelId: 1,
-    noLink: true,
-  };
-  const { response } = mainWindow
-    ? await dialog.showMessageBox(mainWindow, options)
-    : await dialog.showMessageBox(options);
-  return response === 0;
+    detail: `${keys.join('\n')}\n\nO agente recebe os valores destas variáveis em cada sessão nova. A Solline só guarda os nomes.`,
+    acceptLabel: 'Dar',
+    cancelLabel: 'Cancelar',
+  });
 }
-
-/** Diálogo nativo: um comando novo só corre no projeto depois de um clique teu fora da interface. */
 async function confirmChecks(name: string, commands: readonly string[]): Promise<boolean> {
-  const options = {
-    type: 'question' as const,
+  return confirm({
     title: 'Verificações do projeto',
     message: `Correr estes comandos em ${name} no fim de cada turno?`,
     detail: `${commands.join('\n')}\n\nCorrem na pasta do projeto, sem os segredos do teu ambiente.`,
-    buttons: ['Correr', 'Cancelar'],
-    defaultId: 1,
-    cancelId: 1,
-    noLink: true,
-  };
-  const { response } = mainWindow
-    ? await dialog.showMessageBox(mainWindow, options)
-    : await dialog.showMessageBox(options);
-  return response === 0;
+    acceptLabel: 'Correr',
+  });
 }
-
-/** Diálogo nativo: preparar cada worktree nova corre este comando, uma vez, logo a seguir aos .env. */
 async function confirmSetup(name: string, command: string, copyEnv: boolean): Promise<boolean> {
-  const options = {
-    type: 'question' as const,
+  return confirm({
     title: 'Preparação das worktrees',
     message: `Preparar cada worktree nova de ${name} com este comando?`,
-    detail:
-      `${command}\n\nCorre uma vez em cada worktree nova` +
-      (copyEnv ? ', depois de copiar os .env ignorados da raiz do projeto' : '') +
-      ', sem os segredos do teu ambiente.',
-    buttons: ['Preparar', 'Cancelar'],
-    defaultId: 1,
-    cancelId: 1,
-    noLink: true,
-  };
-  const { response } = mainWindow
-    ? await dialog.showMessageBox(mainWindow, options)
-    : await dialog.showMessageBox(options);
-  return response === 0;
+    detail: `${command}\n\nCorre uma vez em cada worktree nova${copyEnv ? ', depois de copiar os .env ignorados da raiz do projeto' : ''}, sem os segredos do teu ambiente.`,
+    acceptLabel: 'Preparar',
+  });
 }
-
-/** Diálogo nativo: deitar fora o trabalho de uma worktree só depois de um clique teu fora da interface. */
 async function confirmDiscard(): Promise<boolean> {
-  const options = {
-    type: 'warning' as const,
+  return confirm({
     title: 'Deitar fora',
     message: 'Deitar fora o trabalho desta worktree?',
     detail: 'Apaga a pasta da worktree e o branch, com tudo o que não foi trazido. Não se desfaz.',
-    buttons: ['Deitar fora', 'Cancelar'],
-    defaultId: 1,
-    cancelId: 1,
-    noLink: true,
-  };
-  const { response } = mainWindow
-    ? await dialog.showMessageBox(mainWindow, options)
-    : await dialog.showMessageBox(options);
-  return response === 0;
+    acceptLabel: 'Deitar fora',
+  });
 }
 
 async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
@@ -208,11 +182,7 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
     case 'projects.list':
       return { projects: await projects.list() };
     case 'projects.add': {
-      const options = { title: 'Adicionar projeto', properties: ['openDirectory' as const] };
-      const picked = mainWindow
-        ? await dialog.showOpenDialog(mainWindow, options)
-        : await dialog.showOpenDialog(options);
-      const folder = picked.canceled ? undefined : picked.filePaths[0];
+      const folder = await prompts?.pickDirectory();
       if (!folder) return { project: null };
       const existing = await projects.find(folder);
       if (existing) return { project: existing };
@@ -323,7 +293,7 @@ function samePage(a: string, b: string): boolean {
  * Só a janela principal, no frame de topo e na página que a app carregou, fala com o main.
  * A condição é a mesma do loadURL/loadFile em createWindow.
  */
-function isTrustedSender(event: IpcMainInvokeEvent): boolean {
+function isTrustedSender(event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>): boolean {
   const frame = event.senderFrame;
   if (!mainWindow || event.sender !== mainWindow.webContents || !frame || frame.parent) {
     return false;
@@ -360,7 +330,9 @@ function createWindow(): void {
     show: false,
     backgroundColor: theme === 'dark' ? '#1c1a18' : '#fbfaf8',
     titleBarStyle: 'hidden',
-    titleBarOverlay: { ...titleBarColors[theme], height: TITLE_BAR_HEIGHT },
+    titleBarOverlay: customControls
+      ? false
+      : { ...titleBarColors[theme], height: TITLE_BAR_HEIGHT },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -378,8 +350,22 @@ function createWindow(): void {
   win.webContents.on('will-navigate', (event) => event.preventDefault());
 
   mainWindow = win;
+  recovery?.attach(win);
+  const publishState = () => {
+    windowRevision += 1;
+    win.webContents.send(IPC.windowState, {
+      maximized: win.isMaximized(),
+      customControls,
+      revision: windowRevision,
+    });
+  };
+  win.on('maximize', publishState);
+  win.on('unmaximize', publishState);
   // Voltaste à janela: a barra deixa de piscar.
-  win.on('focus', () => win.flashFrame(false));
+  win.on('close', () => prompts?.cancelAll());
+  win.on('closed', () => attentionWindow?.dispose());
+  win.webContents.on('render-process-gone', () => prompts?.cancelAll());
+  win.webContents.on('unresponsive', () => prompts?.cancelAll());
   if (devUrl) void win.loadURL(devUrl);
   else void win.loadFile(rendererFile);
 }
@@ -389,13 +375,18 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
   const parsed = CommandNameSchema.safeParse((raw as { command?: unknown } | null)?.command);
   if (!parsed.success) return { ok: false, error: { message: 'Comando desconhecido' } };
   const command: CommandName = parsed.data;
+  if (command === 'engine.shutdown')
+    return { ok: false, error: { message: 'O fecho é coordenado pela janela' } };
   const payload = (raw as { payload?: unknown }).payload ?? {};
   try {
     if (isMainCommand(command)) {
       const input = commandSchemas[command].payload.parse(payload);
+      if (command === 'session.close' || command === 'worktrees.discard')
+        await reconcilePolicy(engine, projects, command, input);
       const result = commandSchemas[command].result.parse(await handleMain(command, input));
       return { ok: true, result };
     }
+    await reconcilePolicy(engine, projects, command, payload);
     return { ok: true, result: await engine.request(command, payload) };
   } catch (error) {
     return {
@@ -408,7 +399,54 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
 ipcMain.handle(IPC.setTheme, (event, theme: unknown) => {
   if (!isTrustedSender(event) || (theme !== 'light' && theme !== 'dark')) return;
   nativeTheme.themeSource = theme;
-  mainWindow?.setTitleBarOverlay({ ...titleBarColors[theme], height: TITLE_BAR_HEIGHT });
+  if (!customControls)
+    mainWindow?.setTitleBarOverlay({ ...titleBarColors[theme], height: TITLE_BAR_HEIGHT });
+  recovery?.theme(theme);
+  prompts?.theme(theme);
+  attentionWindow?.theme(theme);
+});
+
+ipcMain.handle(IPC.windowState, (event) => {
+  if (!isTrustedSender(event) || !mainWindow || mainWindow.isDestroyed())
+    throw new Error('Origem não autorizada');
+  return { maximized: mainWindow.isMaximized(), customControls, revision: windowRevision };
+});
+ipcMain.handle(IPC.windowAction, async (event, raw: unknown) => {
+  if (!isTrustedSender(event) || !mainWindow || mainWindow.isDestroyed())
+    throw new Error('Origem não autorizada');
+  const action = WindowActionSchema.parse(raw);
+  if (action === 'minimize') mainWindow.minimize();
+  else if (action === 'toggle-maximize') {
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  } else await recovery?.close().catch((error) => recovery?.show('save-failed', String(error)));
+});
+ipcMain.handle(IPC.recoveryUi, async (event) => {
+  if (!isTrustedSender(event)) throw new Error('Origem não autorizada');
+  await recoveryStartup.ready();
+  return drafts.load();
+});
+ipcMain.handle(IPC.recoveryOpen, (event) => {
+  if (!isTrustedSender(event)) throw new Error('Origem não autorizada');
+  recovery?.show(
+    'save-failed',
+    'A interface não conseguiu confirmar o estado guardado. Podes tentar restaurar; nenhuma ação será reenviada automaticamente.',
+  );
+});
+ipcMain.handle(IPC.recoveryDraft, async (event, raw: unknown) => {
+  if (!isTrustedSender(event)) throw new Error('Origem não autorizada');
+  await recoveryStartup.ready();
+  return drafts.save(DraftUpdateSchema.parse(raw));
+});
+ipcMain.handle(IPC.preparedClose, (event, raw: unknown) => {
+  if (!isTrustedSender(event)) throw new Error('Origem não autorizada');
+  const data = raw as { token?: unknown; ok?: unknown } | null;
+  if (!data || typeof data.token !== 'string' || typeof data.ok !== 'boolean')
+    throw new Error('Resposta inválida');
+  recovery?.prepared(data.token, data.ok);
+});
+ipcMain.on(IPC.healthReply, (event, token: unknown) => {
+  if (isTrustedSender(event)) recovery?.healthy(token);
 });
 
 // Qualquer webContents novo nasce sem webviews, sem janelas e sem navegar.
@@ -418,14 +456,56 @@ app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
 });
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
+  if (!ownsInstance) return;
+  Menu.setApplicationMenu(null);
   // A interface não usa câmara, microfone, notificações nem nada do género: tudo negado.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
     callback(false),
   );
   session.defaultSession.setPermissionCheckHandler(() => false);
-  engine.start();
+  recovery = new WindowRecovery(
+    engine,
+    drafts,
+    join(__dirname, '../preload/recovery.js'),
+    join(__dirname, '../renderer'),
+    devUrl,
+    () => recoveryStartup.retry(),
+    () => prompts?.cancelAll(),
+  );
+  prompts = new PromptWindows({
+    parent: () => mainWindow,
+    preload: join(__dirname, '../preload/prompt.js'),
+    renderer: join(__dirname, '../renderer'),
+    devUrl,
+    initialDirectory: app.getPath('home'),
+  });
+  attentionWindow = new AttentionWindow(
+    () => mainWindow,
+    join(__dirname, '../preload/attention.js'),
+    join(__dirname, '../renderer'),
+    (sessionId) => {
+      const win = mainWindow;
+      if (!win || win.isDestroyed()) return;
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send(IPC.focusSession, sessionId);
+    },
+    devUrl,
+  );
+  let startupError: unknown;
+  try {
+    await recoveryStartup.ready();
+  } catch (error) {
+    startupError = error;
+  }
   createWindow();
+  if (startupError)
+    recovery.show(
+      'save-failed',
+      `A recuperação não está disponível. Os dados existentes foram preservados. ${String(startupError)}`,
+    );
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -435,4 +515,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => engine.stop());
+app.on('before-quit', (event) => {
+  if (recovery && !recovery.mayQuit && mainWindow && !mainWindow.isDestroyed()) {
+    event.preventDefault();
+    void recovery.close().catch((error) => recovery?.show('save-failed', String(error)));
+    return;
+  }
+  engine.stop();
+});

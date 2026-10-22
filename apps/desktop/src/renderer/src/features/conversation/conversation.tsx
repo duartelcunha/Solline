@@ -45,12 +45,14 @@ function groupTools(blocks: Block[]): (Exclude<Block, ToolBlock> | ToolBlock[])[
 function AssistantTurn({
   turn,
   firstPendingId,
+  readingAway,
   latest,
   onOpen,
   onAnswer,
 }: {
   turn: Turn;
   firstPendingId: string | null;
+  readingAway: boolean;
   /** O último turno: só os pedidos dele se transformam (lib/morph.ts). */
   latest: boolean;
   onOpen: (tool: ToolBlock) => void;
@@ -88,6 +90,7 @@ function AssistantTurn({
                   key={block.id}
                   block={block}
                   active={block.id === firstPendingId}
+                  autoFocus={!readingAway}
                   onAnswer={(a) => onAnswer(block.id, a)}
                 />
               );
@@ -143,6 +146,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   const placed = useRef(false);
   // Subiste para ler: o que chegar depois não te puxa, só acende "Novo".
   const [away, setAway] = useState<string | null>(null);
+  const [pendingVisible, setPendingVisible] = useState(false);
   useDragScroll(scroller);
 
   const { tools, firstPendingId } = useMemo(() => {
@@ -170,23 +174,38 @@ export function Conversation({ sessionId }: { sessionId: string }) {
     }
   }, [turns]);
 
-  // Um pedido que precisa de ti vem sempre à vista, mesmo que tenhas subido.
+  // A pending decision never pulls the reader away from older text.
   useEffect(() => {
     const el = scroller.current;
     if (!el || !firstPendingId) return;
     const card = el.querySelector(`[data-ask="${CSS.escape(firstPendingId)}"]`);
     if (card) {
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          setPendingVisible(
+            Boolean(
+              entry?.isIntersecting &&
+              (entry.intersectionRatio === 1 || entry.boundingClientRect.height > el.clientHeight),
+            ),
+          );
+        },
+        { root: el, threshold: [0, 1] },
+      );
+      observer.observe(card);
       // Keep the complete decision visible when it fits; decorative margins must not crop buttons.
       const margin = Math.max(
         0,
         Math.min(32, (el.clientHeight - card.getBoundingClientRect().height) / 2),
       );
-      scrollIntoViewSmooth(el, card, 'nearest', margin);
+      if (pinned.current) scrollIntoViewSmooth(el, card, 'nearest', margin);
+      return () => observer.disconnect();
     }
+    return undefined;
   }, [firstPendingId]);
 
   const signature = `${turns.length}:${turns.at(-1)?.blocks.length ?? 0}`;
   const hasNew = away !== null && away !== signature;
+  const pendingAway = away !== null && firstPendingId !== null && !pendingVisible;
 
   const openTool = openToolId ? (tools.get(openToolId) ?? null) : null;
   // A linha do tempo marca o <html> com o turno de onde se voltaria: esse e os seguintes
@@ -229,6 +248,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
                     <AssistantTurn
                       turn={turn}
                       firstPendingId={firstPendingId}
+                      readingAway={away !== null}
                       latest={index === turns.length - 1}
                       onOpen={(tool) => setOpenToolId(tool.id)}
                       onAnswer={(requestId, answer) => actions.answer(sessionId, requestId, answer)}
@@ -249,20 +269,35 @@ export function Conversation({ sessionId }: { sessionId: string }) {
           )}
         </div>
 
-        {hasNew ? (
+        {hasNew || pendingAway ? (
           <button
             type="button"
-            onClick={() => {
+            onClick={(event) => {
               const el = scroller.current;
               if (!el) return;
+              if (pendingAway && firstPendingId) {
+                const card = el.querySelector(`[data-ask="${CSS.escape(firstPendingId)}"]`);
+                if (card) {
+                  const margin = Math.max(
+                    0,
+                    Math.min(32, (el.clientHeight - card.getBoundingClientRect().height) / 2),
+                  );
+                  scrollIntoViewSmooth(el, card, 'nearest', margin, {
+                    instant: event.detail === 0,
+                  });
+                  (card as HTMLElement).focus({ preventScroll: true });
+                  return;
+                }
+              }
               pinned.current = true;
               setAway(null);
-              scrollToSmooth(el, el.scrollHeight);
+              scrollToSmooth(el, el.scrollHeight, 'y', { instant: event.detail === 0 });
             }}
             className="chip-in absolute bottom-3 left-1/2 inline-flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[12px] text-muted shadow-raised sl-press hover:text-fg"
             data-testid="jump-new"
+            data-pending={pendingAway || undefined}
           >
-            <ArrowDown size={13} /> Novo
+            <ArrowDown size={13} /> {pendingAway ? 'Precisa de ti' : 'Novo'}
           </button>
         ) : null}
 

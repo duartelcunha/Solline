@@ -167,6 +167,30 @@ export class WorktreeManager {
     return next;
   }
 
+  /** Reconcile a crash between Git branch rename and its metadata/event, without writing. */
+  async recover(wt: Worktree): Promise<Worktree> {
+    const relative = path.relative(this.#root, wt.path);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative))
+      throw new Error('A worktree recuperada está fora da pasta da Solline.');
+    const canonical = (value: string) =>
+      process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+    const top = (await this.#run(wt.path, ['rev-parse', '--show-toplevel'])).out.trim();
+    if (canonical(top) !== canonical(wt.path))
+      throw new Error('A worktree recuperada já não corresponde à pasta guardada.');
+    const branch = (await this.#run(wt.path, ['symbolic-ref', '--short', 'HEAD'])).out.trim();
+    if (!branch.startsWith('solline/') || !branch.endsWith(`-${wt.suffix}`))
+      throw new Error('O branch da worktree mudou fora da Solline; confirma-o antes de continuar.');
+    const actualCommon = (await this.#run(wt.path, ['rev-parse', '--git-common-dir'])).out.trim();
+    const expectedCommon = (await this.#run(wt.top, ['rev-parse', '--git-common-dir'])).out.trim();
+    if (
+      canonical(path.resolve(wt.path, actualCommon)) !==
+      canonical(path.resolve(wt.top, expectedCommon))
+    )
+      throw new Error('A worktree já não pertence ao projeto guardado.');
+    await this.#run(wt.path, ['cat-file', '-e', `${wt.base}^{commit}`]);
+    return { ...wt, branch };
+  }
+
   /**
    * O que a worktree mudou face à base, ficheiro a ficheiro e hunk a hunk (contando o que está
    * por gravar e os ficheiros novos), num índice só seu: nem o do agente nem o das contas, que

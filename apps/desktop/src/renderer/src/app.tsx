@@ -6,6 +6,7 @@ import { Composer } from './features/composer/composer.tsx';
 import { AgentsPanel } from './features/agents/agents-panel.tsx';
 import { NewSessionButton } from './features/agents/new-session-button.tsx';
 import { Conversation } from './features/conversation/conversation.tsx';
+import { UncertainOperations } from './features/conversation/uncertain-operations.tsx';
 import { QualityChip } from './features/quality/quality.tsx';
 import { ChecksRow } from './features/quality/checks.tsx';
 import { CloseDialog, WorkspaceChip } from './features/workspace/workspace.tsx';
@@ -19,7 +20,8 @@ import { Familiar, SessionBot } from './features/agents/bots.tsx';
 import { Bot } from '@solline/ui/bot';
 import { Sidebar } from './features/sidebar/sidebar.tsx';
 import { usePresence } from '@solline/ui/react';
-import { actions, dispatch, sessionStore, useApp, useSession } from './stores/app.ts';
+import { actions, connectRecovery, sessionStore, useApp, useSession } from './stores/app.ts';
+import { WindowControls } from './features/window/window-controls.tsx';
 
 const THEME_KEY = 'solline.theme';
 
@@ -285,10 +287,12 @@ export function App() {
   const activeSessionId = useApp((s) => (s.view === 'session' ? s.activeSessionId : null));
   const hasDesk = useApp((s) => s.sessionIds.length > 0 || s.orphans.length > 0);
   const notice = useApp((s) => s.notice);
+  const recoveryStatus = useApp((s) => s.recoveryStatus);
+  const closePending = useApp((s) => s.closePending);
   const raceId = useApp((s) => (s.view === 'race' ? s.activeRaceId : null));
 
   useEffect(() => {
-    const off = window.solline.onEvent(dispatch);
+    const off = connectRecovery();
     // Clicar num aviso do Windows abre a sessão de que ele fala.
     const offFocus = window.solline.onFocusSession((id) => {
       if (sessionStore(id)) actions.selectSession(id);
@@ -311,81 +315,109 @@ export function App() {
   }, [sessionIds]);
 
   return (
-    <div className="app-shell grid h-full min-h-0 grid-cols-[15rem_minmax(0,1fr)]">
-      <Sidebar
-        sessionsByProject={sessionsByProject}
-        footer={
-          <div className="flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <EngineStatus ping={ping} />
+    <>
+      <WindowControls />
+      <div
+        inert={recoveryStatus !== 'ready' || closePending}
+        className="app-shell grid h-full min-h-0 grid-cols-[15rem_minmax(0,1fr)]"
+      >
+        <Sidebar
+          sessionsByProject={sessionsByProject}
+          footer={
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <EngineStatus ping={ping} />
+              </div>
+              <button
+                type="button"
+                onClick={(e) => toggleTheme(shouldAnimate(e.nativeEvent))}
+                aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+                data-testid="theme-toggle"
+                className="grid size-7 shrink-0 place-items-center rounded-control text-muted sl-press hover:bg-surface-hover hover:text-fg"
+              >
+                <IconSwap swapKey={theme} instant={!themeAnimates}>
+                  {theme === 'dark' ? (
+                    <Sun size={15} strokeWidth={1.75} />
+                  ) : (
+                    <Moon size={15} strokeWidth={1.75} />
+                  )}
+                </IconSwap>
+              </button>
+              <button
+                type="button"
+                onClick={actions.openAgentsPanel}
+                aria-label="Agentes"
+                title="Agentes: estado, login e variáveis"
+                data-testid="sidebar-agents"
+                className="grid size-7 shrink-0 place-items-center rounded-control text-muted sl-press hover:bg-surface-hover hover:text-fg"
+              >
+                <SlidersHorizontal size={15} strokeWidth={1.75} />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={(e) => toggleTheme(shouldAnimate(e.nativeEvent))}
-              aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
-              data-testid="theme-toggle"
-              className="grid size-7 shrink-0 place-items-center rounded-control text-muted sl-press hover:bg-surface-hover hover:text-fg"
-            >
-              <IconSwap swapKey={theme} instant={!themeAnimates}>
-                {theme === 'dark' ? (
-                  <Sun size={15} strokeWidth={1.75} />
-                ) : (
-                  <Moon size={15} strokeWidth={1.75} />
-                )}
-              </IconSwap>
-            </button>
-            <button
-              type="button"
-              onClick={actions.openAgentsPanel}
-              aria-label="Agentes"
-              title="Agentes: estado, login e variáveis"
-              data-testid="sidebar-agents"
-              className="grid size-7 shrink-0 place-items-center rounded-control text-muted sl-press hover:bg-surface-hover hover:text-fg"
-            >
-              <SlidersHorizontal size={15} strokeWidth={1.75} />
-            </button>
-          </div>
-        }
-      />
-      <AgentsPanel />
-      <CloseDialog />
+          }
+        />
+        <AgentsPanel />
+        <CloseDialog />
 
-      <main className="flex min-h-0 min-w-0 flex-col">
-        <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[9.5rem] pl-5">
+        <main className="flex min-h-0 min-w-0 flex-col">
+          <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[9.5rem] pl-5">
+            {activeSessionId ? (
+              <SessionHeaderTitle sessionId={activeSessionId} />
+            ) : raceId ? (
+              <RaceTitle raceId={raceId} />
+            ) : (
+              <DeskTitle />
+            )}
+            {activeSessionId ? (
+              <SessionStatus key={activeSessionId} sessionId={activeSessionId} />
+            ) : null}
+          </header>
+
+          <NoticeBar notice={notice} />
+          <UncertainOperations />
+
           {activeSessionId ? (
-            <SessionHeaderTitle sessionId={activeSessionId} />
+            <div className="session-body relative flex min-h-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <Conversation key={activeSessionId} sessionId={activeSessionId} />
+                <Composer
+                  key={`c-${activeSessionId}`}
+                  sessionId={activeSessionId}
+                  above={<Timeline sessionId={activeSessionId} />}
+                />
+              </div>
+              <ReviewPanel key={`r-${activeSessionId}`} sessionId={activeSessionId} />
+            </div>
           ) : raceId ? (
-            <RaceTitle raceId={raceId} />
+            <RaceView raceId={raceId} />
+          ) : hasDesk ? (
+            <Desk />
           ) : (
-            <DeskTitle />
+            <Welcome />
           )}
-          {activeSessionId ? (
-            <SessionStatus key={activeSessionId} sessionId={activeSessionId} />
-          ) : null}
-        </header>
-
-        <NoticeBar notice={notice} />
-
-        {activeSessionId ? (
-          <div className="session-body relative flex min-h-0 flex-1">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <Conversation key={activeSessionId} sessionId={activeSessionId} />
-              <Composer
-                key={`c-${activeSessionId}`}
-                sessionId={activeSessionId}
-                above={<Timeline sessionId={activeSessionId} />}
-              />
-            </div>
-            <ReviewPanel key={`r-${activeSessionId}`} sessionId={activeSessionId} />
-          </div>
-        ) : raceId ? (
-          <RaceView raceId={raceId} />
-        ) : hasDesk ? (
-          <Desk />
-        ) : (
-          <Welcome />
-        )}
-      </main>
-    </div>
+        </main>
+      </div>
+      {recoveryStatus !== 'ready' ? (
+        <div
+          role="status"
+          className="fixed inset-x-0 bottom-8 mx-auto w-fit max-w-xl rounded-panel border border-line bg-surface px-5 py-3 text-sm text-fg shadow-lg"
+        >
+          {recoveryStatus === 'loading' ? (
+            'A recuperar o teu trabalho…'
+          ) : (
+            <>
+              {notice}
+              <button
+                type="button"
+                className="mt-3 block rounded-control bg-fg px-3 py-2 text-bg"
+                onClick={() => void window.solline.recovery.open()}
+              >
+                Recuperar interface
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+    </>
   );
 }

@@ -58,6 +58,7 @@ function Lane({
   const winner = verdict?.rank === 1 && !tied;
   const action = useSession(id, (s) => lastAction(s.turns));
   const usage = useSession(id, (s) => s.usage);
+  const interrupted = useSession(id, (s) => s.interrupted);
   const workspace = useSession(id, (s) => s.info.workspace);
   const checks = useSession(id, (s) => s.checks);
   const enabled = checks?.trusted ? checks.specs.filter((c) => c.enabled) : [];
@@ -91,7 +92,9 @@ function Lane({
       </header>
       <p className="min-h-[2.5rem] text-[12.5px] leading-snug text-muted line-clamp-2">
         {lane.state === 'error'
-          ? 'A pista falhou'
+          ? interrupted
+            ? 'Execução interrompida · histórico recuperado'
+            : 'A pista falhou'
           : verdict?.empty
             ? 'Não mudou nada'
             : (action ??

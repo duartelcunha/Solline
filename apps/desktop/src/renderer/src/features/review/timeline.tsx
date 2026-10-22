@@ -146,6 +146,8 @@ function TimelineTrack({
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     drag.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      e.currentTarget.releasePointerCapture(e.pointerId);
     const first = d.samples[0];
     const last = d.samples.at(-1);
     const dt = first && last ? (last.t - first.t) / 1000 : 0;
@@ -153,6 +155,31 @@ function TimelineTrack({
     const current = spring.current?.value ?? 0;
     settleAt(nearest(current + project(velocity, 0.99)), velocity);
   }
+
+  function cancelDrag() {
+    const current = drag.current;
+    if (!current) return;
+    drag.current = null;
+    if (track.current?.hasPointerCapture(current.id))
+      track.current.releasePointerCapture(current.id);
+    spring.current?.jump(xOf(picked ?? home));
+  }
+
+  useEffect(() => {
+    const cancel = () => {
+      const current = drag.current;
+      if (!current) return;
+      drag.current = null;
+      if (track.current?.hasPointerCapture(current.id))
+        track.current.releasePointerCapture(current.id);
+      spring.current?.jump(stops === 0 ? 0 : ((picked ?? home) / stops) * width);
+    };
+    window.addEventListener('blur', cancel);
+    return () => {
+      window.removeEventListener('blur', cancel);
+      cancel();
+    };
+  }, [home, picked, width, stops, spring]);
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (busy || working) return;
@@ -191,19 +218,16 @@ function TimelineTrack({
 
   return (
     <div className="mb-2.5" data-testid="timeline" onKeyDown={onEscape}>
-      {/* Calma até lá chegares: compacta (no máximo 56 px por turno) e meio apagada. */}
-      <div
-        className={`flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-100 focus-within:opacity-100 ${
-          picked === null && !timeline.rewoundTo ? 'opacity-55' : ''
-        }`}
-      >
+      {/* Compacta, mas o rótulo e a pega continuam legíveis quando disponíveis. */}
+      <div className="flex items-center gap-2.5">
         <History size={14} strokeWidth={1.75} className="shrink-0 text-subtle" aria-hidden />
         <div
           ref={track}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
+          onPointerCancel={cancelDrag}
+          onLostPointerCapture={cancelDrag}
           className={`relative h-8 flex-1 touch-none ${busy ? 'opacity-60' : 'cursor-pointer'}`}
           style={{ maxWidth: stops * 56 }}
           title={busy ? 'Espera que o agente acabe para rebobinar' : undefined}
@@ -235,7 +259,7 @@ function TimelineTrack({
                     e.stopPropagation();
                     if (!busy && !working) settleAt(i, 0, shouldAnimate(e.nativeEvent));
                   }}
-                  aria-label={`${label(i)}: ${c.title}`}
+                  aria-label={`${label(i)}: ${c.title}${c.state === 'interrupted' ? ' · Interrompido' : ''}`}
                   title={`${label(i)} · ${c.title}${changes(c) ? ` · +${c.stats.additions} −${c.stats.deletions}` : ''}`}
                   data-testid="timeline-stop"
                   className="group absolute top-1/2 grid size-5 -translate-x-1/2 -translate-y-1/2 place-items-center"

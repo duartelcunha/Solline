@@ -19,12 +19,12 @@ export function Logo({ size = 20, className }: { size?: number; className?: stri
         width="43"
         height="43"
         rx="11"
-        fill="#213c35"
+        fill="#292827"
         stroke="var(--sl-border)"
         strokeOpacity="0.6"
       />
-      <path d="M10 23a12 12 0 0 1 24 0z" fill="#b0e5c7" />
-      <path d="M12 28.5h20M16.5 33.5h11" stroke="#b0e5c7" strokeWidth="3" strokeLinecap="round" />
+      <path d="M10 23a12 12 0 0 1 24 0z" fill="#f5f4f1" />
+      <path d="M12 28.5h20M16.5 33.5h11" stroke="#f5f4f1" strokeWidth="3" strokeLinecap="round" />
     </svg>
   );
 }

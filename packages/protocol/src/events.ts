@@ -119,21 +119,25 @@ export const AgentsChangedEvent = z.object({
   error: z.string().optional(),
 });
 
-export const EngineEvent = z.discriminatedUnion('type', [
-  AgentsChangedEvent,
-  EngineReadyEvent,
-  SessionEvent,
-  SessionStateEvent,
-  PermissionRequestEvent,
-  SessionTimelineEvent,
-  SessionQualityEvent,
-  SessionChecksEvent,
-  SessionWorkspaceEvent,
-  SessionQueueEvent,
-  SessionSetupEvent,
-  RaceStateEvent,
-  EngineErrorEvent,
-]);
+export const EngineEvent = z
+  .discriminatedUnion('type', [
+    AgentsChangedEvent,
+    EngineReadyEvent,
+    SessionEvent,
+    SessionStateEvent,
+    PermissionRequestEvent,
+    SessionTimelineEvent,
+    SessionQualityEvent,
+    SessionChecksEvent,
+    SessionWorkspaceEvent,
+    SessionQueueEvent,
+    SessionSetupEvent,
+    RaceStateEvent,
+    EngineErrorEvent,
+  ])
+  .and(
+    z.object({ epoch: z.string().optional(), sequence: z.number().int().nonnegative().optional() }),
+  );
 export type EngineEvent = z.infer<typeof EngineEvent>;
 export type SessionEvent = z.infer<typeof SessionEvent>;
 export type SessionStateEvent = z.infer<typeof SessionStateEvent>;

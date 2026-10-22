@@ -9,3 +9,4 @@ export * from './commands.ts';
 export * from './events.ts';
 export * from './bridge.ts';
 export * from './reducer.ts';
+export * from './recovery.ts';

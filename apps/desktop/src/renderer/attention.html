@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Solline</title>
+  </head>
+  <body>
+    <main>
+      <span class="wordmark">Solline</span><button id="dismiss" aria-label="Fechar aviso">×</button
+      ><button id="open">
+        <strong id="title"></strong><span id="body"></span
+        ><span class="hint">Abrir conversa ↗</span>
+      </button>
+    </main>
+    <script type="module" src="/src/attention.ts"></script>
+  </body>
+</html>

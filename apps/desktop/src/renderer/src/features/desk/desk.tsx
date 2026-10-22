@@ -9,9 +9,8 @@ import {
 import { GitBranch, GitMerge, Trash2 } from 'lucide-react';
 import type { Orphan } from '@solline/protocol';
 import { useReducedMotion } from '@solline/ui/react';
-import { prefersReducedMotion, shouldAnimate } from '@solline/ui/motion';
+import { shouldAnimate } from '@solline/ui/motion';
 import { scrollIntoViewSmooth, useDragScroll } from '@solline/ui/scroll';
-import { flushSync } from 'react-dom';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 import { SessionBot } from '../agents/bots.tsx';
 import { RaceCard } from '../race/race.tsx';
@@ -19,7 +18,7 @@ import { ContextMeter, money } from '../composer/composer.tsx';
 import { Mark } from '../quality/checks.tsx';
 import { deskOrder, lastAction, pendingAsk } from './desk-order.ts';
 import { sessionStore } from '../../stores/app.ts';
-import { observeTransition } from '../../lib/morph.ts';
+import { morphUpdate } from '../../lib/morph.ts';
 
 function Delta({ additions, deletions }: { additions: number; deletions: number }) {
   return (
@@ -108,25 +107,26 @@ function SessionCard({ sessionId }: { sessionId: string }) {
   // transição dos dois lados); pelo teclado ou com movimento reduzido, abre logo.
   const open = (animate: boolean) => {
     const el = mark.current;
-    if (
-      !animate ||
-      !el ||
-      prefersReducedMotion() ||
-      typeof document.startViewTransition !== 'function'
-    ) {
-      actions.selectSession(sessionId);
-      return;
-    }
-    el.style.setProperty('view-transition-name', 'session-bot');
-    el.style.setProperty('view-transition-class', 'sl-morph');
     const root = document.documentElement;
-    root.dataset.opening = '';
-    const transition = document.startViewTransition(() => {
-      el.style.removeProperty('view-transition-name');
-      flushSync(() => actions.selectSession(sessionId));
-    });
-    observeTransition(transition);
-    void transition.finished.finally(() => delete root.dataset.opening).catch(console.error);
+    morphUpdate(
+      () => {
+        el?.style.removeProperty('view-transition-name');
+        actions.selectSession(sessionId);
+      },
+      animate && el !== null,
+      {
+        prepare: () => {
+          el?.style.setProperty('view-transition-name', 'session-bot');
+          el?.style.setProperty('view-transition-class', 'sl-morph');
+          root.dataset.opening = '';
+        },
+        cleanup: () => {
+          el?.style.removeProperty('view-transition-name');
+          el?.style.removeProperty('view-transition-class');
+          delete root.dataset.opening;
+        },
+      },
+    );
   };
   // Na mesa só se veem as verificações que falharam: o que passa não pede atenção.
   const failing = checks?.trusted

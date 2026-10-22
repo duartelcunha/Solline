@@ -1,4 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
+import { useId, useState } from 'react';
 import { ChevronDown, Cpu, Gauge } from 'lucide-react';
 import {
   findModel,
@@ -8,6 +9,7 @@ import {
 } from '@solline/protocol';
 import { ModeIcon } from '../../components/icons.tsx';
 import { IconSwap } from '@solline/ui/icon-swap';
+import { lastInputWasKeyboard } from '@solline/ui/motion';
 import { Item, MenuShell } from '../../components/menu.tsx';
 
 /** Pastilha dentro da caixa do compositor: controlo de 28 px, raio de controlo, borda leve. */
@@ -43,6 +45,8 @@ export function SettingsPills({
   const mode = capabilities.modes.find((m) => m.id === settings.mode);
   const showEffort = capabilities.effort && efforts.length > 0;
   const showMode = capabilities.modes.length > 0;
+  const effortHelpId = useId();
+  const [helpDismissed, setHelpDismissed] = useState(false);
   return (
     <div
       className="flex min-w-0 flex-wrap items-center gap-1.5"
@@ -82,23 +86,41 @@ export function SettingsPills({
         <MenuShell
           title="Esforço"
           trigger={
-            <Menu.Trigger
-              disabled={disabled}
-              data-testid="pill-effort"
-              aria-label={`Esforço: ${settings.effort ?? 'padrão'}. Mudar`}
-              title={`Esforço: ${settings.effort ?? 'padrão'}`}
-              className={pillClass}
+            <span
+              className="effort-help-group"
+              data-help-dismissed={helpDismissed}
+              onPointerEnter={() => setHelpDismissed(false)}
+              onFocus={() => setHelpDismissed(false)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setHelpDismissed(true);
+              }}
             >
-              <Gauge aria-hidden size={13} strokeWidth={1.9} />
-              {/* Estreito (painel de rever aberto): só o ícone; o nome fica no tooltip. */}
-              <span className="@max-[30rem]:hidden">{settings.effort ?? 'esforço padrão'}</span>
-              <ChevronDown
-                aria-hidden
-                size={12}
-                strokeWidth={2}
-                className="opacity-60 @max-[30rem]:hidden"
-              />
-            </Menu.Trigger>
+              <Menu.Trigger
+                disabled={disabled}
+                data-testid="pill-effort"
+                aria-label={`Esforço: ${settings.effort ?? 'padrão'}. Mudar`}
+                aria-describedby={effortHelpId}
+                className={pillClass}
+              >
+                <Gauge aria-hidden size={13} strokeWidth={1.9} />
+                {/* Estreito (painel de rever aberto): só o ícone; o nome fica no tooltip. */}
+                <span className="@max-[30rem]:hidden">{settings.effort ?? 'esforço padrão'}</span>
+                <ChevronDown
+                  aria-hidden
+                  size={12}
+                  strokeWidth={2}
+                  className="opacity-60 @max-[30rem]:hidden"
+                />
+              </Menu.Trigger>
+              <span
+                id={effortHelpId}
+                role="tooltip"
+                className="effort-help"
+                data-testid="effort-help"
+              >
+                Esforço: {settings.effort ?? 'padrão'}
+              </span>
+            </span>
           }
         >
           <Menu.RadioGroup value={settings.effort ?? ''} onValueChange={onEffort}>
@@ -120,7 +142,10 @@ export function SettingsPills({
               title={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}`}
               className={`${pillClass} max-w-full !h-auto min-h-7 py-1`}
             >
-              <IconSwap swapKey={mode?.id ?? settings.mode ?? 'ask'}>
+              <IconSwap
+                swapKey={mode?.id ?? settings.mode ?? 'ask'}
+                instant={lastInputWasKeyboard()}
+              >
                 <ModeIcon risk={mode?.risk ?? 'ask'} size={14} />
               </IconSwap>
               {/* O modo é o que diz o risco: o nome fica sempre. */}

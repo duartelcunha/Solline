@@ -4,34 +4,40 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ConversationRewind } from '@solline/protocol';
 import { ShadowGit } from './git.ts';
-import { SessionCheckpoints } from './session-checkpoints.ts';
+import { SessionCheckpoints, type CheckpointRecovery } from './session-checkpoints.ts';
 
 export interface CheckpointStoreOptions {
   /** Onde vivem os repositórios sombra. */
   root?: string | undefined;
   /** Executável do git; por omissão o do PATH. */
   git?: string | undefined;
+  /** Durable session history owns this repository; normal shutdown must not delete it. */
+  durable?: boolean | undefined;
 }
 
-/** As pastas de execuções anteriores saem ao fim deste tempo (as sessões não sobrevivem). */
+/** Only legacy volatile run folders expire; durable recovery repositories never enter this sweep. */
 const STALE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Um repositório sombra por pasta de projeto, partilhado pelas sessões dessa pasta: cada
- * sessão tem o seu índice, e os objetos repetidos guardam-se uma vez. Tudo vive numa pasta
- * desta execução do motor, porque as sessões ainda só existem em memória.
- * shortcut: quando as sessões passarem a ter histórico (M3), os checkpoints passam a refs
- * por sessão e a limpeza passa a gc.
+ * sessão tem o seu índice, e os objetos repetidos guardam-se uma vez. Com recuperação
+ * durável, refs por sessão protegem os objetos e fechar o motor preserva o repositório.
+ * Os consumidores temporários continuam a usar pastas isoladas por execução.
  */
 export class CheckpointStore {
   readonly #root: string;
   readonly #run: string;
   readonly #git: string | undefined;
+  readonly #durable: boolean;
   readonly #repos = new Map<string, Promise<void>>();
 
   constructor(options: CheckpointStoreOptions = {}) {
     this.#root = options.root ?? path.join(tmpdir(), 'solline-checkpoints');
-    this.#run = path.join(this.#root, `run-${Date.now()}-${process.pid}`);
+    this.#durable = options.durable === true;
+    this.#run = path.join(
+      this.#root,
+      this.#durable ? 'durable-v1' : `run-${Date.now()}-${process.pid}`,
+    );
     this.#git = options.git;
     void this.#sweep();
   }
@@ -40,6 +46,7 @@ export class CheckpointStore {
     sessionId: string,
     cwd: string,
     conversationRewind: () => ConversationRewind,
+    recovery?: CheckpointRecovery | undefined,
   ): SessionCheckpoints {
     const resolved = path.resolve(cwd);
     const key = createHash('sha1')
@@ -58,11 +65,12 @@ export class CheckpointStore {
       repoReady.catch(() => this.#repos.delete(key));
       this.#repos.set(key, repoReady);
     }
-    return new SessionCheckpoints({ git, sessionId, repoReady, conversationRewind });
+    return new SessionCheckpoints({ git, sessionId, repoReady, conversationRewind, recovery });
   }
 
   /** Apaga a pasta desta execução (ao fechar o motor). */
   async dispose(): Promise<void> {
+    if (this.#durable) return;
     await rm(this.#run, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
   }
 

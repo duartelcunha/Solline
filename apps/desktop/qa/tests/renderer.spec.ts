@@ -74,6 +74,34 @@ test('falha tardia preserva também o texto escrito entretanto', async ({ page }
   );
 });
 
+test('ícones conservam identidade e ajuda ao teclado sem animar a escolha do modo', async ({
+  page,
+}) => {
+  await open(page, 'review');
+  await page.getByTestId('review-toggle').click();
+  const quality = page.getByTestId('quality-chip');
+  await expect(quality).toHaveAccessibleName('Revisor sem achados');
+  await expect(quality.locator('.lucide-badge-check')).toBeVisible();
+  const effort = page.getByTestId('pill-effort');
+  await effort.focus();
+  await expect(page.getByTestId('effort-help')).toHaveText('Esforço: high');
+  await expect(page.getByTestId('effort-help')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('effort-help')).toBeHidden();
+  await expect(effort).toBeFocused();
+  const mode = page.getByTestId('pill-mode');
+  await mode.focus();
+  await page.keyboard.press('Enter');
+  const plan = page.getByTestId('mode-plan');
+  await expect(plan).toBeVisible();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 60_000));
+  await plan.focus();
+  await page.keyboard.press('Enter');
+  await expect(mode).toHaveAccessibleName('Modo: Planear. Mudar');
+  await expect(mode.locator('.sl-swap-out')).toHaveCount(0);
+  await expect(mode.locator('.sl-swap-in')).toHaveCount(0);
+});
+
 test('modelo, esforço e modo respeitam as capacidades e o protocolo', async ({ page }) => {
   await open(page);
   for (const [control, option, label] of [
@@ -119,6 +147,44 @@ test('rever, desfazer e manter outra sessão independente', async ({ page }) => 
   await expect(page.getByTestId('diff-hunk')).toBeVisible();
   await page.getByTestId('session-row').last().click();
   await expect(page.getByTestId('review-empty')).toBeVisible();
+});
+
+test('marcadores do diff permanecem visíveis durante comentários', async ({ page }) => {
+  await open(page, 'review');
+  await page.getByTestId('review-toggle').click();
+  for (const [kind, sign] of [
+    ['add', '+'],
+    ['del', '−'],
+  ] as const) {
+    const row = page.getByTestId('diff-hunk').locator(`[data-kind="${kind}"]`).first();
+    const marker = row.locator('.diff-direction');
+    const assertMarker = async () => {
+      await expect(marker).toHaveText(sign);
+      await expect(marker).toBeVisible();
+      await expect(marker).toHaveCSS('opacity', '1');
+      // Direction and comment action must occupy different columns, without overlay.
+      const boxes = await row.evaluate((element) => {
+        const marker = element.querySelector('.diff-direction')?.getBoundingClientRect();
+        const action = element
+          .querySelector('[data-testid="comment-line"]')
+          ?.getBoundingClientRect();
+        if (!marker || !action) throw new Error('Missing diff marker or action');
+        return { markerRight: marker.right, actionLeft: action.left };
+      });
+      expect(boxes.markerRight).toBeLessThanOrEqual(boxes.actionLeft);
+    };
+    await assertMarker();
+    await row.hover();
+    await assertMarker();
+    const comment = row.getByTestId('comment-line');
+    await comment.focus();
+    await assertMarker();
+    await comment.press('Enter');
+    await expect(page.getByTestId('comment-input')).toBeVisible();
+    await assertMarker();
+    await page.getByTestId('comment-input').press('Escape');
+    await expect(page.getByTestId('review-panel')).toBeVisible();
+  }
 });
 
 test('revisão estreita mantém foco e saída por Escape', async ({ page }) => {

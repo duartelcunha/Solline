@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCheck, Clock, GripVertical, Pencil, Play, X } from 'lucide-react';
 import type { Block } from '@solline/protocol';
 import { IconSwap } from '@solline/ui/icon-swap';
@@ -34,7 +34,41 @@ export function SteerView({ block }: { block: SteerBlock }) {
 export function QueueList({ sessionId }: { sessionId: string }) {
   const queue = useSession(sessionId, (s) => s.queue);
   const list = useRef<HTMLOListElement>(null);
-  const [drag, setDrag] = useState<{ id: string; dy: number; start: number } | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const drag = useRef<{
+    id: string;
+    dy: number;
+    start: number;
+    pointerId: number;
+    handle: HTMLElement;
+    row: HTMLElement;
+    frame: number | null;
+  } | null>(null);
+  const cancelDrag = useCallback(() => {
+    const active = drag.current;
+    if (!active) return;
+    drag.current = null;
+    if (active.frame !== null) cancelAnimationFrame(active.frame);
+    active.row.style.transform = '';
+    if (active.handle.hasPointerCapture(active.pointerId))
+      active.handle.releasePointerCapture(active.pointerId);
+    setDragId(null);
+  }, []);
+  useEffect(() => {
+    const hidden = () => {
+      if (document.hidden) cancelDrag();
+    };
+    window.addEventListener('blur', cancelDrag);
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      window.removeEventListener('blur', cancelDrag);
+      document.removeEventListener('visibilitychange', hidden);
+      cancelDrag();
+    };
+  }, [cancelDrag]);
+  useEffect(() => {
+    if (drag.current && !queue?.items.some((item) => item.id === drag.current?.id)) cancelDrag();
+  }, [queue?.items, cancelDrag]);
   if (!queue || queue.items.length === 0) return null;
   const items = queue.items;
 
@@ -75,13 +109,12 @@ export function QueueList({ sessionId }: { sessionId: string }) {
       </div>
       <ol ref={list} className="space-y-1.5">
         {items.map((item, index) => {
-          const dragging = drag?.id === item.id;
+          const dragging = dragId === item.id;
           return (
             <li
               key={item.id}
               data-testid="queued"
               className={`sl-enter flex justify-end ${dragging ? 'relative z-10' : 'transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]'}`}
-              style={dragging ? { transform: `translateY(${drag.dy}px)` } : undefined}
             >
               <div
                 className={`group flex max-w-[85%] items-start gap-1.5 rounded-2xl border border-dashed border-line px-2 py-1.5 text-[13.5px] leading-snug text-muted ${dragging ? 'bg-surface shadow-raised' : ''}`}
@@ -100,16 +133,41 @@ export function QueueList({ sessionId }: { sessionId: string }) {
                     void actions.reorderQueue(sessionId, ids);
                   }}
                   onPointerDown={(e) => {
-                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                    setDrag({ id: item.id, dy: 0, start: e.clientY });
+                    if (drag.current || e.button !== 0) return;
+                    const row = e.currentTarget.closest('li');
+                    if (!row) return;
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    drag.current = {
+                      id: item.id,
+                      dy: 0,
+                      start: e.clientY,
+                      pointerId: e.pointerId,
+                      handle: e.currentTarget,
+                      row,
+                      frame: null,
+                    };
+                    setDragId(item.id);
                   }}
                   onPointerMove={(e) => {
-                    if (drag?.id === item.id) setDrag({ ...drag, dy: e.clientY - drag.start });
+                    const active = drag.current;
+                    if (!active || active.id !== item.id || active.pointerId !== e.pointerId)
+                      return;
+                    active.dy = e.clientY - active.start;
+                    if (active.frame === null)
+                      active.frame = requestAnimationFrame(() => {
+                        active.frame = null;
+                        if (drag.current === active)
+                          active.row.style.transform = `translateY(${active.dy}px)`;
+                      });
                   }}
-                  onPointerUp={() => {
-                    if (drag?.id !== item.id) return;
-                    const to = targetIndex(item.id, drag.dy);
-                    setDrag(null);
+                  onPointerCancel={cancelDrag}
+                  onLostPointerCapture={cancelDrag}
+                  onPointerUp={(e) => {
+                    const active = drag.current;
+                    if (!active || active.id !== item.id || active.pointerId !== e.pointerId)
+                      return;
+                    const to = targetIndex(item.id, active.dy);
+                    cancelDrag();
                     if (to === index) return;
                     const ids = items.map((i) => i.id).filter((id) => id !== item.id);
                     ids.splice(to, 0, item.id);

@@ -116,6 +116,7 @@ try {
     root,
   );
   await run('canary', ['qa/canary.mjs', `${label}-canary`]);
+  await run('recovery-canary', ['qa/recovery-canary.mjs', `${label}-recovery-canary`]);
   await run('renderer', [
     '../../node_modules/@playwright/test/cli.js',
     'test',
@@ -169,6 +170,6 @@ try {
     .join('');
   await writeFile(
     join(output, 'index.html'),
-    `<!doctype html><meta charset="utf-8"><title>Solline QA · ${label}</title><style>body{font:16px system-ui;max-width:850px;margin:60px auto;padding:20px;background:#f3f3ee;color:#29322f}a{color:#285e49}li{margin:12px 0}</style><h1>Solline QA · ${label}</h1><p>${manifest.complete ? 'Automated gates passed. Visual review and external checks remain separate.' : 'Incomplete execution. Do not treat as approval.'}</p><p>Source: ${manifest.sourceHash}</p><a href="manifest.json">Source hashes, environment and evidence integrity</a><ul>${links}</ul><p><a href="renderer-report/index.html">Renderer: screenshots, motion, traces, protocol journals</a></p><p><a href="electron-report/index.html">Electron: real engine and Git effects</a></p>`,
+    `<!doctype html><meta charset="utf-8"><title>Solline QA · ${label}</title><style>body{font:16px system-ui;max-width:850px;margin:60px auto;padding:20px;background:#f5f4f1;color:#292827}a{color:#373532}li{margin:12px 0}</style><h1>Solline QA · ${label}</h1><p>${manifest.complete ? 'Automated gates passed. Visual review and external checks remain separate.' : 'Incomplete execution. Do not treat as approval.'}</p><p>Source: ${manifest.sourceHash}</p><a href="manifest.json">Source hashes, environment and evidence integrity</a><ul>${links}</ul><p><a href="renderer-report/index.html">Renderer: screenshots, motion, traces, protocol journals</a></p><p><a href="electron-report/index.html">Electron: real engine and Git effects</a></p>`,
   );
 }

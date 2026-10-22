@@ -202,6 +202,11 @@ export function prefersReducedMotion(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/** Visible is not necessarily focused: a restored window may still be behind another app. */
+export function isForeground(doc: Pick<Document, 'hidden' | 'hasFocus'> = document): boolean {
+  return !doc.hidden && doc.hasFocus();
+}
+
 let lastInput: 'keyboard' | 'pointer' = 'pointer';
 
 /**
@@ -248,7 +253,7 @@ export function shouldAnimate(event?: { detail?: number } | null): boolean {
  */
 export function trackAmbient(doc: Document = document, win: Window = window): () => void {
   const update = () => {
-    const paused = doc.hidden || !doc.hasFocus();
+    const paused = !isForeground(doc);
     doc.documentElement.dataset.ambient = paused ? 'paused' : 'running';
   };
   update();
