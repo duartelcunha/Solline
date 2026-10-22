@@ -195,10 +195,13 @@ test('a interface não tem acesso ao Node', async () => {
     process: 'undefined',
     api: ['navigation', 'onEvent', 'onFocusSession', 'recovery', 'request', 'window'],
   });
-  expect(await page.evaluate(() => Object.keys(window.solline.navigation).sort())).toEqual([
-    'read',
-    'update',
-  ]);
+  expect(
+    await page.evaluate(() =>
+      Object.keys(
+        (globalThis as unknown as { solline: { navigation: object } }).solline.navigation,
+      ).sort(),
+    ),
+  ).toEqual(['read', 'update']);
 });
 
 test('só links https abrem fora e as permissões do browser vêm negadas', async () => {
