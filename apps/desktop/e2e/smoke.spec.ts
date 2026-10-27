@@ -421,7 +421,11 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
   const bot = page.locator('header').getByTestId('bot');
   await expect(bot).toHaveAttribute('data-hood', 'claude');
   await expect(bot).toHaveAttribute('data-mood', 'waiting');
-  await expect(page.getByTestId('session-mark')).toHaveAttribute('data-mood', 'waiting');
+  // A marca da lista (e a do cabeçalho, que o redesign acrescentou) mostram o mesmo estado.
+  await expect(page.getByTestId('session-row').getByTestId('session-mark')).toHaveAttribute(
+    'data-mood',
+    'waiting',
+  );
 
   // Modelo e effort pelos botões da barra.
   await page.getByTestId('pill-model').click();
@@ -606,8 +610,12 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
   await expect(page.getByTestId('interrupt')).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('composer-input').fill('Reply with exactly one word: ok');
   await expect(page.getByTestId('queue-send')).toBeVisible();
-  await page.getByTestId('composer-input').press('Enter');
-  await expect(page.getByTestId('queued')).toHaveCount(1);
+  // A primeira mensagem só fica confirmada depois de gravada; até lá o Enter não faz nada e o
+  // texto fica na caixa. Repete-se até a fila a aceitar (com a máquina carregada demora).
+  await expect(async () => {
+    await page.getByTestId('composer-input').press('Enter');
+    await expect(page.getByTestId('queued')).toHaveCount(1, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
   await shot(page, 'queue');
 
   // Na mesa, a sessão que pede permissão sobe para o topo e responde-se no cartão.
@@ -690,6 +698,31 @@ test('uma corrida: o mesmo pedido em duas pistas, lado a lado (SDK real)', async
   // Na mesa, a corrida é um cartão; as pistas não aparecem soltas.
   await page.getByTestId('open-desk').click();
   await expect(page.getByTestId('race-card')).toHaveCount(1);
+
+  // Montar: o que as duas pistas escreveram igual (ou a melhor pista) já vem escolhido.
+  await page.getByTestId('race-card').click();
+  await expect(page.getByTestId('race-assembly')).toBeVisible();
+  await expect(page.getByTestId('race-candidate').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('race-assemble')).toBeEnabled();
+  await page.getByTestId('race-assemble').click();
+  await expect(page.getByTestId('race-assembly-summary')).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByTestId('race-phase')).toHaveAttribute('data-phase', 'assembled');
+  await shot(page, 'race-assembled');
+
+  // Trazer faz o merge no projeto, como numa sessão.
+  await page.getByTestId('race-bring').click();
+  await expect(page.getByTestId('race-assembly-summary')).toContainText('Trazida', {
+    timeout: 60_000,
+  });
+  await expect
+    .poll(() => readFile(join(project, 'race.txt'), 'utf8').catch(() => ''), { timeout: 30_000 })
+    .toMatch(/ok/i);
+
+  // Fechar pede uma confirmação nativa e deita fora as pistas.
+  confirmations['Fechar a corrida'] = { button: 'Deitar fora', choice: 'accept' };
+  await page.getByTestId('race-close').click();
+  await expect(page.getByTestId('desk')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('race-card')).toHaveCount(0);
 });
 
 test('Codex por clique: sessão, resposta e tokens (Codex real)', async () => {

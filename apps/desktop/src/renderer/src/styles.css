@@ -652,23 +652,12 @@ body {
   );
 }
 
-/* A barra continua disponível para descobrir e arrastar conteúdo longo. */
+/* Sem barras de scroll em lado nenhum: desloca-se com a roda, o trackpad ou arrastando. */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: var(--sl-border-strong) transparent;
+  scrollbar-width: none;
 }
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 8px;
-  background: var(--sl-border-strong);
-  background-clip: padding-box;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
+  display: none;
 }
 /* Abrir uma sessão pela mesa: só durante essa transição o bot do cabeçalho recebe o capuz. */
 :root[data-opening] .session-bot-target {

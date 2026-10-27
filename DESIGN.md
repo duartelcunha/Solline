@@ -16,7 +16,7 @@ Direção aprovada pelo Duarte em 22/10/2026. Substitui a proposta com menta e q
 
 Cada linha alterada conserva o sinal +/− durante hover, foco e comentário. O sinal tem contorno contínuo para adição e tracejado para remoção; o comentário ocupa uma coluna separada. O código continua selecionável sem incluir a numeração auxiliar. Contagens são neutras; rejeitar ou descartar trabalho conserva a semântica destrutiva.
 
-Barras de scroll finas continuam visíveis e arrastáveis. Transparência reduzida torna o vidro opaco e remove blur; forced colors usa cores de sistema, conserva contornos, seleção e sinais dos diffs. As camadas de leitura não dependem do suporte a blur.
+Sem barras de scroll: desloca-se com a roda, o trackpad ou arrastando numa zona vazia, e as bordas esbatem para dizer que há mais. Transparência reduzida torna o vidro opaco e remove blur; forced colors usa cores de sistema, conserva contornos, seleção e sinais dos diffs. As camadas de leitura não dependem do suporte a blur.
 
 ## Personagens
 
