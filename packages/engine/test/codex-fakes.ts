@@ -61,6 +61,12 @@ export interface FakeCodexOptions {
   holdTurnStart?: Promise<void>;
   /** Resposta ao account/login/start (por omissão, um login do ChatGPT). */
   login?: unknown;
+  /** Os servidores MCP que o config/read devolve (por omissão, nenhum). */
+  mcpServers?: string[];
+  /** O que o mcpServerStatus/list devolve; por omissão, desligados os que o thread/start desligou. */
+  mcpStatus?: { name: string; runtimeStatus: string | null }[];
+  /** O config/read falha. */
+  failConfigRead?: boolean;
 }
 
 const DEFAULT_MODELS = [
@@ -120,6 +126,7 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
   let turn = 0;
   let failed = 0;
   let serverId = 100;
+  let threadConfig: Record<string, unknown> = {};
 
   const send = (msg: unknown) => fromServer.write(`${JSON.stringify(msg)}\n`);
   const reply = (id: unknown, result: unknown) => send({ id, result });
@@ -137,6 +144,12 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
       return;
     }
     const params = (msg.params ?? {}) as { threadId?: string; model?: string };
+    if (msg.method === 'thread/start') {
+      threadConfig = ((msg.params as { config?: Record<string, unknown> }).config ?? {}) as Record<
+        string,
+        unknown
+      >;
+    }
     const results: Record<string, () => unknown> = {
       initialize: () => ({
         userAgent: 'fake',
@@ -151,6 +164,29 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
         },
       'model/list': () => ({ data: options.models ?? DEFAULT_MODELS, nextCursor: null }),
       'windowsSandbox/readiness': () => ({ status: options.sandbox ?? 'ready' }),
+      'config/read': () => {
+        if (options.failConfigRead) throw new Error('config ilegível');
+        return {
+          config: {
+            mcp_servers: Object.fromEntries(
+              (options.mcpServers ?? []).map((name) => [name, { command: 'x', enabled: true }]),
+            ),
+          },
+          origins: {},
+          layers: null,
+        };
+      },
+      'mcpServerStatus/list': () => {
+        const off = (threadConfig.mcp_servers ?? {}) as Record<string, { enabled?: boolean }>;
+        const data = (
+          options.mcpStatus ??
+          (options.mcpServers ?? []).map((name) => ({
+            name,
+            runtimeStatus: off[name]?.enabled === false ? 'disabled' : 'connected',
+          }))
+        ).map((s) => ({ ...s, pluginId: null, httpOrigin: null, authStatus: 'unsupported' }));
+        return { data, nextCursor: null };
+      },
       'thread/start': () => ({
         thread: { id: threadId, turns: [] },
         model: params.model ?? 'gpt-6-luna',

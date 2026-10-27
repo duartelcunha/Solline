@@ -520,6 +520,95 @@ describe('revisor Codex', () => {
     expect((await caught).message).toContain('fechou antes');
     expect(server.killed).toBe(true);
   });
+
+  describe('sem os servidores MCP do utilizador', () => {
+    it('lê a config da pasta e desliga cada servidor (e plugins e apps) no thread/start', async () => {
+      const server = fakeCodexServer({ mcpServers: ['node_repl', 'a.b'] });
+      const run = codexReviewer({ transport: server.transport })(input);
+      const read = await server.waitFor((m) => m.method === 'config/read');
+      expect(read.params).toMatchObject({ cwd: 'C:/p' });
+      const thread = await server.waitFor((m) => m.method === 'thread/start');
+      expect((thread.params as { config: unknown }).config).toEqual({
+        'features.plugins': false,
+        'features.apps': false,
+        mcp_servers: { node_repl: { enabled: false }, 'a.b': { enabled: false } },
+      });
+      await server.waitFor((m) => m.method === 'turn/start');
+      const status = server.received.find((m) => m.method === 'mcpServerStatus/list');
+      expect(status?.params).toMatchObject({ threadId: server.threadId });
+      complete(server, { findings: [] });
+      expect(await run).toEqual([]);
+    });
+
+    it('sem servidores configurados desliga na mesma plugins e apps', async () => {
+      const server = fakeCodexServer();
+      const run = codexReviewer({ transport: server.transport })(input);
+      const thread = await server.waitFor((m) => m.method === 'thread/start');
+      expect((thread.params as { config: unknown }).config).toEqual({
+        'features.plugins': false,
+        'features.apps': false,
+      });
+      await server.waitFor((m) => m.method === 'turn/start');
+      complete(server, { findings: [] });
+      await run;
+    });
+
+    it('um servidor que continua ligado cancela a revisão: nunca há turno nem prompt', async () => {
+      const server = fakeCodexServer({
+        mcpServers: ['node_repl'],
+        mcpStatus: [
+          { name: 'node_repl', runtimeStatus: 'disabled' },
+          { name: 'firebase', runtimeStatus: 'connected' },
+        ],
+      });
+      const caught = await codexReviewer({ transport: server.transport })(input).then(
+        unexpected,
+        (e: Error) => e,
+      );
+      expect(caught.message).toContain('MCP');
+      expect(caught.message).toContain('firebase');
+      expect(server.received.some((m) => m.method === 'turn/start')).toBe(false);
+      expect(server.killed).toBe(true);
+    });
+
+    it('o estado desconhecido conta como ligado', async () => {
+      const server = fakeCodexServer({ mcpStatus: [{ name: 'x', runtimeStatus: null }] });
+      const caught = await codexReviewer({ transport: server.transport })(input).then(
+        unexpected,
+        (e: Error) => e,
+      );
+      expect(caught.message).toContain('x');
+      expect(server.received.some((m) => m.method === 'turn/start')).toBe(false);
+    });
+
+    it('sem conseguir ler a config não há thread nem revisão', async () => {
+      const server = fakeCodexServer({ failConfigRead: true });
+      const caught = await codexReviewer({ transport: server.transport })(input).then(
+        unexpected,
+        (e: Error) => e,
+      );
+      expect(caught.message).toContain('config');
+      expect(server.received.some((m) => m.method === 'thread/start')).toBe(false);
+      expect(server.killed).toBe(true);
+    });
+
+    it('o teste de disponibilidade não abre thread nem toca na config (o app-server não lança MCP no arranque)', async () => {
+      const probe = fakeCodexServer({ mcpServers: ['node_repl'] });
+      const availability = codexAvailability({
+        resolve: () => ({
+          path: 'C:/codex.exe',
+          version: REVIEWED_CODEX_VERSION,
+          source: 'path' as const,
+        }),
+        platform: 'win32',
+        probeTransport: probe.transport,
+      });
+      expect(await availability()).not.toBeNull();
+      const methods = probe.received.map((m) => m.method);
+      expect(methods).not.toContain('thread/start');
+      expect(methods).not.toContain('config/read');
+    });
+  });
 });
 
 describe('regras do projeto', () => {

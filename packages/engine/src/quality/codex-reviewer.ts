@@ -4,6 +4,7 @@ import { JsonRpcPeer, StderrTail } from '../rpc/json-rpc.ts';
 import { withTimeout } from '../adapters/shared/turns.ts';
 import { openCodexAccount } from '../adapters/codex/account.ts';
 import { REVIEWED_CODEX_VERSION, resolveCodexExecutable } from '../adapters/codex/executable.ts';
+import { assertNoMcp, noMcpConfig } from '../adapters/codex/no-mcp.ts';
 import { initializeCodex, spawnCodex, type CodexTransport } from '../adapters/codex/transport.ts';
 import type { CodexExecutable } from '../adapters/codex/executable.ts';
 import type { GetAccountResponse } from '../adapters/codex/protocol/v2/GetAccountResponse';
@@ -185,6 +186,8 @@ export function codexReviewer(options: CodexReviewerOptions): Reviewer {
           sandbox: 'read-only',
           developerInstructions: RULES,
           ephemeral: true,
+          // Sem MCP do utilizador: o sandbox não os limita e um diff podia mandar chamá-los.
+          config: await noMcpConfig(peer, input.cwd),
         };
         const started = await peer.request<ThreadStartResponse>(
           'thread/start',
@@ -192,6 +195,8 @@ export function codexReviewer(options: CodexReviewerOptions): Reviewer {
           START_TIMEOUT_MS,
         );
         seen.threadId = started.thread.id;
+        // Cinto e suspensórios: se algum servidor ficou ligado, não se revê.
+        await assertNoMcp(peer, seen.threadId);
         const turn: TurnStartParams = {
           threadId: seen.threadId,
           input: [{ type: 'text', text: promptFor(input), text_elements: [] }],
@@ -298,6 +303,8 @@ export function codexAvailability(
   const probe = async (): Promise<Reviewer | null> => {
     const found = resolve();
     if (!found || found.version !== REVIEWED_CODEX_VERSION) return null;
+    // O teste só abre conta, sandbox e modelos, sem thread: o app-server não lança MCP no
+    // arranque (verificado no codex 0.163), por isso não precisa de overrides.
     const transport =
       options.probeTransport?.() ??
       spawnCodex({
