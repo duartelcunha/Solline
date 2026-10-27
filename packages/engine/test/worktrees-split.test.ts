@@ -54,6 +54,45 @@ describe('worktrees de repartições', { timeout: 60_000 }, () => {
     expect(third.base).toBe(second.base);
   });
 
+  it('mergeBranch junta sem avanço rápido; com conflito desfaz e deixa a ponta limpa', async () => {
+    const one = (await manager.create(project, 'p1'))!;
+    const two = (await manager.create(project, 'p1'))!;
+    const three = (await manager.create(project, 'p1'))!;
+    await writeFile(path.join(one.cwd, 'a.txt'), 'um\nda um\ntres\n');
+    await writeFile(path.join(two.cwd, 'a.txt'), 'um\nda dois\ntres\n');
+    await writeFile(path.join(three.cwd, 'b.txt'), 'b mudado\n');
+    for (const wt of [one, two, three]) await manager.commitAll(wt, 'trabalho');
+
+    const tip = await manager.createFrom(one);
+    expect(tip.base).toBe(one.base);
+    expect(await manager.mergeBranch(tip, one.branch, 'Integrar um')).toEqual({
+      merged: true,
+      conflicts: [],
+    });
+    const head = git(tip.path, 'rev-parse', 'HEAD');
+    // Mesma linha: conflito. A ponta volta ao que era, sem merge a meio.
+    expect(await manager.mergeBranch(tip, two.branch, 'Integrar dois')).toEqual({
+      merged: false,
+      conflicts: ['a.txt'],
+    });
+    expect(git(tip.path, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(tip.path, 'status', '--porcelain')).toBe('');
+    expect(await manager.isClean(tip)).toBe(true);
+    expect(await manager.contains(tip, two.branch)).toBe(false);
+    // Uma parte que não toca nas outras entra a seguir ao conflito parado.
+    expect(await manager.mergeBranch(tip, three.branch, 'Integrar três')).toEqual({
+      merged: true,
+      conflicts: [],
+    });
+    expect(await manager.contains(tip, three.branch)).toBe(true);
+    expect(git(tip.path, 'log', '--merges', '--format=%s', '--reverse')).toBe(
+      'Integrar um\nIntegrar três',
+    );
+    // Com mudanças por gravar a worktree não está limpa.
+    await writeFile(path.join(tip.cwd, 'novo.txt'), 'x\n');
+    expect(await manager.isClean(tip)).toBe(false);
+  });
+
   it('collisions acha o conflito real entre duas worktrees e nada entre as que não se tocam', async () => {
     const one = (await manager.create(project, 'p1'))!;
     const two = (await manager.create(project, 'p1'))!;

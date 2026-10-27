@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentId, SessionState } from './conversation.ts';
+import { Finding } from './quality.ts';
 import { FileStatus, Hunk } from './review.ts';
 
 /**
@@ -45,7 +46,8 @@ export type RaceLane = z.infer<typeof RaceLane>;
 
 /**
  * running: as pistas trabalham · done: todas pararam · ranking/ranked: a ordenar e ordenada ·
- * assembling/assembled: a montar e montada (a worktree da montagem existe) · closed: fechada.
+ * assembling/assembled: a montar e montada (a worktree da montagem existe; numa repartição, a
+ * integrar e integrada) · closed: fechada.
  */
 export const RacePhase = z.enum([
   'running',
@@ -177,11 +179,94 @@ export const SplitPending = z
   .strict();
 export type SplitPending = z.infer<typeof SplitPending>;
 
-/** O que só as repartições têm: as partes por arrancar e os avisos até agora. */
+/**
+ * Quando uma pista arrancou e parou (milissegundos desde 1970), e a posição da parte no plano:
+ * `index` é o índice dela e `after` o da parte de cuja entrega arrancou. Servem para integrar pela
+ * ordem certa e para medir quanto demorou a mais lenta face à soma de todas.
+ */
+export const SplitLaneInfo = z
+  .object({
+    sessionId: z.string(),
+    index: z.number().int().min(0),
+    after: z.number().int().min(0).nullable(),
+    startedAt: z.number(),
+    settledAt: z.number().nullable(),
+  })
+  .strict();
+export type SplitLaneInfo = z.infer<typeof SplitLaneInfo>;
+
+/** O que só as repartições têm: as partes por arrancar, os avisos e o tempo de cada pista. */
 export const RaceSplit = z
-  .object({ pending: z.array(SplitPending), warnings: z.array(SplitWarning) })
+  .object({
+    pending: z.array(SplitPending),
+    warnings: z.array(SplitWarning),
+    lanes: z.array(SplitLaneInfo).optional(),
+  })
   .strict();
 export type RaceSplit = z.infer<typeof RaceSplit>;
+
+const IntegrationCheck = z.object({
+  label: z.string(),
+  state: z.enum(['passed', 'failed', 'timeout']),
+  preexisting: z.boolean(),
+});
+
+/** Uma parte juntada ao resultado (ou que bateu num conflito), com as verificações desse passo. */
+export const IntegrationStep = z.object({
+  sessionId: z.string(),
+  title: z.string(),
+  merged: z.boolean(),
+  /** Os ficheiros que entraram em conflito neste passo (resolvidos, se `merged`). */
+  conflicts: z.array(z.string()),
+  checks: z.array(IntegrationCheck),
+  failures: z.number().int(),
+});
+export type IntegrationStep = z.infer<typeof IntegrationStep>;
+
+/** O conflito que parou a integração: a parte, os ficheiros e a sessão que o está a resolver. */
+export const IntegrationConflict = z.object({
+  sessionId: z.string(),
+  branch: z.string(),
+  files: z.array(z.string()),
+  resolver: z.string().nullable(),
+});
+export type IntegrationConflict = z.infer<typeof IntegrationConflict>;
+
+/**
+ * O que a integração mediu, sem estimativas inventadas: o custo é a soma do último custo de cada
+ * pista, e o tempo compara a pista mais lenta com a soma de todas (o que levaria uma a seguir à
+ * outra, não o que levaria um agente sozinho).
+ */
+export const IntegrationMetrics = z.object({
+  costUsd: z.number().nullable(),
+  slowestMs: z.number().int(),
+  totalMs: z.number().int(),
+  conflicts: z.number().int(),
+  /** Verificações que falharam por culpa do resultado (as que já falhavam na base não contam). */
+  failures: z.number().int(),
+});
+export type IntegrationMetrics = z.infer<typeof IntegrationMetrics>;
+
+/**
+ * A integração de uma repartição: as partes juntadas uma a uma numa worktree própria (a ponta),
+ * com as verificações depois de cada uma, e no fim a revisão do diff todo.
+ * merging: a juntar · conflict: parou num conflito · ready: pronta · brought: trazida.
+ */
+export const RaceIntegration = z.object({
+  state: z.enum(['merging', 'conflict', 'ready', 'brought']),
+  /** `base` é o commit de onde as pistas partiram (o diff integrado conta-se face a ele). */
+  tip: z.object({ branch: z.string(), path: z.string(), top: z.string(), base: z.string() }),
+  steps: z.array(IntegrationStep),
+  conflict: IntegrationConflict.nullable(),
+  /** As verificações todas, uma vez, depois da última parte. */
+  final: z.object({ checks: z.array(IntegrationCheck), failures: z.number().int() }).nullable(),
+  /** Os achados do revisor sobre o diff integrado; null se ainda não correu ou falhou. */
+  review: z.array(Finding).nullable(),
+  warnings: z.array(z.string()),
+  metrics: IntegrationMetrics,
+  brought: z.object({ into: z.string() }).nullable(),
+});
+export type RaceIntegration = z.infer<typeof RaceIntegration>;
 
 export const Race = z.object({
   id: z.string(),
@@ -195,6 +280,8 @@ export const Race = z.object({
   verdict: RaceVerdict.nullable().optional(),
   assembly: RaceAssembly.nullable().optional(),
   split: RaceSplit.optional(),
+  /** Só nas repartições: a integração das partes (assembling/assembled usam-se aqui também). */
+  integration: RaceIntegration.nullable().optional(),
 });
 export type Race = z.infer<typeof Race>;
 

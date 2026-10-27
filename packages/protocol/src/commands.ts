@@ -316,6 +316,27 @@ export const commandSchemas = {
     payload: SplitStartPayload,
     result: z.object({ race: Race, sessions: z.array(SessionCreateResult) }),
   },
+  /**
+   * Junta as partes de uma repartição acabada, uma a uma, por ordem, numa worktree própria, com as
+   * verificações depois de cada uma e a revisão do diff todo no fim. Pára num conflito.
+   */
+  'split.integrate': {
+    payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
+    result: Race,
+  },
+  /**
+   * Abre uma sessão normal (main) para resolver o conflito em que a integração parou: parte do
+   * resultado até aí e recebe a parte, os ficheiros e a verificação a correr.
+   */
+  'split.resolve': {
+    payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
+    result: z.object({ race: Race, session: SessionCreateResult }),
+  },
+  /** Retoma a integração depois de a sessão de resolução ter juntado a parte e gravado. */
+  'split.continue': {
+    payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
+    result: Race,
+  },
   /** Volta a preparar a worktree da sessão (depois de uma falha). */
   'setup.retry': { payload: SessionRef, result: Empty },
   ...reviewCommandSchemas,
@@ -340,6 +361,7 @@ export const MAIN_COMMANDS = [
   'race.close',
   'split.plan',
   'split.start',
+  'split.resolve',
   'session.create',
   'session.close',
   'worktrees.discard',
@@ -412,6 +434,19 @@ export const internalCommandSchemas = {
       setup: SetupSpec.nullable().optional(),
     }).strict(),
     result: z.object({ race: Race, sessions: z.array(SessionCreateResult) }),
+  },
+  /** Abre a sessão que resolve o conflito, com a pasta e a confiança do projeto (o main resolveu-as). */
+  'split.resolveNow': {
+    payload: z
+      .object({
+        raceId: z.string().min(1).max(64),
+        cwd: z.string().min(1),
+        trusted: z.boolean(),
+        checks: CheckList.nullable().optional(),
+        setup: SetupSpec.nullable().optional(),
+      })
+      .strict(),
+    result: z.object({ race: Race, session: SessionCreateResult }),
   },
   /** Planeia a repartição com a pasta e as verificações do projeto (o main resolveu-as). */
   'split.planNow': { payload: SplitPlanNowPayload, result: SplitPlanResult },

@@ -307,7 +307,10 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       // Deitar fora não se desfaz: confirma-se fora da interface.
       const kept = race.lanes.find((l) => l.sessionId === request.keep);
       const confirmed = await confirmCloseRace({
-        unbrought: Boolean(race.assembly && !race.assembly.brought),
+        unbrought: Boolean(
+          (race.assembly && !race.assembly.brought) ||
+          (race.integration && !race.integration.brought),
+        ),
         kept: kept ? kept.agent : null,
       });
       if (!confirmed) return { closed: false };
@@ -342,6 +345,22 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       });
       for (const created of started.sessions) attention.track(created.session, project.name);
       return started;
+    }
+    case 'split.resolve': {
+      // A pasta e a confiança vêm do projeto guardado: a interface só diz de que repartição.
+      const request = payload as CommandPayload<'split.resolve'>;
+      const race = await engine.request('race.get', { raceId: request.raceId });
+      const project = await projects.get(race.projectId);
+      if (!project) throw new Error('Projeto desconhecido');
+      const resolved = await engine.request('split.resolveNow', {
+        raceId: request.raceId,
+        cwd: project.path,
+        trusted: project.trusted,
+        checks: project.checks ?? null,
+        setup: project.setup ?? null,
+      });
+      attention.track(resolved.session.session, project.name);
+      return resolved;
     }
     case 'split.plan': {
       // A pasta e as verificações vêm do projeto guardado; o planeador só lê.
@@ -487,7 +506,8 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
       if (
         command === 'session.close' ||
         command === 'worktrees.discard' ||
-        command === 'race.close'
+        command === 'race.close' ||
+        command === 'split.resolve'
       )
         await reconcilePolicy(engine, policyProjects, command, input);
       const result = commandSchemas[command].result.parse(await handleMain(command, input));

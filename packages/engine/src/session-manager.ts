@@ -160,6 +160,8 @@ export class SessionManager {
   /** Como se preparam as worktrees de cada projeto (null: a sugestão da Solline). */
   readonly #setups = new Map<string, SetupSpec | null>();
   #claimed: () => readonly string[] = () => [];
+  /** Worktrees de que uma sessão nova pode partir sem serem de uma sessão (a ponta de uma integração). */
+  readonly #anchors = new Map<string, Worktree>();
 
   constructor(options: {
     beforeEffect?: (command: string, sessionId: string, text?: string) => () => void;
@@ -1030,7 +1032,9 @@ export class SessionManager {
     if (always) {
       // As pistas de uma corrida: cada uma na sua worktree, sempre (sem git não há corrida).
       // Uma parte que segue outra (repartição) parte do resultado dela, não do HEAD do projeto.
-      const sibling = after ? this.#memory.get(after)?.worktree : undefined;
+      const sibling = after
+        ? (this.#memory.get(after)?.worktree ?? this.#anchors.get(after))
+        : undefined;
       if (after && !sibling) throw new Error('A parte anterior já não está disponível.');
       const worktree = sibling
         ? await this.#worktrees?.createAfter(sibling)
@@ -1122,6 +1126,23 @@ export class SessionManager {
     this.#get(sessionId);
     const last = this.#memoryOf(sessionId).turns.findLast((t) => t.role === 'assistant');
     return last ? assistantText(last) : '';
+  }
+
+  /** O último custo total que a sessão comunicou (nunca somado entre turnos), se algum. */
+  costOf(sessionId: string): number | null {
+    return this.#recoveryViews.get(sessionId)?.usage.costUsd ?? null;
+  }
+
+  /**
+   * Põe uma worktree à disposição de `startAfter` com esta chave: uma sessão nova parte do
+   * resultado dela (a ponta de uma integração), como parte do resultado de outra sessão.
+   */
+  anchor(key: string, worktree: Worktree): void {
+    this.#anchors.set(key, worktree);
+  }
+
+  unanchor(key: string): void {
+    this.#anchors.delete(key);
   }
 
   /** A worktree da sessão, se tiver uma. */

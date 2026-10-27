@@ -222,10 +222,29 @@ export class Engine {
       emit: emitAll,
       registry: this.registry,
       worktrees,
+      // As partes integram-se com as verificações do projeto e, no fim, a mesma segunda opinião.
+      ...(worktrees
+        ? {
+            integration: {
+              sessions: this.sessions,
+              worktrees,
+              reviewer:
+                options.reviewer === false
+                  ? undefined
+                  : (options.reviewer ??
+                    (options.isolated
+                      ? undefined
+                      : claudeReviewer({ claudeExecutable: options.claudeExecutable }))),
+            },
+          }
+        : {}),
     });
     box.races = this.races;
     box.splits = this.splits;
-    this.sessions.claimWorktrees(() => this.races.worktreePaths());
+    this.sessions.claimWorktrees(() => [
+      ...this.races.worktreePaths(),
+      ...this.splits.worktreePaths(),
+    ]);
     this.spaces = new SpaceManager({
       save: (spaces) => emitAll({ kind: 'event', type: 'spaces.changed', spaces }),
       create: async (start) => (await this.sessions.create(start)).session.id,
@@ -444,7 +463,20 @@ export class Engine {
       'race.get': async (p) => this.registry.get(p.raceId),
       'race.proposal': (p) => this.races.proposal(p.raceId),
       'race.assemble': (p) => this.races.assemble(p.raceId, p.picks),
-      'race.bring': (p) => this.races.bring(p.raceId),
+      'race.bring': (p) =>
+        this.registry.get(p.raceId).kind === 'split'
+          ? this.splits.bring(p.raceId)
+          : this.races.bring(p.raceId),
+      'split.integrate': (p) => this.splits.integrate(p.raceId),
+      'split.resolveNow': ({ raceId, cwd, trusted, checks, setup }) =>
+        this.splits.resolve(raceId, {
+          projectId: this.registry.get(raceId).projectId,
+          cwd,
+          trusted,
+          ...(checks !== undefined ? { checks } : {}),
+          ...(setup !== undefined ? { setup } : {}),
+        }),
+      'split.continue': (p) => this.splits.continueIntegration(p.raceId),
       'race.closeNow': (p) =>
         this.registry.get(p.raceId).kind === 'split'
           ? this.splits.close(p.raceId, p.keep)

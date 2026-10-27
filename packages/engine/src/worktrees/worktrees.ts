@@ -393,7 +393,49 @@ export class WorktreeManager {
     return { result: { merged: true, conflicts: [], into }, wt: next };
   }
 
-  /** Tira a worktree; com deleteBranch, também o branch. */
+  /**
+   * Junta um branch na worktree (merge sem avanço rápido, num commit só seu). Com conflitos, apanha
+   * os ficheiros e desfaz o merge: a worktree fica limpa, como estava. Quem chama grava antes o
+   * que a worktree da parte tem por gravar (só o que está em commit entra no merge).
+   */
+  async mergeBranch(
+    tip: Worktree,
+    branch: string,
+    message: string,
+  ): Promise<{ merged: boolean; conflicts: string[] }> {
+    // Uma worktree por gravar não se mistura com o merge: gravar primeiro, nunca perder nada.
+    await this.commitAll(tip, 'Solline: estado antes de juntar');
+    const email = await this.#run(tip.path, ['config', 'user.email'], true);
+    const identity =
+      email.code === 0 && email.out.trim()
+        ? []
+        : ['-c', 'user.name=Solline', '-c', 'user.email=solline@localhost'];
+    const merge = await this.#run(
+      tip.path,
+      [...identity, 'merge', '--no-ff', '--no-edit', '-m', message, branch],
+      true,
+    );
+    if (merge.code === 0) return { merged: true, conflicts: [] };
+    const { out } = await this.#run(tip.path, ['diff', '--name-only', '--diff-filter=U'], true);
+    const conflicts = out.split('\n').filter(Boolean);
+    await this.#run(tip.path, ['merge', '--abort'], true);
+    if (conflicts.length === 0)
+      throw new Error(`Não consegui juntar ${branch}: o merge falhou sem conflitos.`);
+    return { merged: false, conflicts };
+  }
+
+  /** O branch já está todo no HEAD desta worktree (um merge dele já aconteceu). */
+  async contains(wt: Pick<Worktree, 'path'>, branch: string): Promise<boolean> {
+    const r = await this.#run(wt.path, ['merge-base', '--is-ancestor', branch, 'HEAD'], true);
+    return r.code === 0;
+  }
+
+  /** A worktree não tem nada por gravar (ficheiros ignorados pelo git não contam). */
+  async isClean(wt: Pick<Worktree, 'path'>): Promise<boolean> {
+    const { out } = await this.#run(wt.path, ['status', '--porcelain'], true);
+    return out.trim() === '';
+  }
+
   /**
    * Uma pasta com o código da base da worktree (antes da mudança), para o Verificador comparar.
    * As dependências não estão no git: liga-se o node_modules da worktree (junção no Windows).

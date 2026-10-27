@@ -9,7 +9,14 @@ import type {
   SplitPending,
   SplitWarning,
 } from '@solline/protocol';
+import type { Reviewer } from '../quality/reviewer.ts';
 import type { WorktreeManager } from '../worktrees/worktrees.ts';
+import {
+  Integration,
+  restoreIntegration,
+  type IntegrationSessions,
+  type IntegrationWorktrees,
+} from './integration.ts';
 import {
   Lanes,
   STOPPED,
@@ -28,7 +35,8 @@ import { outOfScope } from './zones.ts';
  * falam entre si: cada um recebe um contrato escrito no início e, quando uma parte acaba um turno,
  * os outros recebem um resumo curto do que mudou (só num sentido, pela fila). Mexer fora do
  * contrato ou chocar com outra parte gera um aviso, nunca mata o agente. Nada arranca sozinho
- * depois de um reinício: as partes por arrancar ficam só listadas.
+ * depois de um reinício: as partes por arrancar ficam só listadas. Quando todas acabam, integram-se
+ * (`Integration`): uma a uma, com verificação depois de cada uma, e trazem-se para o projeto.
  */
 
 /** O que o gestor precisa do SessionManager. */
@@ -146,6 +154,7 @@ export class SplitManager {
   readonly #registry: RaceRegistry;
   readonly #emit: (event: EngineEvent) => void;
   readonly #core: Lanes;
+  readonly #integration: Integration | undefined;
   readonly #runs = new Map<string, Run>();
   #stopping = false;
 
@@ -155,12 +164,23 @@ export class SplitManager {
     registry?: RaceRegistry;
     /** Sem worktrees não há resumos, avisos de âmbito nem de colisões (só o lançamento). */
     worktrees?: SplitWorktrees | undefined;
+    /** Sem isto as partes lançam-se e acabam, mas não se integram. */
+    integration?:
+      | {
+          sessions: IntegrationSessions;
+          worktrees: IntegrationWorktrees;
+          reviewer?: Reviewer | undefined;
+        }
+      | undefined;
   }) {
     this.#sessions = options.sessions;
     this.#worktrees = options.worktrees;
     this.#emit = options.emit;
     this.#registry = options.registry ?? new RaceRegistry(options.emit);
     this.#core = new Lanes(options.sessions);
+    this.#integration = options.integration
+      ? new Integration({ ...options.integration, changed: (race) => this.#changed(race) })
+      : undefined;
   }
 
   /**
@@ -211,7 +231,7 @@ export class SplitManager {
       text,
       phase: 'running',
       lanes: [],
-      split: { pending, warnings: [] },
+      split: { pending, warnings: [], lanes: [] },
     };
     const run: Run = {
       project,
@@ -253,6 +273,7 @@ export class SplitManager {
       if (race.kind !== 'split') continue;
       if (race.phase === 'running') race.phase = 'done';
       race.split ??= { pending: [], warnings: [] };
+      restoreIntegration(race);
       this.#core.restored(race.lanes);
       this.#registry.add(race);
     }
@@ -261,16 +282,22 @@ export class SplitManager {
   /** O que as sessões fazem chega aqui: o estado de cada pista e o que se segue a um fim de turno. */
   observe(event: EngineEvent): void {
     if (this.#stopping || event.type !== 'session.state') return;
+    this.#integration?.observe(event);
     for (const race of this.#registry.all()) {
       if (race.kind !== 'split' || race.phase === 'closed') continue;
       const lane = race.lanes.find((l) => l.sessionId === event.sessionId);
       if (!lane) continue;
       const started = this.#core.hasStarted(lane.sessionId);
       if (!this.#core.observe(race.lanes, event)) continue;
-      this.#changed(race);
       const run = this.#runs.get(race.id);
       // Parar sem ter começado não conta, a não ser em erro (aí já não vai começar).
       const ended = STOPPED.has(event.state) && (started || event.state === 'error');
+      const timing = race.split?.lanes?.find((l) => l.sessionId === lane.sessionId);
+      if (timing) {
+        if (ended) timing.settledAt = Date.now();
+        else if (!STOPPED.has(event.state)) timing.settledAt = null;
+      }
+      this.#changed(race);
       if (run && ended)
         this.#enqueue(run, () => this.#settled(race, run, lane.sessionId, event.state));
     }
@@ -282,6 +309,8 @@ export class SplitManager {
     if (race.phase === 'closed') return { closed: true, race };
     if (race.phase === 'running')
       throw new Error('Espera que as partes acabem de trabalhar antes de fechar.');
+    if (race.phase === 'assembling')
+      throw new Error('Espera que a integração acabe antes de fechar.');
     if (keep !== undefined && !race.lanes.some((l) => l.sessionId === keep))
       throw new Error('Essa pista não é desta repartição.');
     const run = this.#runs.get(raceId);
@@ -293,6 +322,7 @@ export class SplitManager {
       race.lanes.map((l) => l.sessionId),
       keep,
     );
+    await this.#integration?.close(race);
     if (race.split) race.split.pending = [];
     race.phase = 'closed';
     this.#runs.delete(raceId);
@@ -300,9 +330,52 @@ export class SplitManager {
     return { closed: true, race };
   }
 
-  /** Na paragem do motor nada novo arranca nem se revê. */
+  /**
+   * Junta as partes de uma repartição acabada, uma a uma, com a verificação de cada uma e a revisão
+   * do resultado. Pára num conflito, com a ponta limpa.
+   */
+  async integrate(raceId: string): Promise<Race> {
+    return this.#requireIntegration().integrate(this.#splitOf(raceId));
+  }
+
+  /** Abre a sessão que resolve o conflito em que a integração parou. */
+  async resolve(
+    raceId: string,
+    project: LaneProject,
+  ): Promise<{ race: Race; session: SessionCreateResult }> {
+    const race = this.#splitOf(raceId);
+    if (project.projectId !== race.projectId)
+      throw new Error('Este projeto não é o da repartição.');
+    const run = this.#runs.get(raceId);
+    return this.#requireIntegration().resolve(race, project, run?.checks ?? []);
+  }
+
+  /** Retoma a integração depois de o conflito estar resolvido e gravado. */
+  async continueIntegration(raceId: string): Promise<Race> {
+    return this.#requireIntegration().continue(this.#splitOf(raceId));
+  }
+
+  /** Traz a integração para o branch atual do projeto. Com conflitos, nada muda no projeto. */
+  async bring(
+    raceId: string,
+  ): Promise<{ race: Race; merged: boolean; conflicts: string[]; into: string }> {
+    return this.#requireIntegration().bring(this.#splitOf(raceId));
+  }
+
+  /** As worktrees das integrações que ainda existem (não são órfãs). */
+  worktreePaths(): string[] {
+    return this.#integration?.paths(this.#registry.all()) ?? [];
+  }
+
+  /** Na paragem do motor nada novo arranca, nem se revê, nem se integra. */
   stopForRecovery(): void {
     this.#stopping = true;
+    this.#integration?.stop();
+  }
+
+  #requireIntegration(): Integration {
+    if (!this.#integration) throw new Error('As repartições não integram neste projeto.');
+    return this.#integration;
   }
 
   #splitOf(raceId: string): Race {
@@ -343,6 +416,13 @@ export class SplitManager {
         part: pending.part,
       };
       race.lanes.push(lane);
+      race.split?.lanes?.push({
+        sessionId: lane.sessionId,
+        index: pending.index,
+        after: pending.after,
+        startedAt: Date.now(),
+        settledAt: null,
+      });
     });
     if (race.split) race.split.pending = race.split.pending.filter((p) => !batch.includes(p));
   }

@@ -56,6 +56,10 @@ const LABELS: Record<string, string> = {
   'session.start': 'Abrir sessão',
   'race.begin': 'Iniciar corrida',
   'split.begin': 'Iniciar repartição',
+  'split.integrate': 'Integrar repartição',
+  'split.resolveNow': 'Abrir sessão para resolver um conflito',
+  'split.continue': 'Continuar a integração',
+  'race.bring': 'Trazer o resultado para o projeto',
 };
 
 /** Preserved intents are evidence, never a queue to retry. Text stays selectable. */
