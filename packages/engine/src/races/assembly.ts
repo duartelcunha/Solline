@@ -4,10 +4,11 @@ import { hunkPatch, type RawFile, type RawHunk } from '../checkpoints/unified-di
 import { changedLines } from './rank.ts';
 
 /**
- * Montar o resultado a partir de várias pistas, pedaço a pedaço. Cada pedaço (hunk) de cada pista
- * cai numa zona do ficheiro; pedaços que se tocam na base são alternativas (só um entra), e os
- * que não se tocam somam-se. Pedaços iguais em várias pistas (sem contar espaços) são um só
- * candidato com mais votos. A escolha de partida é a mais votada, ou a da pista melhor ordenada.
+ * Montar o resultado a partir de várias pistas, pedaço a pedaço. Os hunks de todas as pistas que
+ * se tocam na base formam uma zona; numa zona, o que cada pista escreveu (um ou mais hunks) é um
+ * candidato, e só um candidato entra. Zonas que não se tocam somam-se. Candidatos iguais em
+ * várias pistas (sem contar espaços) são um só, com mais votos. A escolha de partida é a mais
+ * votada, ou a da pista melhor ordenada.
  */
 
 export interface AssemblyLane {
@@ -17,14 +18,12 @@ export interface AssemblyLane {
   files: readonly RawFile[];
 }
 
-/** Um pedaço pronto a aplicar: o patch em bytes, tal como o git o escreveu. */
+/** O que um candidato aplica: os patches dos seus hunks, em bytes, tal como o git os escreveu. */
 export interface Part {
   id: string;
   slot: string;
   path: string;
-  oldStart: number;
-  patch: Buffer;
-  label: string;
+  hunks: { oldStart: number; patch: Buffer; label: string }[];
 }
 
 export interface Assembly {
@@ -38,7 +37,6 @@ interface Entry {
   raw: RawHunk;
   start: number;
   end: number;
-  key: string;
 }
 
 const digest = (text: string) => createHash('sha1').update(text).digest('hex').slice(0, 12);
@@ -65,7 +63,6 @@ export function propose(lanes: readonly AssemblyLane[]): Assembly {
             raw,
             start: raw.hunk.oldStart,
             end: raw.hunk.oldStart + raw.hunk.oldLines,
-            key: digest(`${file.diff.status}\0${changedLines(raw.hunk).join('\n')}`),
           });
           byPath.set(path, entries);
         }
@@ -79,14 +76,27 @@ export function propose(lanes: readonly AssemblyLane[]): Assembly {
     for (const cluster of clusters(byPath.get(path) ?? [])) {
       const start = Math.min(...cluster.map((e) => e.start));
       const slot = `${path}:${start}`;
+      // O que cada pista escreveu nesta zona (pode ser mais de um hunk) e o resumo disso.
+      const perLane = new Map<string, Entry[]>();
+      for (const entry of cluster)
+        perLane.set(entry.lane.sessionId, [...(perLane.get(entry.lane.sessionId) ?? []), entry]);
       // Os candidatos: o mesmo conteúdo escrito por várias pistas é um só.
-      const candidates = new Map<string, Entry[]>();
-      for (const entry of [...cluster].sort((a, b) => a.lane.rank - b.lane.rank))
-        candidates.set(entry.key, [...(candidates.get(entry.key) ?? []), entry]);
-      const ranked = [...candidates.values()].map((entries) => ({
-        entries,
-        lanes: [...new Set(entries.map((e) => e.lane.sessionId))],
-        rank: Math.min(...entries.map((e) => e.lane.rank)),
+      const byKey = new Map<string, Entry[][]>();
+      for (const entries of [...perLane.values()].sort((a, b) => rankOf(a) - rankOf(b))) {
+        const ordered = [...entries].sort((a, b) => a.start - b.start);
+        const key = digest(
+          ordered
+            .map((e) => `${e.file.diff.status}\0${changedLines(e.raw.hunk).join('\n')}`)
+            .join('\0\0'),
+        );
+        byKey.set(key, [...(byKey.get(key) ?? []), ordered]);
+      }
+      const ranked = [...byKey.entries()].map(([key, groups]) => ({
+        key,
+        // A versão que se aplica e se mostra é a da pista melhor ordenada.
+        entries: groups[0] as Entry[],
+        lanes: groups.map((g) => (g[0] as Entry).lane.sessionId),
+        rank: Math.min(...groups.map(rankOf)),
       }));
       const winner = [...ranked].sort(
         (a, b) => b.lanes.length - a.lanes.length || a.rank - b.rank,
@@ -94,20 +104,21 @@ export function propose(lanes: readonly AssemblyLane[]): Assembly {
       const built: RaceCandidate[] = ranked
         .sort((a, b) => a.rank - b.rank)
         .map((candidate) => {
-          const first = candidate.entries[0] as Entry;
-          const id = `${slot}:${first.key}`;
+          const id = `${slot}:${candidate.key}`;
           parts.set(id, {
             id,
             slot,
             path,
-            oldStart: first.start,
-            patch: hunkPatch(first.file, first.raw),
-            label: `${path} (linha ${first.start})`,
+            hunks: candidate.entries.map((e) => ({
+              oldStart: e.start,
+              patch: hunkPatch(e.file, e.raw),
+              label: `${path} (linha ${e.start})`,
+            })),
           });
           return {
             id,
             lanes: candidate.lanes,
-            hunk: first.raw.hunk,
+            hunks: candidate.entries.map((e) => e.raw.hunk),
             // Entra de partida o que várias pistas repetem ou o que a melhor pista escreveu.
             preferred:
               candidate === winner && (candidate.lanes.length >= 2 || candidate.rank === bestRank),
@@ -120,6 +131,8 @@ export function propose(lanes: readonly AssemblyLane[]): Assembly {
   }
   return { proposal: { files, skipped: [...skipped.values()] }, parts };
 }
+
+const rankOf = (entries: readonly Entry[]) => Math.min(...entries.map((e) => e.lane.rank));
 
 /** Pedaços que se tocam (contando o contexto) ficam na mesma zona. */
 function clusters(entries: readonly Entry[]): Entry[][] {
@@ -156,6 +169,7 @@ export function chosenPatches(
   }
   if (bySlot.size === 0) throw new Error('Escolhe pelo menos um pedaço para montar.');
   return [...bySlot.values()]
+    .flatMap((part) => part.hunks.map((hunk) => ({ path: part.path, ...hunk })))
     .sort((a, b) => a.path.localeCompare(b.path) || b.oldStart - a.oldStart)
     .map(({ label, patch }) => ({ label, patch }));
 }

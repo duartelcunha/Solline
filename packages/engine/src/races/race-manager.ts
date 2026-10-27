@@ -340,6 +340,13 @@ export class RaceManager {
     return { closed: true, race };
   }
 
+  /** As worktrees das montagens que ainda existem (não são órfãs). */
+  worktreePaths(): string[] {
+    return [...this.#races.values()].flatMap((race) =>
+      race.phase !== 'closed' && race.assembly ? [race.assembly.path] : [],
+    );
+  }
+
   #requireAssembler(): Assembler {
     if (!this.#assembler) throw new Error('As corridas não montam neste projeto.');
     return this.#assembler;

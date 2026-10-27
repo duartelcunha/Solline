@@ -11,6 +11,7 @@ import type {
   Orphan,
   Race,
   RaceLaneSpec,
+  RaceProposal,
   DiffScope,
   EngineEvent,
   FileDiff,
@@ -627,6 +628,79 @@ export const actions = {
 
   openRace(raceId: string): void {
     useApp.setState({ activeRaceId: raceId, view: 'race', reviewOpen: false });
+  },
+
+  /** O que se pode montar com as pistas de uma corrida ordenada (null se falhar). */
+  async raceProposal(raceId: string): Promise<RaceProposal | null> {
+    try {
+      return await request('race.proposal', { raceId });
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui preparar a montagem. ${message(error)}` });
+      return null;
+    }
+  },
+
+  async assembleRace(raceId: string, picks: string[]): Promise<boolean> {
+    try {
+      const race = await request('race.assemble', { raceId, picks });
+      useApp.setState((s) => ({ races: { ...s.races, [raceId]: race } }));
+      return true;
+    } catch (error) {
+      useApp.setState({ notice: `A montagem não foi feita. ${message(error)}` });
+      return false;
+    }
+  },
+
+  async bringRace(raceId: string): Promise<boolean> {
+    try {
+      const result = await request('race.bring', { raceId });
+      useApp.setState((s) => ({ races: { ...s.races, [raceId]: result.race } }));
+      if (!result.merged) {
+        useApp.setState({
+          notice: `Há conflitos em ${result.conflicts.join(', ')}. O projeto ficou como estava.`,
+        });
+        return false;
+      }
+      return true;
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui trazer a montagem. ${message(error)}` });
+      return false;
+    }
+  },
+
+  /** Fecha a corrida (o main confirma) e tira as pistas da interface. */
+  async closeRace(raceId: string, keep?: string): Promise<boolean> {
+    try {
+      const result = await request('race.close', { raceId, ...(keep ? { keep } : {}) });
+      if (!result.closed) return false;
+      const lanes = new Set(
+        useApp.getState().races[raceId]?.lanes.map((lane) => lane.sessionId) ?? [],
+      );
+      for (const id of lanes) {
+        sessionStores.delete(id);
+        draftSubscriptions.get(id)?.();
+        draftSubscriptions.delete(id);
+        draftWrites.delete(id);
+      }
+      useApp.setState((s) => {
+        const sessionIds = s.sessionIds.filter((id) => !lanes.has(id));
+        const here = s.activeRaceId === raceId;
+        return {
+          sessionIds,
+          races: result.race ? { ...s.races, [raceId]: result.race } : s.races,
+          activeRaceId: here ? null : s.activeRaceId,
+          activeSessionId:
+            s.activeSessionId && lanes.has(s.activeSessionId)
+              ? (sessionIds[0] ?? null)
+              : s.activeSessionId,
+          view: here ? 'desk' : s.view,
+        };
+      });
+      return true;
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui fechar a corrida. ${message(error)}` });
+      return false;
+    }
   },
 
   /** Abre a mesa e volta a procurar as worktrees por trazer. */

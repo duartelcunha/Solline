@@ -7,18 +7,16 @@ import { ContextMeter, money } from '../composer/composer.tsx';
 import { lastAction, pendingAsk } from '../desk/desk-order.ts';
 import { Mark } from '../quality/checks.tsx';
 
-const LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
-/** "claude-haiku-5-5" -> "haiku 5.5": o modelo curto, como nas pílulas. */
-const shortModel = (model: string) =>
-  model.replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2');
-const laneName = (lane: RaceLane) =>
-  `${LABELS[lane.agent] ?? lane.agent}${lane.model ? ` · ${shortModel(lane.model)}` : ''}`;
+import { AssemblyPanel } from './assemble.tsx';
+import { LABELS, laneName } from './lane-name.ts';
 
 const PHASE: Record<Race['phase'], string> = {
   running: 'A correr',
   done: 'Acabaram todas',
   ranking: 'A ordenar',
   ranked: 'Ordenada',
+  assembling: 'A montar',
+  assembled: 'Montada',
   closed: 'Fechada',
 };
 
@@ -299,9 +297,11 @@ function TieNote({ race }: { race: Race }) {
 export function RaceView({ raceId }: { raceId: string }) {
   const race = useApp((s) => s.races[raceId]);
   const celebrate = useCelebrate(race?.phase);
+  const area = useRef<HTMLElement>(null);
   if (!race) return null;
   return (
     <section
+      ref={area}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-2 pb-8"
       data-testid="race"
     >
@@ -321,6 +321,7 @@ export function RaceView({ raceId }: { raceId: string }) {
           />
         ))}
       </div>
+      <AssemblyPanel race={race} area={area} />
     </section>
   );
 }

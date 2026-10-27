@@ -159,6 +159,22 @@ async function confirmDiscard(): Promise<boolean> {
     acceptLabel: 'Deitar fora',
   });
 }
+async function confirmCloseRace(options: {
+  unbrought: boolean;
+  kept: string | null;
+}): Promise<boolean> {
+  return confirm({
+    title: 'Fechar a corrida',
+    message: 'Deitar fora as pistas desta corrida?',
+    detail:
+      'Apaga as worktrees e os branches das pistas, com tudo o que não foi trazido' +
+      (options.kept ? `, menos o branch de ${options.kept}, que fica guardado` : '') +
+      '.' +
+      (options.unbrought ? ' A montagem ainda não foi trazida e também se apaga.' : '') +
+      ' Não se desfaz.',
+    acceptLabel: 'Deitar fora',
+  });
+}
 
 async function handleMain(command: MainCommandName, payload: unknown): Promise<unknown> {
   switch (command) {
@@ -283,6 +299,18 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       if (!(await confirmDiscard())) return {};
       await engine.request('worktrees.discardNow', { id });
       return {};
+    }
+    case 'race.close': {
+      const request = payload as CommandPayload<'race.close'>;
+      const race = await engine.request('race.get', { raceId: request.raceId });
+      // Deitar fora não se desfaz: confirma-se fora da interface.
+      const kept = race.lanes.find((l) => l.sessionId === request.keep);
+      const confirmed = await confirmCloseRace({
+        unbrought: Boolean(race.assembly && !race.assembly.brought),
+        kept: kept ? kept.agent : null,
+      });
+      if (!confirmed) return { closed: false };
+      return engine.request('race.closeNow', request);
     }
     case 'race.start': {
       // Como numa sessão: a pasta, a confiança e as definições vêm do projeto guardado.
@@ -426,7 +454,11 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
     }
     if (isMainCommand(command)) {
       const input = commandSchemas[command].payload.parse(payload);
-      if (command === 'session.close' || command === 'worktrees.discard')
+      if (
+        command === 'session.close' ||
+        command === 'worktrees.discard' ||
+        command === 'race.close'
+      )
         await reconcilePolicy(engine, policyProjects, command, input);
       const result = commandSchemas[command].result.parse(await handleMain(command, input));
       return { ok: true, result };

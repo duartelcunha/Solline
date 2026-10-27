@@ -159,6 +159,7 @@ export class SessionManager {
   readonly #ports = new PortAllocator();
   /** Como se preparam as worktrees de cada projeto (null: a sugestão da Solline). */
   readonly #setups = new Map<string, SetupSpec | null>();
+  #claimed: () => readonly string[] = () => [];
 
   constructor(options: {
     beforeEffect?: (command: string, sessionId: string, text?: string) => () => void;
@@ -1259,13 +1260,23 @@ export class SessionManager {
   }
 
   /** As worktrees no disco sem sessão aberta, com o que mudou em cada uma. */
+  /** Outras worktrees em uso que não são de sessões (a montagem de uma corrida). */
+  claimWorktrees(paths: () => readonly string[]): void {
+    this.#claimed = paths;
+  }
+
+  /** As worktrees que alguém usa: as das sessões abertas e as que outros reclamaram. */
+  #open(): Set<string> {
+    return new Set([
+      ...[...this.#memory.values()].flatMap((m) => (m.worktree ? [m.worktree.path] : [])),
+      ...this.#claimed(),
+    ]);
+  }
+
   async orphans(): Promise<Orphan[]> {
     const worktrees = this.#worktrees;
     if (!worktrees) return [];
-    const open = new Set(
-      [...this.#memory.values()].flatMap((m) => (m.worktree ? [m.worktree.path] : [])),
-    );
-    const found = await worktrees.orphans(open);
+    const found = await worktrees.orphans(this.#open());
     return Promise.all(
       found.map(async (wt) => ({
         id: `${wt.projectId}/${wt.suffix}`,
@@ -1277,10 +1288,7 @@ export class SessionManager {
   }
 
   async #orphan(id: string): Promise<Worktree> {
-    const open = new Set(
-      [...this.#memory.values()].flatMap((m) => (m.worktree ? [m.worktree.path] : [])),
-    );
-    const wt = (await this.#worktrees?.orphans(open))?.find(
+    const wt = (await this.#worktrees?.orphans(this.#open()))?.find(
       (w) => `${w.projectId}/${w.suffix}` === id,
     );
     if (!wt) throw new Error('Essa worktree já não existe');

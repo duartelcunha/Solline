@@ -132,6 +132,30 @@ describe('montar o resultado de uma corrida', { timeout: 60_000 }, () => {
     expect(all.map((p) => p.label)).toEqual(['main.txt (linha 35)', 'main.txt (linha 1)']);
   });
 
+  it('o que uma pista escreveu numa zona entra inteiro, mesmo em vários hunks', async () => {
+    const a = (await worktrees.create(project, 'p'))!;
+    const b = (await worktrees.create(project, 'p'))!;
+    // A mexe em dois sítios afastados; B reescreve o meio todo e liga-os numa só zona.
+    await writeFile(path.join(a.cwd, 'main.txt'), text({ 2: 'A cima', 20: 'A baixo' }));
+    const middle = Object.fromEntries(Array.from({ length: 15 }, (_, i) => [i + 4, `B ${i + 4}`]));
+    await writeFile(path.join(b.cwd, 'main.txt'), text(middle));
+    const lanes: AssemblerLane[] = [
+      { sessionId: 'a', rank: 1, worktree: a },
+      { sessionId: 'b', rank: 2, worktree: b },
+    ];
+    const assembler = new Assembler({ worktrees });
+    const { proposal } = await assembler.propose(lanes);
+    const slots = proposal.files[0]!.slots;
+    expect(slots).toHaveLength(1);
+    const fromA = slots[0]!.candidates.find((c) => c.lanes[0] === 'a')!;
+    expect(fromA.hunks).toHaveLength(2);
+    const built = await assembler.build(lanes, [fromA.id], NO_CHECKS);
+    expect(await readFile(path.join(built.worktree.cwd, 'main.txt'), 'utf8')).toBe(
+      text({ 2: 'A cima', 20: 'A baixo' }),
+    );
+    await assembler.discard(built.worktree, 'always');
+  });
+
   it('corre as verificações na montagem e separa o que já falhava na base', async () => {
     const lanes = await twoLanes();
     const assembler = new Assembler({ worktrees });
@@ -222,6 +246,8 @@ describe('a montagem na corrida', { timeout: 60_000 }, () => {
     expect(assembled.phase).toBe('assembled');
     expect(assembled.assembly).toMatchObject({ files: 2, failures: 0, brought: null });
     expect(races.map((r) => r.phase)).toEqual(['assembling', 'assembled']);
+    // A montagem está em uso: não aparece como worktree órfã na mesa.
+    expect(manager.worktreePaths()).toEqual([assembled.assembly!.path]);
 
     const brought = await manager.bring('r');
     expect(brought).toMatchObject({ merged: true, into: 'main' });
@@ -231,6 +257,7 @@ describe('a montagem na corrida', { timeout: 60_000 }, () => {
 
     const closing = await manager.close('r', 'b');
     expect(closing.race.phase).toBe('closed');
+    expect(manager.worktreePaths()).toEqual([]);
     expect(closed).toEqual([
       ['a', 'discard'],
       ['b', 'keep'],

@@ -197,6 +197,7 @@ export class Engine {
         : { judge: claudeJudge({ claudeExecutable: options.claudeExecutable }) }),
     });
     box.races = this.races;
+    this.sessions.claimWorktrees(() => this.races.worktreePaths());
     this.spaces = new SpaceManager({
       save: (spaces) => emitAll({ kind: 'event', type: 'spaces.changed', spaces }),
       create: async (start) => (await this.sessions.create(start)).session.id,

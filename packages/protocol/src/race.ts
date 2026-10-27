@@ -74,7 +74,8 @@ export const RaceCandidate = z.object({
   id: z.string(),
   /** As pistas que escreveram exatamente isto (mais de uma é consenso). */
   lanes: z.array(z.string()),
-  hunk: Hunk,
+  /** O que a pista escreveu nesta zona: um ou mais hunks, de cima para baixo. */
+  hunks: z.array(Hunk),
   /** A escolha de partida: a mais votada, ou a da pista melhor ordenada. */
   preferred: z.boolean(),
 });
