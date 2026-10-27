@@ -30,6 +30,10 @@ Sem resposta, não entra.
 usar passam por uma ronda de /grilling com o Duarte antes de se fazerem. As perguntas partem de
 factos (capturas, código, auditorias), cada uma com a resposta recomendada.
 
+**/deep-research antes de mecânicas grandes:** um marco ou uma mecânica nova começa por uma
+passagem de /deep-research (o que os melhores fazem, o que falha, a evidência). Só depois vêm o
+grilling, com as conclusões, e o plano. O relatório fica fora do repositório.
+
 ## Regras de arquitetura
 
 1. Três peças, um só sentido de dependência: **motor** (`packages/engine`, Node, SDK, sessões)
