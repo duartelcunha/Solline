@@ -214,6 +214,17 @@ export function handedBanner(
       };
 }
 
+/**
+ * "Retomar aqui" só espera pelo agente desta sessão quando ele trabalha. Uma sessão recuperada
+ * depois de reiniciar (ou com o agente caído) fica em erro e tem de poder retomar a pasta.
+ */
+export function resumeHereGate(state: SessionState): { enabled: boolean; reason: string | null } {
+  const busy: SessionState[] = ['starting', 'running', 'needs-you'];
+  return busy.includes(state)
+    ? { enabled: false, reason: 'A sessão ainda está ocupada' }
+    : { enabled: true, reason: null };
+}
+
 /** Porque é que o compositor está desligado numa sessão que passou o testemunho. */
 export function handedReason(banner: HandedBanner | null): string | null {
   if (!banner) return null;

@@ -1,6 +1,6 @@
 import { ChevronRight, Handshake } from 'lucide-react';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { handedBanner, lineageLine } from './handoff-model.ts';
+import { handedBanner, lineageLine, resumeHereGate } from './handoff-model.ts';
 
 /** O título de uma sessão aberta, se ainda estiver aberta. */
 function useOpenSession(id: string | undefined) {
@@ -54,7 +54,7 @@ export function SessionOriginLink({ sessionId }: { sessionId: string }) {
  */
 export function HandedBanner({ sessionId }: { sessionId: string }) {
   const handedTo = useSession(sessionId, (s) => s.info.handedTo);
-  const busy = useSession(sessionId, (s) => s.info.state !== 'idle');
+  const resume = resumeHereGate(useSession(sessionId, (s) => s.info.state));
   const target = useOpenSession(handedTo);
   const banner = handedBanner(handedTo, target);
   if (!banner) return null;
@@ -79,13 +79,9 @@ export function HandedBanner({ sessionId }: { sessionId: string }) {
         ) : null}
         <button
           type="button"
-          disabled={busy}
+          disabled={!resume.enabled}
           onClick={() => void actions.resumeHandoff(sessionId)}
-          title={
-            busy
-              ? 'A sessão ainda está ocupada'
-              : 'A pasta volta a esta sessão e a outra fica em pausa'
-          }
+          title={resume.reason ?? 'A pasta volta a esta sessão e a outra fica em pausa'}
           data-testid="handed-resume"
           className="sl-press inline-flex h-8 items-center rounded-control bg-fg px-3 text-[12.5px] font-medium text-bg disabled:opacity-50"
         >

@@ -8,9 +8,22 @@ import {
   handoffReducer,
   initialHandoff,
   lineageLine,
+  resumeHereGate,
   sendGate,
   type HandoffState,
 } from './handoff-model.ts';
+
+describe('"Retomar aqui"', () => {
+  it('só espera pelo agente a trabalhar; recuperada (em erro) ou parada, retoma', () => {
+    for (const state of ['starting', 'running', 'needs-you'] as const)
+      expect(resumeHereGate(state), state).toEqual({
+        enabled: false,
+        reason: 'A sessão ainda está ocupada',
+      });
+    for (const state of ['idle', 'error'] as const)
+      expect(resumeHereGate(state), state).toEqual({ enabled: true, reason: null });
+  });
+});
 
 const run = (state: HandoffState, ...events: Parameters<typeof handoffReducer>[1][]) =>
   events.reduce(handoffReducer, state);
