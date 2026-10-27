@@ -1,5 +1,5 @@
 import { Logo } from '../../components/logo.tsx';
-import { Folder, Globe2, LayoutGrid, Plus, ShieldCheck, ShieldOff, X } from 'lucide-react';
+import { Folder, Globe2, LayoutGrid, Network, Plus, ShieldCheck, ShieldOff, X } from 'lucide-react';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { useNeedsYouCount } from '../desk/desk.tsx';
 import { APP_NAME } from '@solline/protocol/app';
@@ -150,6 +150,7 @@ export function Sidebar({
           Geral
         </button>
         <DeskButton />
+        <MapButton />
       </div>
 
       <div className="mt-4 flex items-center pr-2 pl-4">
@@ -225,6 +226,26 @@ function DeskButton() {
           {waiting}
         </span>
       ) : null}
+    </button>
+  );
+}
+
+/** O Mapa: quem passou o testemunho e quem se bifurcou de quem, por projeto. */
+function MapButton() {
+  const hasWork = useApp((s) => s.projects.length > 0 || s.sessionIds.length > 0);
+  const open = useApp((s) => s.mapOpen);
+  if (!hasWork) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => actions.openMap()}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      data-testid="open-map"
+      className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-[13px] text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-fg active:bg-surface-sunken"
+    >
+      <Network size={15} strokeWidth={1.75} />
+      Mapa
     </button>
   );
 }

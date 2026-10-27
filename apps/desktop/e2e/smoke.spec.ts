@@ -300,6 +300,17 @@ test('a nova sessão deixa escolher o agente e mostra porque um não está pront
   await expect(page.getByTestId('agents-panel')).toBeHidden();
 });
 
+test('o Mapa abre com um estado vazio calmo e fecha com Esc', async () => {
+  const page = await app.firstWindow();
+  await page.getByTestId('open-map').click();
+  await expect(page.getByTestId('map-empty')).toContainText(
+    'Ainda não há sessões ligadas entre si.',
+  );
+  await shot(page, 'map-empty');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('map-dialog')).toBeHidden();
+});
+
 test('o painel de agentes mostra o estado e guarda as variáveis só depois de confirmares', async () => {
   const page = await app.firstWindow();
   await page.getByTestId('sidebar-agents').click();

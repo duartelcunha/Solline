@@ -1,5 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Ellipsis, Handshake } from 'lucide-react';
+import { Ellipsis, Handshake, Network } from 'lucide-react';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useSession } from '../../stores/app.ts';
 import { handoffGate } from './handoff-model.ts';
@@ -54,6 +54,13 @@ export function SessionMenu({ sessionId }: { sessionId: string }) {
         disabled={!gate.enabled}
         onSelect={() => actions.openHandoff(sessionId)}
         testId="session-pass-to"
+      />
+      <ActionItem
+        title="Mapa"
+        description="Ver as sessões ligadas deste projeto"
+        icon={<Network size={14} />}
+        onSelect={() => actions.openMap()}
+        testId="session-map"
       />
     </MenuShell>
   );

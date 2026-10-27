@@ -550,6 +550,29 @@ body {
   animation: sl-dialog-out var(--sl-dur-exit) var(--sl-ease-out) forwards;
 }
 
+/*
+ * O Mapa entra uma vez, ao abrir: cada caixa sobe e aparece com um escalonamento curto (30 ms
+ * por caixa, no máximo 120 ms). O que muda depois não anima. Movimento reduzido: só opacidade.
+ */
+@keyframes sl-map-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--sl-rise));
+  }
+}
+@keyframes sl-map-fade {
+  from {
+    opacity: 0;
+  }
+}
+.map-in {
+  animation: sl-map-in 180ms var(--sl-ease-out) both;
+  animation-delay: min(calc(var(--i, 0) * 30ms), 120ms);
+}
+.map-fade {
+  animation: sl-map-fade 180ms var(--sl-ease-out) both;
+}
+
 /* ---------- Agentes ---------- */
 
 /* O estado novo entra por cima do antigo com um desfoque curto: lê-se como uma só peça. */

@@ -14,6 +14,7 @@ import { BringDialog } from './features/workspace/bring-dialog.tsx';
 import { HandoffDialog } from './features/handoff/handoff-dialog.tsx';
 import { SessionMenu } from './features/handoff/pass-to.tsx';
 import { HandedBanner, SessionOriginLink } from './features/handoff/session-lineage.tsx';
+import { MapDialog } from './features/map/map-dialog.tsx';
 import { Desk, useNeedsYouCount } from './features/desk/desk.tsx';
 import { RaceTitle, RaceView } from './features/race/race.tsx';
 import { IconSwap } from '@solline/ui/icon-swap';
@@ -428,6 +429,7 @@ export function App() {
         <CloseDialog />
         <BringDialog />
         <HandoffDialog />
+        <MapDialog />
 
         <main tabIndex={-1} className="flex min-h-0 min-w-0 flex-col">
           <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[12rem] pl-5">
