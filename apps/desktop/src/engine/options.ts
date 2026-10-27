@@ -1,4 +1,5 @@
 import {
+  claudeDrafter,
   claudePlanner,
   claudeReviewer,
   resolveClaudeExecutable,
@@ -20,6 +21,9 @@ export function engineOptions(): EngineOptions {
       : {}),
     ...(process.env.SOLLINE_PLANNER === '1'
       ? { planner: claudePlanner({ claudeExecutable }) }
+      : {}),
+    ...(process.env.SOLLINE_DRAFTER === '1'
+      ? { drafter: claudeDrafter({ claudeExecutable }) }
       : {}),
     ...(process.env.SOLLINE_CHECKS === '1' ? { checks: {} } : {}),
   };

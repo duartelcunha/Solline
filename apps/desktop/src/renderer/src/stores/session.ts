@@ -97,7 +97,11 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
           return { ...data, capabilities: delta.capabilities };
         case 'turn.start': {
           const turns = applyDelta(data.turns, delta);
-          const first = delta.turn.role === 'user' && data.turns.length === 0;
+          // Uma sessão de passagem já vem com o nome do objetivo: a primeira mensagem é o aviso.
+          const first =
+            delta.turn.role === 'user' &&
+            data.turns.length === 0 &&
+            data.info.origin?.kind !== 'handoff';
           const text = delta.turn.blocks.find((b) => b.kind === 'text');
           const title = first && text?.kind === 'text' ? titleFrom(text.text) : data.info.title;
           return { ...data, turns, info: { ...data.info, title } };
@@ -127,6 +131,10 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       return { ...data, queue: event.queue };
     case 'session.workspace':
       return { ...data, info: { ...data.info, workspace: event.workspace } };
+    case 'session.handoff': {
+      const { handedTo: _previous, ...info } = data.info;
+      return { ...data, info: event.handedTo ? { ...info, handedTo: event.handedTo } : info };
+    }
     case 'session.state': {
       if (event.state === data.info.state) return data;
       const now = Date.now();

@@ -16,6 +16,8 @@ const INSPECTION = new Set<CommandName>([
   'review.diff',
   'quality.get',
   'checks.get',
+  // Só desiste de um rascunho a escrever: não toca em nada.
+  'handoff.cancelDraft',
   // Pura: confere um plano, não toca em nada.
   'split.review',
 ]);

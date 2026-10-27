@@ -22,6 +22,21 @@ export { routeReviewer, type ReviewerPicker } from './quality/routing.ts';
 export { MIN_REVIEW_LINES, isSensitivePath, reviewWorth } from './quality/gating.ts';
 export { MAX_RULES_CHARS, readProjectRules } from './quality/rules.ts';
 export { claudePlanner, type Planner } from './races/planner.ts';
+export {
+  DRAFT_HEADERS,
+  NOTHING,
+  assembleDraft,
+  claudeDrafter,
+  draftHandoff,
+  handoffMessage,
+  mechanicalSections,
+  objectiveOf,
+  type DraftFile,
+  type DraftSections,
+  type Drafter,
+  type DrafterInput,
+  type DrafterOutcome,
+} from './handoff/drafter.ts';
 export { SessionQuality, fixMessage } from './quality/session-quality.ts';
 export { PermissionBroker, type BrokerOutcome } from './permission-broker.ts';
 export { ClaudeNormalizer } from './adapters/claude/normalizer.ts';

@@ -12,6 +12,7 @@ import {
   WorktreeStats,
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
+import { handoffCommandSchemas } from './handoff.ts';
 import { Race, RaceProposal, RaceStartPayload } from './race.ts';
 import {
   SplitPlanNowPayload,
@@ -353,6 +354,7 @@ export const commandSchemas = {
   ...reviewCommandSchemas,
   ...qualityCommandSchemas,
   ...checksCommandSchemas,
+  ...handoffCommandSchemas,
 } as const;
 
 /**

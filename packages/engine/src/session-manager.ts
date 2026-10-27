@@ -35,6 +35,7 @@ import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/type
 import type { SessionCheckpoints } from './checkpoints/session-checkpoints.ts';
 import type { CheckpointStore } from './checkpoints/store.ts';
 import { assistantText, commentsMessage, summaryOf, textOf } from './review.ts';
+import { draftFilesOf, handoffMessage, objectiveOf, type DraftFile } from './handoff/drafter.ts';
 import type { Reviewer } from './quality/reviewer.ts';
 import type { ReviewerPicker } from './quality/routing.ts';
 import { reviewWorth } from './quality/gating.ts';
@@ -166,6 +167,8 @@ export class SessionManager {
   /** Como se preparam as worktrees de cada projeto (null: a sugestão da Solline). */
   readonly #setups = new Map<string, SetupSpec | null>();
   #claimed: () => readonly string[] = () => [];
+  /** Sessões a meio de uma passagem de testemunho (nada lhes envia até acabar). */
+  readonly #handingOff = new Set<string>();
   /** Worktrees de que uma sessão nova pode partir sem serem de uma sessão (a ponta de uma integração). */
   readonly #anchors = new Map<string, Worktree>();
 
@@ -208,7 +211,14 @@ export class SessionManager {
     return Boolean(this.#reviewer ?? this.#pickReviewer);
   }
 
-  async create(payload: SessionStartPayload): Promise<SessionResult> {
+  /**
+   * `inherit`: a sessão nasce na pasta de outra (passagem de testemunho) em vez de ter lugar
+   * próprio. Nunca cria worktree nem prepara nada; quem herda decide depois quem fica com a worktree.
+   */
+  async create(
+    payload: SessionStartPayload,
+    inherit?: { workspace: Workspace },
+  ): Promise<SessionResult> {
     const definition = this.#registry.get(payload.agent);
     if (!definition) throw new Error(`Agente desconhecido: ${payload.agent}`);
     if (!payload.trusted && definition.untrustedProjects === 'refused') {
@@ -227,12 +237,14 @@ export class SessionManager {
         'Com um servidor MCP que corre programas, escolhe um modo que pergunte antes',
       );
     }
-    const place = await this.#placeFor(
-      payload.projectId,
-      payload.cwd,
-      payload.worktree === 'always',
-      payload.startAfter,
-    );
+    const place: { cwd: string; workspace: Workspace; worktree?: Worktree; key: string } = inherit
+      ? { cwd: payload.cwd, workspace: structuredClone(inherit.workspace), key: '' }
+      : await this.#placeFor(
+          payload.projectId,
+          payload.cwd,
+          payload.worktree === 'always',
+          payload.startAfter,
+        );
     if (payload.setup !== undefined) this.#setups.set(payload.projectId, payload.setup);
     const sessionId = crypto.randomUUID();
     const port = await this.#ports.reserve(sessionId).catch(() => undefined);
@@ -427,7 +439,7 @@ export class SessionManager {
     how: How = 'queue',
     submissionId?: string,
   ): Promise<Submitted> {
-    this.#get(sessionId);
+    this.#requireActive(this.#get(sessionId));
     if (this.#recoveryViews.get(sessionId)?.interrupted)
       throw new Error('Retoma a sessão recuperada antes de enviar.');
     return this.#memoryOf(sessionId).cycle.submit(text, how, submissionId);
@@ -540,6 +552,7 @@ export class SessionManager {
   ): Promise<Timeline> {
     // Aceitar só mexe na base; rejeitar escreve no disco e não pode correr com o agente.
     if (action === 'reject') {
+      this.#requireActive(this.#get(sessionId));
       this.#requireIdle(this.#get(sessionId), this.#memoryOf(sessionId), 'rejeitar');
     }
     const timeline = await this.#checkpoints(sessionId).apply(action, path, hunkId);
@@ -548,6 +561,7 @@ export class SessionManager {
   }
 
   async undo(sessionId: string): Promise<Timeline> {
+    this.#requireActive(this.#get(sessionId));
     this.#requireIdle(this.#get(sessionId), this.#memoryOf(sessionId), 'desfazer');
     const timeline = await this.#checkpoints(sessionId).undo();
     this.#checks.get(this.#get(sessionId).info.cwd)?.reset();
@@ -574,6 +588,8 @@ export class SessionManager {
   ): Promise<{ timeline: Timeline; text: string | null; conversation: ConversationRewind | null }> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
+    // Rebobinar os ficheiros mexe na pasta, que agora é de outra sessão; só a conversa se pode.
+    if (options.files) this.#requireActive(entry);
     return memory.cycle.exclusive('rebobinar', () => this.#rewind(entry, memory, turnId, options));
   }
 
@@ -1261,6 +1277,7 @@ export class SessionManager {
   async bring(sessionId: string): Promise<{ merged: boolean; conflicts: string[]; into: string }> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
+    this.#requireActive(entry);
     this.#requireIdle(entry, memory, 'trazer o trabalho');
     if (!memory.worktree || !this.#worktrees)
       throw new Error('Esta sessão trabalha na pasta do projeto');
@@ -1362,6 +1379,17 @@ export class SessionManager {
     memory.cycle.clear();
     this.#sessions.delete(sessionId);
     this.#memory.delete(sessionId);
+    // Quem tinha passado o testemunho a esta sessão volta a poder enviar (já não há para quem esperar).
+    for (const other of this.#sessions.values()) {
+      if (other.info.handedTo !== sessionId) continue;
+      delete other.info.handedTo;
+      this.#emit({
+        kind: 'event',
+        type: 'session.handoff',
+        sessionId: other.info.id,
+        handedTo: null,
+      });
+    }
     memory.preparing?.abort();
     this.#ports.release(sessionId);
     await entry.adapter.close().catch(() => undefined);
@@ -1611,6 +1639,218 @@ export class SessionManager {
     return quality.resolve(ids, 'dismissed');
   }
 
+  /**
+   * Uma sessão que passou o testemunho (ou está a passá-lo) só se lê: nada lhe envia nem mexe na
+   * pasta, que agora é de outra. "Retomar aqui" devolve-lha.
+   */
+  #requireActive(entry: Entry): void {
+    const to = entry.info.handedTo;
+    if (to) {
+      const title = this.#sessions.get(to)?.info.title ?? 'outra sessão';
+      throw new Error(
+        `Esta sessão passou o testemunho a ${title}. Usa "Retomar aqui" para voltar a trabalhar nela.`,
+      );
+    }
+    if (this.#handingOff.has(entry.info.id))
+      throw new Error('A passagem de testemunho está a meio: espera que acabe.');
+  }
+
+  /**
+   * O que o rascunho da passagem precisa da sessão de origem: onde está, quem é, o que se disse e
+   * os ficheiros tocados (contados pela Solline: da worktree contra a base, ou do checkpoint da
+   * sessão). `filesNote` diz porque a lista pode estar incompleta.
+   */
+  async handoffSource(sessionId: string): Promise<{
+    cwd: string;
+    label: string;
+    title: string;
+    turns: readonly Turn[];
+    lastRequest: string;
+    files: DraftFile[];
+    filesNote?: string;
+  }> {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    const last = memory.turns.findLast((t) => t.role === 'user');
+    const base = {
+      cwd: entry.info.cwd,
+      label: entry.definition.label,
+      title: entry.info.title,
+      turns: memory.turns,
+      lastRequest: last ? textOf(last) : '',
+    };
+    try {
+      if (memory.worktree && this.#worktrees) {
+        const diff = await this.#worktrees.diff(memory.worktree);
+        return { ...base, files: draftFilesOf(diff.map((f) => f.diff)) };
+      }
+      const checkpoints = memory.checkpoints;
+      await checkpoints?.ready;
+      if (checkpoints?.available)
+        return { ...base, files: draftFilesOf(await checkpoints.diff({ kind: 'session' })) };
+      return {
+        ...base,
+        files: [],
+        filesNote: 'Os checkpoints estão desligados: não há como listar os ficheiros tocados.',
+      };
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      return {
+        ...base,
+        files: [],
+        filesNote: `Não consegui listar os ficheiros tocados (${why}).`,
+      };
+    }
+  }
+
+  /**
+   * Passa o testemunho: abre a sessão do agente escolhido na mesma pasta (e a mesma worktree, que
+   * muda de dono) e manda-lhe o aviso e o rascunho. A origem fica sem enviar até "Retomar aqui".
+   * Recusa se a origem trabalha ou já passou o testemunho; se a primeira mensagem não segue, desfaz.
+   */
+  async handoff(
+    sourceId: string,
+    request: {
+      agent: string;
+      model?: string | undefined;
+      effort?: string | undefined;
+      text: string;
+    },
+  ): Promise<SessionResult & { turnId: string }> {
+    const source = this.#get(sourceId);
+    const sourceMemory = this.#memoryOf(sourceId);
+    this.#requireActive(source);
+    if (sourceMemory.closing) throw new Error('A sessão está a fechar');
+    this.#requireIdle(source, sourceMemory, 'passar o testemunho');
+    this.#handingOff.add(sourceId);
+    try {
+      // O branch a ganhar nome acaba antes de a worktree mudar de dono (senão voltava à origem).
+      await sourceMemory.naming;
+      const lastTurn = sourceMemory.turns.at(-1);
+      const created = await this.create(
+        {
+          projectId: source.info.projectId,
+          cwd: source.info.cwd,
+          trusted: source.trusted,
+          agent: request.agent,
+          ...(request.model ? { model: request.model } : {}),
+          ...(request.effort ? { effort: request.effort } : {}),
+          origin: {
+            kind: 'handoff',
+            sessionId: sourceId,
+            ...(lastTurn ? { turnId: lastTurn.id } : {}),
+          },
+        },
+        { workspace: source.info.workspace ?? { kind: 'project' } },
+      );
+      const targetId = created.session.id;
+      const target = this.#get(targetId);
+      // O nome do objetivo, antes de qualquer evento: a primeira mensagem é só o aviso.
+      target.info.title = (
+        objectiveOf(request.text) ?? `Continuação de ${source.info.title}`
+      ).slice(0, 80);
+      this.#giveWorktree(sourceId, targetId);
+      this.#setHandedTo(sourceId, targetId);
+      this.#setHandedTo(targetId, null);
+      await this.#emitWorkspace(targetId);
+      let sent: Submitted;
+      try {
+        sent = await this.send(
+          targetId,
+          handoffMessage(
+            { label: source.definition.label, title: source.info.title },
+            request.text,
+          ),
+        );
+      } catch (error) {
+        // A primeira mensagem não seguiu: a pasta e o direito de enviar voltam à origem.
+        this.#giveWorktree(targetId, sourceId);
+        this.#setHandedTo(sourceId, null);
+        await this.#emitWorkspace(sourceId);
+        await this.close(targetId, undefined, true).catch(() => undefined);
+        throw error;
+      }
+      return {
+        session: { ...target.info },
+        capabilities: created.capabilities,
+        turnId: sent.turnId,
+      };
+    } finally {
+      this.#handingOff.delete(sourceId);
+    }
+  }
+
+  /**
+   * "Retomar aqui", pedido na sessão que passou o testemunho: a pasta (e a worktree) voltam a ela
+   * e quem a tinha fica em pausa, também sem enviar. Segue a cadeia de passagens até quem tem a
+   * pasta agora; recusa se essa sessão está a trabalhar.
+   */
+  async resumeHere(
+    sessionId: string,
+  ): Promise<{ session: SessionInfo; paused: SessionInfo | undefined }> {
+    const entry = this.#get(sessionId);
+    if (!entry.info.handedTo) throw new Error('Esta sessão já tem a pasta.');
+    if (this.#handingOff.has(sessionId))
+      throw new Error('A passagem de testemunho está a meio: espera que acabe.');
+    const holder = this.#holderOf(entry);
+    this.#handingOff.add(sessionId);
+    if (holder) this.#handingOff.add(holder.info.id);
+    try {
+      if (holder) {
+        const holderMemory = this.#memoryOf(holder.info.id);
+        this.#requireIdle(holder, holderMemory, 'retomar aqui');
+        await holderMemory.naming;
+        if (holderMemory.closing) throw new Error('A sessão está a fechar');
+        this.#giveWorktree(holder.info.id, sessionId);
+        this.#setHandedTo(holder.info.id, sessionId);
+      }
+      this.#setHandedTo(sessionId, null);
+      await this.#emitWorkspace(sessionId);
+      return { session: { ...entry.info }, paused: holder ? { ...holder.info } : undefined };
+    } finally {
+      this.#handingOff.delete(sessionId);
+      if (holder) this.#handingOff.delete(holder.info.id);
+    }
+  }
+
+  /** Quem tem a pasta agora: o fim da cadeia de passagens (undefined: já não existe ninguém). */
+  #holderOf(from: Entry): Entry | undefined {
+    const seen = new Set([from.info.id]);
+    let current: Entry | undefined = from;
+    while (current?.info.handedTo) {
+      const next: Entry | undefined = this.#sessions.get(current.info.handedTo);
+      if (!next) {
+        // A sessão para quem passou já não existe: esta fica com a pasta.
+        this.#setHandedTo(current.info.id, null);
+        return current === from ? undefined : current;
+      }
+      if (seen.has(next.info.id)) throw new Error('A cadeia de passagens ficou inconsistente.');
+      seen.add(next.info.id);
+      current = next;
+    }
+    return current === from ? undefined : current;
+  }
+
+  /** A worktree muda de dono: só uma sessão a tem de cada vez (fechar e trazer vão por ela). */
+  #giveWorktree(fromId: string, toId: string): void {
+    const from = this.#memoryOf(fromId);
+    const to = this.#memoryOf(toId);
+    if (!from.worktree) return;
+    if (to.worktree) throw new Error('As duas sessões têm worktree: o estado ficou inconsistente.');
+    to.worktree = from.worktree;
+    from.worktree = undefined;
+    // O branch já tem nome; o aviso da primeira mensagem não lho deve dar.
+    to.named = true;
+  }
+
+  /** Escreve o `handedTo` da sessão e avisa (a interface e o diário de recuperação). */
+  #setHandedTo(sessionId: string, handedTo: string | null): void {
+    const entry = this.#get(sessionId);
+    if (handedTo) entry.info.handedTo = handedTo;
+    else delete entry.info.handedTo;
+    this.#emit({ kind: 'event', type: 'session.handoff', sessionId, handedTo });
+  }
+
   /** Mexer no disco ou na conversa só com o agente parado e nada a meio. */
   #requireIdle(entry: Entry, memory: Memory, what: string): void {
     const state = entry.info.state;
@@ -1768,11 +2008,13 @@ export class SessionManager {
     return (delta) => {
       if (delta.type === 'settings') info.settings = { ...info.settings, ...delta.settings };
       if (delta.type === 'meta') info.agentSessionId = delta.agentSessionId;
+      // Uma sessão de passagem já nasce com o nome do objetivo: a primeira mensagem é o aviso.
       if (
         memory &&
         delta.type === 'turn.start' &&
         delta.turn.role === 'user' &&
-        memory.turns.length === 0
+        memory.turns.length === 0 &&
+        info.origin?.kind !== 'handoff'
       ) {
         const text = delta.turn.blocks.find((block) => block.kind === 'text');
         if (text?.kind === 'text')

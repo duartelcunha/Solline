@@ -1252,6 +1252,88 @@ export const actions = {
     }
   },
 
+  /**
+   * Escreve o rascunho de uma passagem de testemunho (só leitura, não muda nada). null se falhou
+   * ou foi cancelado; o erro fica na sessão de origem.
+   */
+  async draftHandoff(
+    sessionId: string,
+    agent: AgentId,
+    goal: string,
+    model?: string,
+  ): Promise<CommandResult<'handoff.draft'> | null> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      return await request('handoff.draft', {
+        sessionId,
+        agent,
+        goal,
+        ...(model ? { model } : {}),
+      });
+    } catch (error) {
+      setActionError(sessionId, error);
+      return null;
+    }
+  },
+
+  /** Desiste do rascunho a escrever (fechar o diálogo). */
+  async cancelHandoffDraft(sessionId: string): Promise<void> {
+    await request('handoff.cancelDraft', { sessionId }).catch(() => undefined);
+  },
+
+  /**
+   * Passa o testemunho: o motor abre a sessão do agente escolhido na mesma pasta, com o rascunho
+   * editado, e a interface abre-a. A de origem fica só de leitura (o evento trata disso).
+   */
+  async startHandoff(
+    sessionId: string,
+    agent: AgentId,
+    text: string,
+    options: { model?: string; effort?: string } = {},
+  ): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      const { session, capabilities } = await request('handoff.start', {
+        sessionId,
+        agent,
+        text,
+        ...(options.model ? { model: options.model } : {}),
+        ...(options.effort ? { effort: options.effort } : {}),
+      });
+      const store = createSessionStore(session, session.projectId, capabilities);
+      adoptStore(session.id, store);
+      useApp.setState((s) => ({
+        sessionIds: [session.id, ...s.sessionIds.filter((id) => id !== session.id)],
+        activeSessionId: session.id,
+        view: 'session',
+      }));
+      loadSessionExtras(session.id, store);
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
+  /** "Retomar aqui": a pasta volta a esta sessão e a outra fica em pausa. */
+  async resumeHandoff(sessionId: string): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      const { session, paused } = await request('handoff.resume', { sessionId });
+      for (const info of [session, paused]) {
+        if (!info) continue;
+        sessionStores.get(info.id)?.setState((data) => {
+          const { handedTo: _previous, ...rest } = data.info;
+          return { info: info.handedTo ? { ...rest, handedTo: info.handedTo } : rest };
+        });
+      }
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
   toggleReview(open?: boolean): void {
     useApp.setState((s) => ({ reviewOpen: open ?? !s.reviewOpen }));
   },

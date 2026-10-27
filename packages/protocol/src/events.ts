@@ -89,6 +89,17 @@ export const SessionQueueEvent = z.object({
 });
 export type SessionQueue = z.infer<typeof SessionQueueEvent>['queue'];
 
+/**
+ * Passagem de testemunho: a sessão passou o trabalho a outra (`handedTo`) e deixa de enviar, ou
+ * (null) voltou a poder enviar. Quem tem a pasta é sempre a sessão sem `handedTo`.
+ */
+export const SessionHandoffEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.handoff'),
+  sessionId: z.string(),
+  handedTo: z.string().nullable(),
+});
+
 /** A preparação da worktree de uma sessão mudou (começou, acabou ou falhou). */
 export const SessionSetupEvent = z.object({
   kind: z.literal('event'),
@@ -133,6 +144,7 @@ export const EngineEvent = z
     SessionChecksEvent,
     SessionWorkspaceEvent,
     SessionQueueEvent,
+    SessionHandoffEvent,
     SessionSetupEvent,
     RaceStateEvent,
     EngineErrorEvent,
@@ -147,4 +159,5 @@ export type PermissionRequestEvent = z.infer<typeof PermissionRequestEvent>;
 export type SessionTimelineEvent = z.infer<typeof SessionTimelineEvent>;
 export type SessionQualityEvent = z.infer<typeof SessionQualityEvent>;
 export type SessionChecksEvent = z.infer<typeof SessionChecksEvent>;
+export type SessionHandoffEvent = z.infer<typeof SessionHandoffEvent>;
 export type AgentsChangedEvent = z.infer<typeof AgentsChangedEvent>;

@@ -3,6 +3,7 @@ export * from './conversation.ts';
 export * from './capabilities.ts';
 export * from './review.ts';
 export * from './quality.ts';
+export * from './handoff.ts';
 export * from './checks.ts';
 export * from './race.ts';
 export * from './split.ts';

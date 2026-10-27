@@ -241,6 +241,10 @@ export function installBridge(scene: Scene) {
       case 'session.workspace':
         item.session.workspace = event.workspace;
         break;
+      case 'session.handoff':
+        if (event.handedTo) item.session.handedTo = event.handedTo;
+        else delete item.session.handedTo;
+        break;
       case 'session.queue':
         item.queue = event.queue;
         queues.set(event.sessionId, event.queue);
@@ -600,6 +604,79 @@ export function installBridge(scene: Scene) {
         });
         seed(session.id); // Deliberately before the response: tests the real early-event buffer.
         return { session: { ...session }, capabilities };
+      }
+      case 'handoff.draft': {
+        required(sessions.get(id), `sessão ${id}`);
+        const none = '(nada)';
+        const sections = [
+          ['Objetivo', String(payload.goal)],
+          ['Decisões e o que se pôs de parte', none],
+          ['Ficheiros tocados', none],
+          ['Perguntas em aberto', none],
+          ['Próximos passos', none],
+          ['Verificação', none],
+        ];
+        return {
+          text: sections
+            .map(([header, body]) => `## ${header}${String.fromCharCode(10)}${body}`)
+            .join(String.fromCharCode(10, 10)),
+          drafted: 'mechanical' as const,
+          warning: 'QA: rascunho mecânico.',
+          cost: null,
+        };
+      }
+      case 'handoff.cancelDraft':
+        return { cancelled: false };
+      case 'handoff.start': {
+        const source = required(sessions.get(id), `sessão ${id}`);
+        if (source.handedTo) throw new Error('QA: a sessão já passou o testemunho');
+        const agent = required(
+          agents.find((value) => value.id === payload.agent),
+          'agente',
+        );
+        if (agent.status !== 'ready') throw new Error('QA: agente indisponível neste projeto');
+        const session: SessionInfo = {
+          id: `session-${++count}`,
+          projectId: source.projectId,
+          cwd: source.cwd,
+          agent: String(payload.agent),
+          title: 'Continuação',
+          state: 'idle',
+          agentSessionId: 'qa-agent',
+          settings: { model: 'sonnet', effort: 'high', mode: 'default' },
+          ...(source.workspace ? { workspace: structuredClone(source.workspace) } : {}),
+          origin: { kind: 'handoff', sessionId: id },
+        };
+        sessions.set(session.id, session);
+        canonical.set(session.id, {
+          session,
+          capabilities: structuredClone(capabilities),
+          turns: [],
+          usage: { costUsd: null, models: [], context: null, tokens: null },
+          queue: { items: [], paused: false },
+          timeline: null,
+          quality: structuredClone(quality),
+          checks: null,
+          conflicts: null,
+          interrupted: false,
+          error: null,
+        });
+        qualities.set(session.id, structuredClone(quality));
+        reviews.set(session.id, {
+          timeline: structuredClone(initialTimeline),
+          files: [structuredClone(diff)],
+        });
+        emit({ kind: 'event', type: 'session.handoff', sessionId: id, handedTo: session.id });
+        return { session: { ...session }, capabilities, turnId: 'handoff-1' };
+      }
+      case 'handoff.resume': {
+        const session = required(sessions.get(id), `sessão ${id}`);
+        const paused = session.handedTo ? sessions.get(session.handedTo) : undefined;
+        if (!session.handedTo) throw new Error('QA: esta sessão já tem a pasta');
+        if (paused)
+          emit({ kind: 'event', type: 'session.handoff', sessionId: paused.id, handedTo: id });
+        emit({ kind: 'event', type: 'session.handoff', sessionId: id, handedTo: null });
+        return { session: { ...session }, ...(paused ? { paused: { ...paused } } : {}) };
       }
       case 'quality.get':
         return required(qualities.get(id), 'qualidade ausente');

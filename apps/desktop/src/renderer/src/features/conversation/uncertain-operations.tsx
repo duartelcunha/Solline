@@ -49,6 +49,8 @@ const LABELS: Record<string, string> = {
   'review.undo': 'Desfazer alteração',
   'review.comment': 'Comentários para o agente',
   'session.rewind': 'Rebobinar sessão',
+  'handoff.start': 'Passar o testemunho a outro agente',
+  'handoff.resume': 'Retomar aqui o trabalho passado',
   'session.bring': 'Trazer alterações',
   'worktrees.bring': 'Trazer alterações',
   'worktrees.discardNow': 'Eliminar worktree',

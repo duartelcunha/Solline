@@ -34,6 +34,8 @@ import { SplitManager } from './races/split-manager.ts';
 import { claudeJudge } from './verify/judge.ts';
 import { claudePlanner, type Planner } from './races/planner.ts';
 import { reviewPlan } from './races/split-review.ts';
+import { claudeDrafter, draftHandoff, type Drafter } from './handoff/drafter.ts';
+import { summaryOf } from './review.ts';
 import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
@@ -74,6 +76,11 @@ export interface EngineOptions {
   reviewers?: { claude?: Reviewer; codex?: Reviewer | false };
   /** Quem corta um pedido em partes (por omissão um Claude só de leitura); false desliga. */
   planner?: Planner | false;
+  /**
+   * Quem escreve o rascunho de uma passagem de testemunho (por omissão um Claude só de leitura,
+   * menos isolado); sem ele, o rascunho sai mecânico. false desliga.
+   */
+  drafter?: Drafter | false;
   /** As verificações do projeto no fim de cada turno (por omissão ligadas, menos isolado); false desliga. */
   checks?: ChecksOptions | false;
   /** Worktrees para as sessões a mais de um projeto (por omissão na pasta de dados); false desliga. */
@@ -128,6 +135,9 @@ export class Engine {
   readonly #handlers: Handlers;
   readonly #checkpoints: CheckpointStore | undefined;
   readonly #planner: Planner | undefined;
+  readonly #drafter: Drafter | undefined;
+  /** Os rascunhos a escrever (um por sessão de origem): um novo cancela o anterior. */
+  readonly #drafts = new Map<string, AbortController>();
   readonly #epoch = randomUUID();
   readonly #journal: DurableJournal<RecoveryRecord> | undefined;
   readonly #operations = new Map<string, RecoveryOperation>();
@@ -186,7 +196,8 @@ export class Engine {
           sessionId &&
           (!this.#recordedSessions.has(sessionId) ||
             event.type === 'session.timeline' ||
-            event.type === 'session.workspace');
+            event.type === 'session.workspace' ||
+            event.type === 'session.handoff');
         const session = capture
           ? this.sessions?.recovery().find((saved) => saved.view.session.id === sessionId)
           : undefined;
@@ -248,6 +259,14 @@ export class Engine {
           (options.isolated || options.reviewer === false
             ? undefined
             : claudePlanner({ claudeExecutable: options.claudeExecutable })));
+    // Como o planeador: nos testes isolados não se gasta a subscrição a escrever rascunhos.
+    this.#drafter =
+      options.drafter === false
+        ? undefined
+        : (options.drafter ??
+          (options.isolated
+            ? undefined
+            : claudeDrafter({ claudeExecutable: options.claudeExecutable })));
     this.splits = new SplitManager({
       sessions: this.sessions,
       emit: emitAll,
@@ -539,6 +558,50 @@ export class Engine {
       'checks.get': async (p) => s.checks(p.sessionId),
       'checks.run': (p) => s.runChecks(p.sessionId),
       'checks.fix': async (p) => ({ turnId: await s.fixCheck(p.sessionId, p.id) }),
+      'handoff.draft': async (p) => {
+        const target = definitionOf(p.agent);
+        const source = await s.handoffSource(p.sessionId);
+        this.#drafts.get(p.sessionId)?.abort();
+        const abort = new AbortController();
+        this.#drafts.set(p.sessionId, abort);
+        try {
+          const drafted = await draftHandoff(this.#drafter, {
+            cwd: source.cwd,
+            goal: p.goal,
+            source: { label: source.label, title: source.title },
+            target: { label: target.label, model: p.model },
+            transcript: summaryOf(
+              source.turns,
+              'A conversa da sessão anterior, por ordem (as mensagens mais antigas podem ter ficado de fora):',
+            ),
+            lastRequest: source.lastRequest,
+            files: source.files,
+            signal: abort.signal,
+          });
+          const warning = [drafted.warning, source.filesNote].filter(Boolean).join(' ');
+          return {
+            text: drafted.text,
+            drafted: drafted.drafted,
+            ...(warning ? { warning } : {}),
+            cost: drafted.cost,
+          };
+        } finally {
+          if (this.#drafts.get(p.sessionId) === abort) this.#drafts.delete(p.sessionId);
+        }
+      },
+      'handoff.cancelDraft': async (p) => {
+        const draft = this.#drafts.get(p.sessionId);
+        draft?.abort();
+        return { cancelled: draft !== undefined };
+      },
+      'handoff.start': (p) =>
+        s.handoff(p.sessionId, {
+          agent: p.agent,
+          model: p.model,
+          effort: p.effort,
+          text: p.text,
+        }),
+      'handoff.resume': (p) => s.resumeHere(p.sessionId),
     };
   }
 
@@ -680,6 +743,7 @@ export class Engine {
   async shutdown(): Promise<void> {
     if (this.#disposed) return;
     this.#stopping = true;
+    for (const draft of this.#drafts.values()) draft.abort();
     await this.analysis.stop();
     this.races.stopForRecovery();
     this.splits.stopForRecovery();
@@ -719,4 +783,6 @@ const READ_ONLY = new Set<EngineCommandName>([
   'review.diff',
   'quality.get',
   'checks.get',
+  'handoff.draft',
+  'handoff.cancelDraft',
 ]);

@@ -23,6 +23,7 @@ import {
   isMainCommand,
   type CommandName,
   type CommandPayload,
+  type CommandResult,
   type MainCommandName,
 } from '@solline/protocol';
 import { addedKeys, allowedLoginUrl } from './agent-policy.ts';
@@ -523,7 +524,14 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
       return { ok: true, result };
     }
     await reconcilePolicy(engine, policyProjects, command, payload);
-    return { ok: true, result: await engine.request(command, payload) };
+    const result = await engine.request(command, payload);
+    // A sessão que recebe o testemunho passa a ser seguida, como qualquer sessão nova.
+    if (command === 'handoff.start') {
+      const { session } = result as CommandResult<'handoff.start'>;
+      const project = await projects.get(session.projectId);
+      attention.track(session, project?.name ?? basename(session.cwd));
+    }
+    return { ok: true, result };
   } catch (error) {
     return {
       ok: false,

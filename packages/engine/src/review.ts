@@ -26,7 +26,10 @@ const TOTAL = 12_000;
  * mensagens que ficaram, pela ordem, cortadas para caber. Se não couber tudo, ficam as mais
  * recentes. Devolve undefined quando não ficou nada para trás.
  */
-export function summaryOf(turns: readonly Turn[]): string | undefined {
+export function summaryOf(
+  turns: readonly Turn[],
+  intro = 'Esta conversa continua uma sessão anterior que foi rebobinada. O que ficou dela, por ordem:',
+): string | undefined {
   const lines: string[] = [];
   for (const turn of turns) {
     const text = turn.role === 'user' ? textOf(turn).trim() : assistantText(turn);
@@ -43,7 +46,7 @@ export function summaryOf(turns: readonly Turn[]): string | undefined {
   }
   const skipped = lines.length - kept.length;
   return [
-    'Esta conversa continua uma sessão anterior que foi rebobinada. O que ficou dela, por ordem:',
+    intro,
     ...(skipped > 0 ? [`(${skipped} mensagens mais antigas ficaram de fora)`] : []),
     '',
     kept.join('\n\n'),

@@ -85,6 +85,10 @@ export function replay(records: readonly RecoveryRecord[], initial: RecoveryStat
       case 'session.workspace':
         view.session.workspace = event.workspace;
         break;
+      case 'session.handoff':
+        if (event.handedTo) view.session.handedTo = event.handedTo;
+        else delete view.session.handedTo;
+        break;
     }
   }
   state.snapshot.sessions = state.sessions.map((session) => session.view);
