@@ -17,6 +17,7 @@ import {
   type CheckSpec,
   type Checks,
   type Quality,
+  type ReviewScope,
   type ReviewTrigger,
   type Orphan,
   type SetupSpec,
@@ -35,6 +36,9 @@ import type { SessionCheckpoints } from './checkpoints/session-checkpoints.ts';
 import type { CheckpointStore } from './checkpoints/store.ts';
 import { assistantText, commentsMessage, summaryOf, textOf } from './review.ts';
 import type { Reviewer } from './quality/reviewer.ts';
+import type { ReviewerPicker } from './quality/routing.ts';
+import { reviewWorth } from './quality/gating.ts';
+import { readProjectRules } from './quality/rules.ts';
 import { NO_REVIEW, SessionQuality, fixMessage } from './quality/session-quality.ts';
 import { ProjectChecks, checkFixMessage } from './checks/project-checks.ts';
 import type { RunCommand } from './checks/run.ts';
@@ -149,6 +153,7 @@ export class SessionManager {
   readonly #store: CheckpointStore | undefined;
   readonly #keysFor: (agent: string) => Promise<readonly string[]>;
   readonly #reviewer: Reviewer | undefined;
+  readonly #pickReviewer: ReviewerPicker | undefined;
   readonly #checksOptions: ChecksOptions | undefined;
   /** As verificações de cada pasta de trabalho (por cwd), partilhadas pelas sessões que lá estão. */
   readonly #checks = new Map<string, ProjectChecks>();
@@ -179,6 +184,8 @@ export class SessionManager {
     keysFor?: (agent: string) => Promise<readonly string[]>;
     /** Quem dá a segunda opinião no fim de cada turno que mude ficheiros. */
     reviewer?: Reviewer | undefined;
+    /** Quem revê cada sessão, conforme o agente (o fabricante oposto); tem prioridade sobre reviewer. */
+    reviewerFor?: ReviewerPicker | undefined;
     /** As verificações do projeto no fim de cada turno que mude ficheiros; sem isto, não há. */
     checks?: ChecksOptions | undefined;
     /** Worktrees para as sessões a mais de um projeto; sem isto, partilham a pasta. */
@@ -192,8 +199,13 @@ export class SessionManager {
     this.#store = options.checkpoints;
     this.#keysFor = options.keysFor ?? (async () => []);
     this.#reviewer = options.reviewer;
+    this.#pickReviewer = options.reviewerFor;
     this.#checksOptions = options.checks;
     this.#worktrees = options.worktrees;
+  }
+
+  get #hasReviewer(): boolean {
+    return Boolean(this.#reviewer ?? this.#pickReviewer);
   }
 
   async create(payload: SessionStartPayload): Promise<SessionResult> {
@@ -253,7 +265,7 @@ export class SessionManager {
       openTurn: null,
       cycle: this.#turnsFor(() => info),
       context: undefined,
-      quality: this.#reviewer
+      quality: this.#hasReviewer
         ? new SessionQuality({
             reviewer: this.#reviewer,
             enabled: true,
@@ -824,7 +836,7 @@ export class SessionManager {
         preparing: undefined,
         closing: false,
       };
-      if (this.#reviewer && view.quality)
+      if (this.#hasReviewer && view.quality)
         memory.quality = new SessionQuality({
           reviewer: this.#reviewer,
           enabled: view.quality.enabled,
@@ -967,40 +979,99 @@ export class SessionManager {
     });
   }
 
-  /** A segunda opinião sobre um turno, se ele mudou ficheiros. Uma falha fica no estado. */
-  async #review(sessionId: string, turnId: string, trigger: ReviewTrigger = 'turn'): Promise<void> {
+  /**
+   * A segunda opinião sobre um turno (ou, com scope 'session', sobre tudo o que a sessão mudou).
+   * No fim de um turno só se revê o que vale a pena (20 linhas ou mais, ou um caminho sensível);
+   * a pedido e antes de trazer revê-se sempre. Uma falha fica no estado, nunca como "limpo".
+   */
+  async #review(
+    sessionId: string,
+    turnId: string,
+    how: { trigger: ReviewTrigger; scope: ReviewScope } = { trigger: 'turn', scope: 'turn' },
+  ): Promise<void> {
     const entry = this.#sessions.get(sessionId);
     const memory = this.#memory.get(sessionId);
     const checkpoints = memory?.checkpoints;
     if (!entry || !memory?.quality || !checkpoints?.available) return;
-    const checkpoint = checkpoints.timeline().checkpoints.find((c) => c.turnId === turnId);
-    if (!checkpoint || checkpoint.stats.files === 0) return;
+    const timeline = checkpoints.timeline().checkpoints;
+    const whole = how.scope === 'session';
+    if (!whole) {
+      const checkpoint = timeline.find((c) => c.turnId === turnId);
+      if (!checkpoint || checkpoint.stats.files === 0) return;
+    }
+    const worktrees = this.#worktrees;
+    const worktree = memory.worktree;
+    const diffOf = async (): Promise<FileDiff[]> =>
+      whole
+        ? worktree && worktrees
+          ? (await worktrees.diff(worktree)).map((f) => f.diff)
+          : checkpoints.diff({ kind: 'session' })
+        : checkpoints.diff({ kind: 'turn', turnId });
+    // Só os turnos pequenos e banais saem aqui em silêncio (o estado e os achados anteriores ficam).
+    // Uma falha ao calcular o diff não se esconde: segue e chega ao estado como erro.
+    let ready: { diff: FileDiff[] } | { error: unknown } | undefined;
+    if (how.trigger === 'turn') {
+      try {
+        const diff = await diffOf();
+        if (!reviewWorth(diff).worth) return;
+        ready = { diff };
+      } catch (error) {
+        ready = { error };
+      }
+    }
+    const reviewer = await this.#reviewerOf(entry);
+    if (!reviewer) return;
     const completed = this.#beforeEffect('quality.run', sessionId);
-    const turn = memory.turns.find((t) => t.id === turnId && t.role === 'user');
-    // Uma falha do diff chega ao estado como erro: o revisor nunca parece ter aprovado.
-    const vendor = this.#reviewer?.vendor;
+    const request = this.#requestOf(memory, turnId, whole);
     await memory.quality.review(
       turnId,
       async () => {
-        const diff = await checkpoints.diff({ kind: 'turn', turnId });
-        return diff.length === 0
-          ? null
-          : { cwd: entry.info.cwd, diff, request: turn ? textOf(turn) : '' };
+        if (ready && 'error' in ready) throw ready.error;
+        const diff = ready?.diff ?? (await diffOf());
+        if (diff.length === 0) return null;
+        const rules = entry.trusted ? await readProjectRules(entry.info.cwd) : undefined;
+        return { cwd: entry.info.cwd, diff, request, rules };
       },
       {
-        trigger,
-        ...(vendor
+        trigger: how.trigger,
+        ...(reviewer.vendor
           ? {
               reviewer: {
-                vendor,
-                ...(this.#reviewer?.model ? { model: this.#reviewer.model } : {}),
-                sameVendor: entry.info.agent === vendor,
+                vendor: reviewer.vendor,
+                ...(reviewer.model ? { model: reviewer.model } : {}),
+                sameVendor: entry.info.agent === reviewer.vendor,
               },
             }
           : {}),
       },
+      reviewer,
     );
     completed();
+  }
+
+  /** O revisor desta sessão: o fabricante oposto quando está pronto, senão o mesmo. */
+  async #reviewerOf(entry: Entry): Promise<Reviewer | undefined> {
+    return this.#pickReviewer
+      ? this.#pickReviewer(entry.info.agent, entry.trusted)
+      : this.#reviewer;
+  }
+
+  /**
+   * O que o utilizador pediu: o turno, ou (na sessão toda) os pedidos todos pela ordem. Nunca o
+   * que o agente respondeu: o revisor vê o diff e o pedido, não a história que o autor conta.
+   */
+  #requestOf(memory: Memory, turnId: string, whole: boolean): string {
+    if (!whole) {
+      const turn = memory.turns.find((t) => t.id === turnId && t.role === 'user');
+      return turn ? textOf(turn) : '';
+    }
+    const requests = memory.turns.filter((t) => t.role === 'user').map((t) => textOf(t));
+    return requests.length === 1
+      ? (requests[0] ?? '')
+      : requests
+          .map((text, i) => `${i + 1}. ${text}`)
+          .join('\n\n')
+          .slice(0, 6_000);
   }
 
   /** As verificações do projeto depois de um turno que mudou ficheiros. */
@@ -1496,15 +1567,25 @@ export class SessionManager {
     return quality.setEnabled(enabled);
   }
 
-  /** Volta a rever o último turno com checkpoint, agora. */
-  async reviewNow(sessionId: string): Promise<Quality> {
+  /**
+   * Revê agora: o último turno com checkpoint (por omissão) ou, com scope 'session', tudo o que
+   * a sessão mudou. A pedido ('manual') e antes de trazer ('bring') revê sempre, sem o limiar
+   * das 20 linhas.
+   */
+  async reviewNow(
+    sessionId: string,
+    how: { trigger?: ReviewTrigger | undefined; scope?: ReviewScope | undefined } = {},
+  ): Promise<Quality> {
     this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
     if (!memory.quality) throw new Error('A segunda opinião não está disponível');
     const last = memory.checkpoints?.timeline().checkpoints.at(-1);
     if (!last || last.state !== 'done') throw new Error('Ainda não há nenhum turno acabado');
     // Não espera pelo fim (uma revisão leva segundos); o resultado chega por session.quality.
-    void this.#review(sessionId, last.turnId, 'manual');
+    const trigger = how.trigger === 'turn' ? 'manual' : (how.trigger ?? 'manual');
+    void this.#review(sessionId, last.turnId, { trigger, scope: how.scope ?? 'turn' }).catch(
+      (error) => this.#backgroundFailure(sessionId, error),
+    );
     return memory.quality.state;
   }
 

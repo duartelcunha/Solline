@@ -29,11 +29,12 @@ export interface ReviewMeta {
 export class SessionQuality {
   #state: Quality;
   #running: AbortController | null = null;
-  readonly #reviewer: Reviewer;
+  readonly #reviewer: Reviewer | undefined;
   readonly #emit: (quality: Quality) => void;
 
   constructor(options: {
-    reviewer: Reviewer;
+    /** O revisor por omissão; cada revisão pode trazer o seu (o do fabricante oposto). */
+    reviewer?: Reviewer | undefined;
     emit: (quality: Quality) => void;
     enabled: boolean;
     recovery?: Quality;
@@ -77,6 +78,7 @@ export class SessionQuality {
     turnId: string,
     prepare: () => Promise<Omit<ReviewInput, 'signal'> | null>,
     meta: ReviewMeta = {},
+    reviewer: Reviewer | undefined = this.#reviewer,
   ): Promise<void> {
     const who = {
       ...(meta.trigger ? { trigger: meta.trigger } : {}),
@@ -96,7 +98,8 @@ export class SessionQuality {
         this.#set({ ...this.#state, review: NO_REVIEW });
         return;
       }
-      const found = await this.#reviewer({ ...input, signal: abort.signal });
+      if (!reviewer) throw new Error('Não há revisor disponível');
+      const found = await reviewer({ ...input, signal: abort.signal });
       if (abort.signal.aborted) return;
       const findings = found.map((f, i): Finding => ({
         ...f,

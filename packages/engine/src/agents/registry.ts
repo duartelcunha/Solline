@@ -16,7 +16,7 @@ import {
   type CodexExecutable,
 } from '../adapters/codex/executable.ts';
 import { CODEX_MODES, DEFAULT_CODEX_MODE } from '../adapters/codex/modes.ts';
-import { CLAUDE_ENV_POLICY, agentEnv, type EnvPolicy } from '../env.ts';
+import { CLAUDE_ENV_POLICY, CODEX_ENV_POLICY, agentEnv, type EnvPolicy } from '../env.ts';
 import { StderrTail } from '../rpc/json-rpc.ts';
 import { CATALOG, catalogDefinition } from './catalog.ts';
 import type { LoginFlow } from './login.ts';
@@ -150,7 +150,7 @@ export function codexDefinition(
 ): AgentDefinition {
   const resolve =
     options.resolve ?? (() => resolveCodexExecutable({ packaged: options.packaged === true }));
-  const envPolicy: EnvPolicy = { base: 'no-secrets', keys: ['OPENAI_API_KEY', 'CODEX_API_KEY'] };
+  const envPolicy: EnvPolicy = CODEX_ENV_POLICY;
   const reviewed = (): CodexExecutable => {
     const found = resolve();
     if (!found) throw new Error('Não encontrei o Codex nesta máquina');

@@ -13,7 +13,7 @@ const TIMEOUT_MS = 30_000;
  * Um app-server só para a conta, sem sessão nem thread. A Solline pergunta ao Codex se tem
  * sessão e pede-lhe o login; nunca lê as credenciais (o Codex guarda-as onde costuma).
  */
-async function open(transport: CodexTransport): Promise<{
+export async function openCodexAccount(transport: CodexTransport): Promise<{
   peer: JsonRpcPeer;
   stderr: StderrTail;
   close: () => Promise<void>;
@@ -45,7 +45,7 @@ async function open(transport: CodexTransport): Promise<{
 
 /** Se o Codex precisa de login. Não pede um token novo (refreshToken: false). */
 export async function codexNeedsLogin(transport: CodexTransport): Promise<boolean> {
-  const { peer, close } = await open(transport);
+  const { peer, close } = await openCodexAccount(transport);
   try {
     const account = await peer.request<GetAccountResponse>(
       'account/read',
@@ -63,7 +63,7 @@ export async function codexNeedsLogin(transport: CodexTransport): Promise<boolea
  * endereço da OpenAI. O processo fica vivo até ao account/login/completed.
  */
 export async function startCodexLogin(transport: CodexTransport): Promise<LoginFlow> {
-  const { peer, close } = await open(transport);
+  const { peer, close } = await openCodexAccount(transport);
   let settle: (error: Error | null) => void = () => undefined;
   const finished = new Promise<Error | null>((resolve) => (settle = resolve));
   let loginId: string | null = null;

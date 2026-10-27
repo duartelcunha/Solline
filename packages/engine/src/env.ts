@@ -69,3 +69,9 @@ export function sanitizedEnv(
 ): Record<string, string | undefined> {
   return agentEnv(CLAUDE_ENV_POLICY, source);
 }
+
+/** O Codex recebe só as chaves da OpenAI, nenhum outro segredo do anfitrião. */
+export const CODEX_ENV_POLICY: EnvPolicy = {
+  base: 'no-secrets',
+  keys: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
+};

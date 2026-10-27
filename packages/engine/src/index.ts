@@ -11,6 +11,16 @@ export {
   type ReviewedFinding,
   type Reviewer,
 } from './quality/reviewer.ts';
+export {
+  CODEX_REVIEW_LOGIN_MESSAGE,
+  codexAvailability,
+  codexFailure,
+  codexReviewer,
+  type CodexReviewerOptions,
+} from './quality/codex-reviewer.ts';
+export { routeReviewer, type ReviewerPicker } from './quality/routing.ts';
+export { MIN_REVIEW_LINES, isSensitivePath, reviewWorth } from './quality/gating.ts';
+export { MAX_RULES_CHARS, readProjectRules } from './quality/rules.ts';
 export { claudePlanner, type Planner } from './races/planner.ts';
 export { SessionQuality, fixMessage } from './quality/session-quality.ts';
 export { PermissionBroker, type BrokerOutcome } from './permission-broker.ts';

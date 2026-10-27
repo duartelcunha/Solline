@@ -21,6 +21,7 @@ import {
   type AdapterSink,
   type AgentAdapter,
   type AgentStartOptions,
+  promptFor,
   type Reviewer,
 } from '../src/index.ts';
 import { CheckpointStore } from '../src/checkpoints/store.ts';
@@ -84,6 +85,12 @@ class ScriptedAdapter implements AgentAdapter {
     this.#sink.state('running');
     const match = /escreve (\S+)=(\S+)/.exec(text);
     if (match) await writeFile(path.join(this.#options.cwd, match[1]!), `${match[2]}\n`);
+    // Uma mudança grande: 25 linhas num ficheiro (passa o limiar da segunda opinião).
+    const big = /escreve-muito (\S+)/.exec(text);
+    if (big) {
+      const lines = Array.from({ length: 25 }, (_, i) => `linha ${i}`);
+      await writeFile(path.join(this.#options.cwd, big[1]!), `${lines.join('\n')}\n`);
+    }
     const reply = `${turnId}:a`;
     delta({ type: 'turn.start', turn: { id: reply, role: 'assistant', blocks: [] } });
     delta({
@@ -477,7 +484,7 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
       seen.push(input);
       return [
         {
-          path: 'f.txt',
+          path: 'auth.txt',
           line: 1,
           severity: 'slop',
           priority: 3,
@@ -488,17 +495,20 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
       ];
     });
     const id = await startSession();
-    const t1 = await turn(id, 'escreve f.txt=v1');
+    const t1 = await turn(id, 'escreve auth.txt=v1');
     await waitFor(() => quality(id)?.review.state === 'done', 10_000);
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ request: 'escreve f.txt=v1', cwd: project });
-    expect(seen[0]!.diff.map((f) => f.path)).toEqual(['f.txt']);
+    expect(seen[0]).toMatchObject({ request: 'escreve auth.txt=v1', cwd: project });
+    expect(seen[0]!.diff.map((f) => f.path)).toEqual(['auth.txt']);
+    // O revisor só vê o pedido e o diff: nunca o que o agente respondeu ("Feito: …").
+    expect(Object.keys(seen[0]!).sort()).toEqual(['cwd', 'diff', 'request', 'rules', 'signal']);
+    expect(promptFor(seen[0]!)).not.toContain('Feito:');
     const findings = quality(id)!.review.findings;
     expect(findings).toEqual([expect.objectContaining({ id: `${t1}-1`, severity: 'slop' })]);
 
     expect(quality(id)!.review).toMatchObject({ trigger: 'turn', findings: [{ status: 'open' }] });
     await manager.fix(id, [findings[0]!.id]);
-    expect(ScriptedAdapter.received.at(-1)!.text).toContain('f.txt:1: Valor sem sentido');
+    expect(ScriptedAdapter.received.at(-1)!.text).toContain('auth.txt:1: Valor sem sentido');
     expect(manager.quality(id).review.findings[0]).toMatchObject({ status: 'fixed' });
     expect(manager.quality(id).stats).toEqual({ fixed: 1, dismissed: 0, total: 1 });
   });
@@ -506,7 +516,7 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
   it('descartar marca o achado, conta-o e sobrevive à recuperação', async () => {
     makeManager(true, async () => [
       {
-        path: 'f.txt',
+        path: 'auth.txt',
         line: 1,
         severity: 'risk',
         priority: 1,
@@ -516,7 +526,7 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
       },
     ]);
     const id = await startSession();
-    const t1 = await turn(id, 'escreve f.txt=v1');
+    const t1 = await turn(id, 'escreve auth.txt=v1');
     await waitFor(() => quality(id)?.review.state === 'done', 10_000);
     const after = manager.dismiss(id, [`${t1}-1`]);
     expect(after.review.findings[0]).toMatchObject({ status: 'dismissed', priority: 1 });
@@ -546,10 +556,94 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
   it('uma falha do revisor fica no estado, sem partir a sessão', async () => {
     makeManager(true, () => Promise.reject(new Error('sem rede')));
     const id = await startSession();
-    await turn(id, 'escreve f.txt=v1');
+    await turn(id, 'escreve auth.txt=v1');
     await waitFor(() => quality(id)?.review.state === 'error', 10_000);
     expect(quality(id)!.review.error).toBe('sem rede');
-    await turn(id, 'escreve f.txt=v2');
+    await turn(id, 'escreve auth.txt=v2');
+  });
+
+  describe('quando se revê', () => {
+    const nothing: Reviewer = async () => [];
+
+    it('um turno pequeno e banal não gasta o revisor; um grande ou sensível sim', async () => {
+      const seen: Parameters<Reviewer>[0][] = [];
+      makeManager(true, async (input) => (seen.push(input), []));
+      const id = await startSession();
+      await turn(id, 'escreve f.txt=v1');
+      await new Promise((r) => setTimeout(r, 200));
+      expect(seen).toHaveLength(0);
+      // Nem o estado anterior se mexe: continua "ainda nada revisto".
+      expect(quality(id)?.review.state ?? 'idle').toBe('idle');
+
+      await turn(id, 'escreve-muito big.ts');
+      await waitFor(() => quality(id)?.review.state === 'done', 10_000);
+      expect(seen).toHaveLength(1);
+      expect(quality(id)!.review.trigger).toBe('turn');
+    });
+
+    it('a pedido revê sempre, mesmo um turno pequeno', async () => {
+      const seen: Parameters<Reviewer>[0][] = [];
+      makeManager(true, async (input) => (seen.push(input), []));
+      const id = await startSession();
+      await turn(id, 'escreve f.txt=v1');
+      await manager.reviewNow(id, {});
+      await waitFor(() => quality(id)?.review.state === 'done', 10_000);
+      expect(seen).toHaveLength(1);
+      expect(quality(id)!.review.trigger).toBe('manual');
+    });
+
+    it('com scope session revê tudo o que a sessão mudou, com os pedidos todos e antes de trazer', async () => {
+      const seen: Parameters<Reviewer>[0][] = [];
+      makeManager(true, async (input) => (seen.push(input), []));
+      const id = await startSession();
+      await turn(id, 'escreve f.txt=v1');
+      await turn(id, 'escreve g.txt=v2');
+      await manager.reviewNow(id, { trigger: 'bring', scope: 'session' });
+      await waitFor(() => quality(id)?.review.state === 'done', 10_000);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.diff.map((f) => f.path).sort()).toEqual(['f.txt', 'g.txt']);
+      expect(seen[0]!.request).toContain('1. escreve f.txt=v1');
+      expect(seen[0]!.request).toContain('2. escreve g.txt=v2');
+      expect(quality(id)!.review.trigger).toBe('bring');
+    });
+
+    it('as regras do projeto só vão para o revisor em projetos de confiança', async () => {
+      await writeFile(path.join(project, 'CLAUDE.md'), 'Commits em pt-PT.\n');
+      const seen: Parameters<Reviewer>[0][] = [];
+      makeManager(true, async (input) => (seen.push(input), []));
+      const id = await startSession();
+      await turn(id, 'escreve auth.txt=v1');
+      await waitFor(() => quality(id)?.review.state === 'done', 10_000);
+      expect(seen[0]!.rules).toContain('Commits em pt-PT.');
+
+      manager.setProjectTrust('p', false);
+      await turn(id, 'escreve auth.txt=v2');
+      await waitFor(() => seen.length === 2, 10_000);
+      expect(seen[1]!.rules).toBeUndefined();
+    });
+
+    it('cada sessão é revista pelo revisor que o escolhedor der ao agente dela', async () => {
+      const asked: [string, boolean][] = [];
+      const other = Object.assign(nothing, { vendor: 'codex', model: 'gpt-x' });
+      events = [];
+      manager = new SessionManager({
+        emit: (event) => events.push(event),
+        registry: testRegistry({
+          claude: (options, sink) => new ScriptedAdapter(options, sink, true),
+        }),
+        checkpoints: store,
+        reviewerFor: async (agent, trusted) => (asked.push([agent, trusted]), other),
+      });
+      const id = await startSession();
+      await turn(id, 'escreve auth.txt=v1');
+      await waitFor(() => quality(id)?.review.state === 'done', 10_000);
+      expect(asked).toEqual([['claude', true]]);
+      expect(quality(id)!.review.reviewer).toEqual({
+        vendor: 'codex',
+        model: 'gpt-x',
+        sameVendor: false,
+      });
+    });
   });
 });
 

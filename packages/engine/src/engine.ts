@@ -24,6 +24,8 @@ import { fileAgentSettings, memoryAgentSettings, type AgentSettings } from './ag
 import { SECRET_NAME } from './env.ts';
 import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
+import { codexAvailability } from './quality/codex-reviewer.ts';
+import { routeReviewer, type ReviewerPicker } from './quality/routing.ts';
 import { SessionManager, type ChecksOptions } from './session-manager.ts';
 import { Assembler } from './races/assembler.ts';
 import { RaceManager } from './races/race-manager.ts';
@@ -63,6 +65,13 @@ export interface EngineOptions {
   checkpoints?: CheckpointStoreOptions | false;
   /** A segunda opinião no fim de cada turno (por omissão um Claude só de leitura); false desliga. */
   reviewer?: Reviewer | false;
+  /**
+   * Os revisores por fabricante: a sessão de um agente é revista pelo oposto (Claude pelo Codex;
+   * Codex e ACP pelo Claude) e, sem o outro, pelo mesmo. Por omissão o Claude só de leitura e o
+   * Codex se estiver pronto (instalado, com login e sandbox); codex: false desliga o Codex.
+   * Tem de ser dado sem `reviewer`, que revê tudo com um só.
+   */
+  reviewers?: { claude?: Reviewer; codex?: Reviewer | false };
   /** Quem corta um pedido em partes (por omissão um Claude só de leitura); false desliga. */
   planner?: Planner | false;
   /** As verificações do projeto no fim de cada turno (por omissão ligadas, menos isolado); false desliga. */
@@ -73,6 +82,33 @@ export interface EngineOptions {
   settings?: AgentSettings;
   /** Para testes: o ambiente onde se procuram nomes de segredos. */
   env?: NodeJS.ProcessEnv;
+}
+
+/** Quem dá a segunda opinião: um só para tudo, ou um por fabricante (o oposto do agente da sessão). */
+function reviewersFor(options: EngineOptions): {
+  manager: { reviewer?: Reviewer; reviewerFor?: ReviewerPicker };
+  /** O revisor do resultado integrado das partes (sem agente de sessão: o Claude). */
+  integration: Reviewer | undefined;
+} {
+  if (options.reviewer === false) return { manager: {}, integration: undefined };
+  if (options.reviewer)
+    return { manager: { reviewer: options.reviewer }, integration: options.reviewer };
+  if (options.isolated && !options.reviewers) return { manager: {}, integration: undefined };
+  const claude =
+    options.reviewers?.claude ?? claudeReviewer({ claudeExecutable: options.claudeExecutable });
+  const given = options.reviewers?.codex;
+  const codex =
+    given === false
+      ? undefined
+      : given
+        ? () => Promise.resolve(given)
+        : options.isolated
+          ? undefined
+          : codexAvailability({ packaged: options.packaged });
+  return {
+    manager: { reviewerFor: routeReviewer({ claude, codex }) },
+    integration: claude,
+  };
 }
 
 type Handlers = {
@@ -175,6 +211,7 @@ export class Engine {
           (options.dataDir
             ? new WorktreeManager({ root: path.join(options.dataDir, 'worktrees') })
             : undefined));
+    const reviewing = reviewersFor(options);
     this.sessions = new SessionManager({
       beforeEffect: (command, sessionId, text) =>
         this.#prepare(command, { sessionId, ...(text ? { text } : {}) }),
@@ -184,13 +221,7 @@ export class Engine {
       checkpoints: this.#checkpoints,
       keysFor: (agent) => settings.keys(agent),
       // Nos testes isolados não se gasta a subscrição a rever turnos falsos.
-      reviewer:
-        options.reviewer === false
-          ? undefined
-          : (options.reviewer ??
-            (options.isolated
-              ? undefined
-              : claudeReviewer({ claudeExecutable: options.claudeExecutable }))),
+      ...reviewing.manager,
       worktrees,
       checks:
         options.checks === false
@@ -228,13 +259,7 @@ export class Engine {
             integration: {
               sessions: this.sessions,
               worktrees,
-              reviewer:
-                options.reviewer === false
-                  ? undefined
-                  : (options.reviewer ??
-                    (options.isolated
-                      ? undefined
-                      : claudeReviewer({ claudeExecutable: options.claudeExecutable }))),
+              reviewer: reviewing.integration,
             },
           }
         : {}),
@@ -508,7 +533,7 @@ export class Engine {
         s.rewind(p.sessionId, p.turnId, { files: p.files, conversation: p.conversation }),
       'quality.get': async (p) => s.quality(p.sessionId),
       'quality.setEnabled': async (p) => s.setQualityEnabled(p.sessionId, p.enabled),
-      'quality.review': (p) => s.reviewNow(p.sessionId),
+      'quality.review': (p) => s.reviewNow(p.sessionId, p),
       'quality.fix': async (p) => ({ turnId: await s.fix(p.sessionId, p.ids) }),
       'quality.dismiss': async (p) => s.dismiss(p.sessionId, p.ids),
       'checks.get': async (p) => s.checks(p.sessionId),
