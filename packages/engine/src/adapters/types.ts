@@ -6,6 +6,7 @@ import type {
   SessionSettings,
   SessionState,
 } from '@solline/protocol';
+import type { BrainBinding } from '../brain/brain.ts';
 
 /**
  * Para onde um adaptador manda o que acontece na conversa. O SessionManager liga isto
@@ -32,6 +33,11 @@ export interface AgentStartOptions {
   /** Servidores MCP só desta sessão (stdio). */
   mcpServers?: readonly McpServerLaunch[] | undefined;
   /**
+   * As ferramentas da Solline, só para quem as recebe dentro do processo (o Claude). Os agentes
+   * por stdio recebem o mesmo cérebro como mais um servidor em mcpServers (o shim).
+   */
+  brain?: BrainBinding | undefined;
+  /**
    * Começa de um ponto de rebobinar que este mesmo adaptador deu (rewindPoint): a conversa
    * fica como estava nesse momento, numa sessão nova do agente.
    */
@@ -52,6 +58,8 @@ export interface McpServerLaunch {
   env: Readonly<Record<string, string>>;
   /** Corre programas: as ferramentas dele nunca ficam com "Permitir sempre". */
   executesCode: boolean;
+  /** Ferramentas só de leitura deste servidor: podem correr sem pedir autorização (as outras pedem). */
+  autoApprove?: readonly string[] | undefined;
 }
 
 export interface AgentStartResult {

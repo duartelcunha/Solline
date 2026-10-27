@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { basename, isAbsolute, relative, resolve } from 'node:path';
 import {
   applyDelta,
   findModel,
@@ -54,6 +54,7 @@ import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
 import type { McpCatalog } from './mcp/catalog.ts';
+import type { Brain, BrainBinding } from './brain/brain.ts';
 
 /** Com um servidor MCP que corre programas ligado, nada de modos sem perguntas. */
 const RESTRICTED_RISKS = new Set(['auto', 'full']);
@@ -64,6 +65,13 @@ function restrict(capabilities: AgentCapabilities, restricted: boolean): AgentCa
     ...capabilities,
     modes: capabilities.modes.filter((m) => !RESTRICTED_RISKS.has(m.risk)),
   };
+}
+
+/** features.brain diz à interface se o agente desta sessão tem mesmo as ferramentas da Solline. */
+function withBrain(capabilities: AgentCapabilities, brain: boolean): AgentCapabilities {
+  return brain
+    ? { ...capabilities, features: { ...capabilities.features, brain: true } }
+    : capabilities;
 }
 
 type SessionResult = EngineCommandResult<'session.start'>;
@@ -92,6 +100,8 @@ interface Entry {
   definition: AgentDefinition;
   trusted: boolean;
   mcp: readonly McpServerLaunch[];
+  /** As ferramentas da Solline desta sessão, até ela fechar ou arrancar de novo. */
+  brain?: BrainBinding | undefined;
 }
 
 /** O que a sessão guarda para lá do adaptador (sobrevive a retomar e a rebobinar). */
@@ -150,6 +160,7 @@ export class SessionManager {
   readonly #emit: (event: EngineEvent) => void;
   readonly #registry: AgentRegistry;
   readonly #mcp: McpCatalog | undefined;
+  readonly #brain: Brain | undefined;
   readonly #checkCwd: (cwd: string) => Promise<void>;
   readonly #store: CheckpointStore | undefined;
   readonly #keysFor: (agent: string) => Promise<readonly string[]>;
@@ -179,6 +190,8 @@ export class SessionManager {
     registry: AgentRegistry;
     /** Servidores MCP que uma sessão pode pedir. */
     mcp?: McpCatalog | undefined;
+    /** As ferramentas da Solline para os agentes; sem isto, nenhuma sessão as tem. */
+    brain?: Brain | undefined;
     /** Para testes: troca a verificação da pasta. */
     checkCwd?: (cwd: string) => Promise<void>;
     /** Checkpoints escondidos por turno; sem isto, rever e rebobinar ficheiros ficam desligados. */
@@ -198,6 +211,7 @@ export class SessionManager {
     this.#beforeEffect = options.beforeEffect ?? (() => () => undefined);
     this.#registry = options.registry;
     this.#mcp = options.mcp;
+    this.#brain = options.brain;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
     this.#store = options.checkpoints;
     this.#keysFor = options.keysFor ?? (async () => []);
@@ -720,6 +734,7 @@ export class SessionManager {
     const memories = [...this.#memory.values()];
     this.#sessions.clear();
     this.#memory.clear();
+    for (const entry of entries) entry.brain?.revoke();
     if (!alreadyStopped) await Promise.all(entries.map((entry) => entry.adapter.close()));
     for (const m of memories) m.quality?.dispose();
     for (const c of this.#checks.values()) c.dispose();
@@ -961,6 +976,7 @@ export class SessionManager {
       memory.quality?.dispose();
     }
     for (const checks of this.#checks.values()) checks.dispose();
+    for (const entry of this.#sessions.values()) entry.brain?.revoke();
     await Promise.all([...this.#sessions.values()].map((entry) => entry.adapter.close()));
   }
 
@@ -1421,6 +1437,7 @@ export class SessionManager {
     }
     memory.preparing?.abort();
     this.#ports.release(sessionId);
+    entry.brain?.revoke();
     await entry.adapter.close().catch(() => undefined);
     memory.quality?.dispose();
     await memory.checkpoints?.dispose();
@@ -2038,6 +2055,31 @@ export class SessionManager {
     );
   }
 
+  /**
+   * As ferramentas da Solline desta sessão, ou nada. Pistas e partes de uma repartição (e quem
+   * resolve a integração) ficam sem elas: têm de continuar independentes umas das outras.
+   */
+  async #bindBrain(
+    info: SessionInfo,
+    definition: AgentDefinition,
+  ): Promise<BrainBinding | undefined> {
+    if (!this.#brain || !definition.brain || !definition.mcp) return undefined;
+    if (info.raceId || info.origin?.kind === 'lane' || info.origin?.kind === 'part')
+      return undefined;
+    const binding = await this.#brain.bind(
+      {
+        id: info.id,
+        projectId: info.projectId,
+        agent: info.agent,
+        describe: () => ({ title: info.title, folder: basename(info.cwd) }),
+      },
+      definition.brain,
+    );
+    if (binding.available) return binding;
+    binding.revoke();
+    return undefined;
+  }
+
   async #start(
     info: SessionInfo,
     definition: AgentDefinition,
@@ -2066,6 +2108,14 @@ export class SessionManager {
       ...agentEnv(policy),
       ...(info.port !== undefined ? PortAllocator.env(info.port) : {}),
     };
+    // Retomar ou rebobinar arranca outro agente: o acesso do anterior fecha antes de abrir o novo.
+    this.#sessions.get(info.id)?.brain?.revoke();
+    const brain = await this.#bindBrain(info, definition);
+    const servers = [
+      ...mcp.map((s) => withoutSecrets(s, env)),
+      // O shim vai como mais um servidor MCP; o limite de 8 é dos do catálogo e este não conta.
+      ...(brain?.launch ? [brain.launch] : []),
+    ];
     const adapter = definition.create(
       {
         cwd: info.cwd,
@@ -2076,17 +2126,19 @@ export class SessionManager {
         ...(fork ? { fork } : {}),
         projectTrusted: trusted,
         env,
-        ...(mcp.length ? { mcpServers: mcp.map((s) => withoutSecrets(s, env)) } : {}),
+        ...(servers.length ? { mcpServers: servers } : {}),
+        ...(brain?.transport === 'in-process' ? { brain } : {}),
       },
       this.#sinkFor(
         info,
         () => entry.adapter,
         mcp.some((s) => s.executesCode),
+        Boolean(brain),
       ),
     );
     entry.adapter = adapter;
     const isNew = !this.#sessions.has(info.id);
-    this.#sessions.set(info.id, { info, adapter, definition, trusted, mcp });
+    this.#sessions.set(info.id, { info, adapter, definition, trusted, mcp, brain });
     const restricted = mcp.some((s) => s.executesCode);
     let started: Awaited<ReturnType<AgentAdapter['start']>> | undefined;
     try {
@@ -2098,7 +2150,7 @@ export class SessionManager {
       // Um modo que o agente aceitou no arranque mas não anuncia (por exemplo Auto num modelo
       // sem suporte) volta ao modo por omissão: a interface nunca mostra um modo que não há.
       const fallback = definition.defaultMode;
-      const visible = restrict(started.capabilities, restricted);
+      const visible = withBrain(restrict(started.capabilities, restricted), Boolean(brain));
       const modes = visible.modes;
       if (info.settings.mode && !modes.some((m) => m.id === info.settings.mode)) {
         // Sem modo por omissão (agentes ACP), vai para o mais fechado que restar.
@@ -2113,6 +2165,7 @@ export class SessionManager {
       }
       return { session: { ...info }, capabilities: visible };
     } catch (error) {
+      brain?.revoke();
       // O agente arrancou mas algo depois falhou: fecha-o, senão o processo ficava sem dono.
       if (started) await adapter.close().catch(() => undefined);
       // Uma sessão que nunca arrancou não fica; uma retomada fica, em erro, para tentar outra vez.
@@ -2125,6 +2178,7 @@ export class SessionManager {
     info: SessionInfo,
     adapter: () => AgentAdapter | undefined,
     restricted: boolean,
+    brain: boolean,
   ): AdapterSink {
     const emit = this.#emit;
     const forward = this.#deltaFor(info, this.#memory.get(info.id));
@@ -2133,7 +2187,10 @@ export class SessionManager {
         const cleaned = withoutUnreportedCost(raw, adapter());
         forward(
           cleaned.type === 'capabilities'
-            ? { ...cleaned, capabilities: restrict(cleaned.capabilities, restricted) }
+            ? {
+                ...cleaned,
+                capabilities: withBrain(restrict(cleaned.capabilities, restricted), brain),
+              }
             : cleaned,
         );
       },

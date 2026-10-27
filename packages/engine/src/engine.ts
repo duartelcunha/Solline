@@ -40,6 +40,7 @@ import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
 import { ENGINE_VERSION } from './version.ts';
+import { Brain, sourceShimPath, type BrainOptions } from './brain/brain.ts';
 import { SpaceManager } from './spaces/manager.ts';
 import { SpaceAnalysis, type AnalysisRunner } from './spaces/analysis.ts';
 import { claudeAnalysis } from './spaces/claude-analysis.ts';
@@ -63,6 +64,11 @@ export interface EngineOptions {
   registry?: AgentRegistry;
   /** Para testes: troca o catálogo de servidores MCP. */
   mcp?: McpCatalog;
+  /**
+   * As ferramentas da Solline para os agentes (o servidor MCP "solline"). Sem isto, nenhuma sessão
+   * as tem. O shim para o Codex e os agentes ACP vem de `shim` (a app instalada diz onde está).
+   */
+  brain?: BrainOptions | undefined;
   /** Checkpoints por turno (por omissão na pasta de dados); false desliga-os. */
   checkpoints?: CheckpointStoreOptions | false;
   /** A segunda opinião no fim de cada turno (por omissão um Claude só de leitura); false desliga. */
@@ -136,6 +142,7 @@ export class Engine {
   readonly #checkpoints: CheckpointStore | undefined;
   readonly #planner: Planner | undefined;
   readonly #drafter: Drafter | undefined;
+  readonly #brain: Brain | undefined;
   /** Os rascunhos a escrever (um por sessão de origem): um novo cancela o anterior. */
   readonly #drafts = new Map<string, AbortController>();
   readonly #epoch = randomUUID();
@@ -223,12 +230,16 @@ export class Engine {
             ? new WorktreeManager({ root: path.join(options.dataDir, 'worktrees') })
             : undefined));
     const reviewing = reviewersFor(options);
+    this.#brain = options.brain
+      ? new Brain({ ...options.brain, shim: options.brain.shim ?? sourceShimPath() })
+      : undefined;
     this.sessions = new SessionManager({
       beforeEffect: (command, sessionId, text) =>
         this.#prepare(command, { sessionId, ...(text ? { text } : {}) }),
       emit: emitAll,
       registry,
       mcp,
+      brain: this.#brain,
       checkpoints: this.#checkpoints,
       keysFor: (agent) => settings.keys(agent),
       // Nos testes isolados não se gasta a subscrição a rever turnos falsos.
@@ -759,6 +770,7 @@ export class Engine {
     await this.flush();
     this.#disposed = true;
     await this.sessions.disposeAll(true);
+    await this.#brain?.dispose();
     await this.#checkpoints?.dispose();
     this.#journal?.close();
   }

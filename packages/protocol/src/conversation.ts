@@ -286,6 +286,8 @@ export const AgentFeatures = z.object({
   rewind: z.boolean(),
   /** Aceita uma mensagem a meio do turno ("Agora"); sem isto, só há fila. */
   steer: z.boolean().optional(),
+  /** A sessão tem as ferramentas da Solline (o servidor MCP "solline"); a interface só as mostra se existirem. */
+  brain: z.boolean().optional(),
 });
 export type AgentFeatures = z.infer<typeof AgentFeatures>;
 

@@ -102,6 +102,7 @@ export function catalogDefinition(
     untrustedProjects: entry.untrustedProjects,
     // O ACP obriga os agentes a aceitar servidores MCP por stdio.
     mcp: true,
+    brain: 'stdio',
     // Corre sem segredos do anfitrião: as chaves que precisar escolhes tu no painel.
     configurableKeys: true,
     detect: async () => {

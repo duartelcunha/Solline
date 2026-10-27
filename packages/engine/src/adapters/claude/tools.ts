@@ -1,4 +1,5 @@
 import type { ToolCategory, ToolContent } from '@solline/protocol';
+import { BRAIN_SERVER_NAME, brainToolLabel } from '../../brain/tool.ts';
 
 /**
  * Resumo de uma linha para cada ferramenta do Claude Code: o que aparece no bloco
@@ -74,6 +75,7 @@ export function toolSummary(name: string, input: unknown): string {
     default: {
       if (name.startsWith('mcp__')) {
         const [, server, tool] = name.split('__');
+        if (server === BRAIN_SERVER_NAME) return brainToolLabel(tool ?? name);
         return `${server ?? 'mcp'}: ${tool ?? name}`;
       }
       return name;

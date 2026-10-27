@@ -110,6 +110,26 @@ export { AcpNormalizer } from './adapters/acp/normalizer.ts';
 export { capabilitiesFromAcp, classifyModeRisk, acpConfig } from './adapters/acp/capabilities.ts';
 export { CATALOG, catalogDefinition, findNpmAgent, type CatalogEntry } from './agents/catalog.ts';
 export {
+  Brain,
+  sourceShimPath,
+  type BrainBinding,
+  type BrainOptions,
+  type BrainSession,
+  type BrainToolInfo,
+  type BrainTransport,
+} from './brain/brain.ts';
+export { BrainChannel, BRAIN_PIPE_ENV, BRAIN_TOKEN_ENV } from './brain/channel.ts';
+export {
+  BRAIN_SERVER_NAME,
+  BrainToolError,
+  brainToolLabel,
+  defineBrainTool,
+  type BrainContext,
+  type BrainResult,
+  type BrainTool,
+} from './brain/tool.ts';
+export { contextTool } from './brain/tools/context.ts';
+export {
   MCP_CATALOG,
   findNode,
   fixedMcpCatalog,

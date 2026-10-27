@@ -1,3 +1,4 @@
+import { BRAIN_SERVER_NAME, brainToolLabel } from '../../brain/tool.ts';
 import type { BrokerOutcome } from '../../permission-broker.ts';
 import type { McpServerLaunch } from '../types.ts';
 import type { JsonValue } from './protocol/serde_json/JsonValue';
@@ -27,6 +28,14 @@ export function mcpServersConfig(
       env: { ...server.env },
       startup_timeout_sec: 30,
       default_tools_approval_mode: 'prompt',
+      // As ferramentas só de leitura da Solline correm sem pedir; as outras pedem como as de todos.
+      ...(server.autoApprove?.length
+        ? {
+            tools: Object.fromEntries(
+              server.autoApprove.map((tool) => [tool, { approval_mode: 'approve' }]),
+            ),
+          }
+        : {}),
     };
   }
   return config;
@@ -74,7 +83,10 @@ export function mcpToolApproval(params: McpServerElicitationRequestParams): McpT
   return {
     server: params.serverName,
     tool: tool ?? 'ferramenta',
-    title: `${params.serverName}: ${title ?? 'ferramenta'}`,
+    title:
+      params.serverName === BRAIN_SERVER_NAME
+        ? brainToolLabel(title ?? tool ?? 'ferramenta')
+        : `${params.serverName}: ${title ?? 'ferramenta'}`,
     ...(description ? { description } : {}),
     input: asRecord(meta.tool_params) ?? {},
     persist,

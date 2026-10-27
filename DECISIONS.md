@@ -583,3 +583,40 @@
   - Não verificado: o revisor Codex e o redator contra binários reais; o Mapa com ~100 sessões.
   - Adiados do plano: verificação por segunda passagem no revisor; aprender com Corrigir e Dispensar;
     menções entre sessões; sugerir a passagem quando o contexto enche.
+
+## M6, fase 1: o servidor MCP da Solline, o "cérebro" (27/10/2026)
+
+- **O que é:** um servidor MCP chamado `solline`, que vive no motor (`packages/engine/src/brain`) e
+  que os agentes veem como mais um servidor. Esta fase só monta o cano e uma ferramenta de prova,
+  `solline_context` (projeto, pasta, título da sessão, agente; só leitura). As ferramentas de regras,
+  memória e agentes vêm nas fases seguintes.
+- **Identidade:** quem chama é resolvido pelo motor (a sessão que recebeu o servidor), nunca pelos
+  argumentos do agente; um argumento a mais é recusado. Erros voltam como erro MCP, nunca como
+  exceção no motor.
+- **Dois caminhos para a mesma função:** o Claude recebe um servidor SDK em processo
+  (`createSdkMcpServer`), sem canal nem token. O Codex e os agentes ACP recebem um shim stdio
+  (`solline-brain-shim.cjs`, um ficheiro sem dependências) corrido com o Node do sistema (o mesmo
+  `findNode` do catálogo); nunca o executável da app (os fuses tiram o `runAsNode`). Sem Node ou sem
+  shim, o cérebro não existe para esses agentes: avisa-se uma vez e a sessão abre na mesma.
+- **Canal local:** named pipe no Windows ou socket Unix numa pasta 0700, com nome aleatório. O shim
+  diz o token (32 bytes aleatórios, um por sessão e por arranque do agente) e o motor mapeia-o para
+  a sessão. Token desconhecido, fechado ou revogado recebe sempre "unauthorized"; mensagens com mais
+  de 1 MiB, ligações sem hello em 5 s e mais de 8 ligações por token são cortadas. O token só existe
+  no ambiente do shim (`SOLLINE_BRAIN_TOKEN`) e na config que o motor dá ao agente: nunca em eventos,
+  resumo de sessão, diário de recuperação nem registos. Fechar a sessão, retomar, rebobinar ou parar
+  o motor revoga-o e fecha as ligações abertas.
+- **Onde está ligado:** sessões normais, de passagem, de bifurcação e de tarefa, em agentes com MCP
+  por sessão. Desligado nas pistas das corridas, nas partes de uma repartição e em quem resolve uma
+  integração (têm `raceId`): têm de ficar independentes. Os revisores, o juiz, o planeador e o
+  redator não passam pelo gestor de sessões e continuam sem MCP. O limite de 8 servidores é dos do
+  catálogo; o cérebro não conta. `features.brain` diz à interface se a sessão o tem.
+- **Autorização:** as ferramentas só de leitura correm sem pedir (no Claude por `canUseTool`, não por
+  `allowedTools`, porque o SDK avisa que isso lhe tira o callback; no Codex por
+  `tools.<nome>.approval_mode = approve`). Tudo o que mude estado passa pela autorização normal do
+  agente, com o nome "Solline · ferramenta".
+- **Verificado em binários reais:** o Claude liga o servidor em processo (`mcpServerStatus`:
+  connected, com a ferramenta); o Codex 0.163 arranca o shim por `mcp_servers.solline`, aceita o
+  `approval_mode` por ferramenta e `mcpServer/tool/call` devolve a identidade da sessão.
+- **Por verificar:** um agente ACP real a usar o shim (só testado com um agente falso); o Codex a
+  chamar a ferramenta num turno com modelo; o shim dentro de um instalador completo (o
+  `electron-builder --dir` põe-no em `app.asar.unpacked/out/main/brain-shim.cjs`).

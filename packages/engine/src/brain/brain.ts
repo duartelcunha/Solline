@@ -1,0 +1,199 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
+import type { AgentId } from '@solline/protocol';
+import { findNode } from '../mcp/catalog.ts';
+import type { McpServerLaunch } from '../adapters/types.ts';
+import {
+  BRAIN_PIPE_ENV,
+  BRAIN_TOKEN_ENV,
+  BrainChannel,
+  type ChannelSession,
+  type ChannelTool,
+} from './channel.ts';
+import {
+  BRAIN_SERVER_NAME,
+  type BrainContext,
+  type BrainResult,
+  type BrainShape,
+  type BrainTool,
+} from './tool.ts';
+import { contextTool } from './tools/context.ts';
+
+/** Como o agente chega às ferramentas: dentro do processo (Claude) ou pelo shim stdio (o resto). */
+export type BrainTransport = 'in-process' | 'stdio';
+
+/** A sessão que pede ferramentas. A identidade é dela: os argumentos do agente nunca a mudam. */
+export interface BrainSession {
+  id: string;
+  projectId: string;
+  agent: AgentId;
+  describe(): { title: string; folder: string };
+}
+
+export interface BrainToolInfo {
+  name: string;
+  description: string;
+  input: BrainShape;
+  readOnly: boolean;
+}
+
+/** As ferramentas da Solline atadas a uma sessão, até fecharem ou arrancarem de novo. */
+export interface BrainBinding {
+  readonly transport: BrainTransport;
+  readonly serverName: string;
+  readonly tools: readonly BrainToolInfo[];
+  /** Só nos agentes por stdio: o shim pronto a arrancar. null: sem Node ou sem shim, sem cérebro. */
+  readonly launch: McpServerLaunch | null;
+  /** O agente consegue mesmo chamar as ferramentas. */
+  readonly available: boolean;
+  readonly revoked: boolean;
+  call(name: string, args: unknown): Promise<BrainResult>;
+  /** Fecha o acesso: o token deixa de valer e as ligações abertas caem. */
+  revoke(): void;
+}
+
+export interface BrainOptions {
+  tools?: readonly BrainTool[];
+  /** Caminho absoluto do shim (ficheiro único, sem dependências). Sem ele, só o Claude tem cérebro. */
+  shim?: string | undefined;
+  /** O Node do sistema que corre o shim (como os servidores do catálogo). */
+  node?: () => string | null;
+  /** Para testes: o canal local. */
+  channel?: BrainChannel;
+  warn?: (message: string) => void;
+}
+
+/** O shim ao lado do código (desenvolvimento e testes); a app instalada passa o caminho de lá. */
+export function sourceShimPath(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'shim', 'solline-brain-shim.cjs');
+}
+
+function describeTool(tool: BrainTool): ChannelTool {
+  const { $schema: _schema, ...inputSchema } = z.toJSONSchema(z.object(tool.input).strict());
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema,
+    readOnly: tool.readOnly,
+  };
+}
+
+/**
+ * O servidor MCP da Solline para os agentes ("o cérebro"): um registo de ferramentas e o ponto
+ * onde cada chamada ganha a identidade da sessão que a fez. Os dois caminhos (SDK do Claude em
+ * processo; shim por stdio e canal local para o resto) acabam na mesma função, call().
+ */
+export class Brain {
+  readonly #tools: readonly BrainTool[];
+  readonly #byName: ReadonlyMap<string, BrainTool>;
+  readonly #shim: string | undefined;
+  readonly #node: () => string | null;
+  readonly #channel: BrainChannel;
+  readonly #warn: (message: string) => void;
+  readonly #warned = new Set<string>();
+
+  constructor(options: BrainOptions = {}) {
+    this.#tools = options.tools ?? [contextTool];
+    const names = new Set<string>();
+    for (const tool of this.#tools) {
+      if (names.has(tool.name)) throw new Error(`Ferramenta repetida: ${tool.name}`);
+      names.add(tool.name);
+    }
+    this.#byName = new Map(this.#tools.map((t) => [t.name, t]));
+    this.#shim = options.shim;
+    this.#node = options.node ?? (() => findNode());
+    this.#channel = options.channel ?? new BrainChannel();
+    this.#warn = options.warn ?? ((message) => console.warn(`[brain] ${message}`));
+  }
+
+  /** Os nomes das ferramentas só de leitura (o resto pede sempre autorização). */
+  get readOnlyTools(): readonly string[] {
+    return this.#tools.filter((t) => t.readOnly).map((t) => t.name);
+  }
+
+  async bind(session: BrainSession, transport: BrainTransport): Promise<BrainBinding> {
+    const context: BrainContext = {
+      sessionId: session.id,
+      projectId: session.projectId,
+      agent: session.agent,
+      session: () => session.describe(),
+    };
+    let revoked = false;
+    const call = async (name: string, args: unknown): Promise<BrainResult> => {
+      if (revoked) return { text: 'Esta sessão da Solline já fechou.', isError: true };
+      const tool = this.#byName.get(name);
+      if (!tool) return { text: `Ferramenta desconhecida: ${name}`, isError: true };
+      return tool.run(context, args);
+    };
+    const infos: BrainToolInfo[] = this.#tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      input: t.input,
+      readOnly: t.readOnly,
+    }));
+    let issued: { token: string; revoke: () => void } | undefined;
+    let launch: McpServerLaunch | null = null;
+    if (transport === 'stdio') {
+      const resolved = await this.#stdioLaunch();
+      if (resolved) {
+        const channelSession: ChannelSession = {
+          tools: () => this.#tools.map(describeTool),
+          call,
+        };
+        issued = this.#channel.issue(channelSession);
+        launch = {
+          name: BRAIN_SERVER_NAME,
+          command: resolved.node,
+          args: [resolved.shim],
+          env: { [BRAIN_PIPE_ENV]: resolved.address, [BRAIN_TOKEN_ENV]: issued.token },
+          executesCode: false,
+          autoApprove: this.readOnlyTools,
+        };
+      }
+    }
+    return {
+      transport,
+      serverName: BRAIN_SERVER_NAME,
+      tools: infos,
+      launch,
+      available: transport === 'in-process' || launch !== null,
+      get revoked() {
+        return revoked;
+      },
+      call,
+      revoke: () => {
+        revoked = true;
+        issued?.revoke();
+      },
+    };
+  }
+
+  /** Sem Node de sistema, sem shim ou sem canal, o cérebro não existe para estes agentes (avisa uma vez). */
+  async #stdioLaunch(): Promise<{ node: string; shim: string; address: string } | null> {
+    const node = this.#node();
+    if (!node) return this.#unavailable('falta o Node.js no PATH para correr o shim');
+    const shim = this.#shim;
+    if (!shim || !existsSync(shim)) {
+      return this.#unavailable('o shim da Solline não está onde a app o espera');
+    }
+    try {
+      return { node, shim, address: await this.#channel.listen() };
+    } catch (error) {
+      return this.#unavailable(`o canal local não abriu (${String(error)})`);
+    }
+  }
+
+  #unavailable(reason: string): null {
+    if (!this.#warned.has(reason)) {
+      this.#warned.add(reason);
+      this.#warn(`sem ferramentas da Solline para o Codex e os agentes ACP: ${reason}`);
+    }
+    return null;
+  }
+
+  async dispose(): Promise<void> {
+    await this.#channel.close();
+  }
+}

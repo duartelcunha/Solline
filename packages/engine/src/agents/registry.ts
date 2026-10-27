@@ -6,6 +6,7 @@ import type { AgentDescriptor, AgentId, ModeOption } from '@solline/protocol';
 import { binaryName, platformPackageName } from '../adapters/claude/executable.ts';
 import { CLAUDE_MODES, ClaudeSdkAdapter } from '../adapters/claude/sdk.ts';
 import type { AgentAdapterFactory } from '../adapters/types.ts';
+import type { BrainTransport } from '../brain/brain.ts';
 import { CodexAppServerAdapter } from '../adapters/codex/adapter.ts';
 import { codexNeedsLogin, startCodexLogin } from '../adapters/codex/account.ts';
 import { spawnCodex, type CodexTransport } from '../adapters/codex/transport.ts';
@@ -41,6 +42,11 @@ export interface AgentDefinition {
   untrustedProjects: 'allowed' | 'refused';
   /** Aceita servidores MCP por sessão. */
   mcp?: boolean;
+  /**
+   * Como recebe as ferramentas da Solline: in-process (servidor dentro do motor, o Claude) ou
+   * stdio (o shim, com o Node do sistema). Sem isto, a sessão não as tem. Exige mcp.
+   */
+  brain?: BrainTransport;
   /**
    * Estado nesta máquina; nunca lê credenciais. Pode perguntar ao agente se tem sessão (o
    * Codex), e guarda a resposta um bocado; refresh volta a perguntar.
@@ -118,6 +124,8 @@ export function claudeDefinition(options: BuiltinOptions = {}): AgentDefinition 
     staticModes: CLAUDE_MODES,
     untrustedProjects: 'allowed',
     mcp: true,
+    // O servidor da Solline corre dentro do motor, sem processo nem canal.
+    brain: 'in-process',
     detect: () => detectClaude(options.claudeExecutable),
     create: (start, sink) =>
       new ClaudeSdkAdapter(
@@ -193,6 +201,7 @@ export function codexDefinition(
     untrustedProjects: 'refused',
     // Pela config do thread (mcp_servers.<nome>), só nesta sessão.
     mcp: true,
+    brain: 'stdio',
     detect: async ({ refresh = false } = {}) => {
       const found = resolve();
       if (!found) {

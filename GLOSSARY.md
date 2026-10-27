@@ -74,3 +74,5 @@ Os nomes do domínio da Solline, como o código os usa.
 - **Linhagem**: de que sessão nasceu cada uma (passagem, bifurcação, corrida, parte ou tarefa).
   Guarda só ids.
 - **Mapa**: a vista em árvore da linhagem de um projeto. Opcional; a cor é a do fabricante.
+- **Cérebro**: o servidor MCP `solline` que o motor dá aos agentes de cada sessão normal. Em
+  processo no Claude; por um shim e um canal local nos outros. Cada chamada sabe de que sessão é.

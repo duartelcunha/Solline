@@ -35,6 +35,7 @@ import type {
   SendOptions,
 } from '../types.ts';
 import { CRAFT_RULES } from '../../quality/craft.ts';
+import { claudeBrain, type ClaudeBrain } from '../../brain/claude.ts';
 
 export interface ClaudeSdkOptions extends AgentStartOptions {
   claudeExecutable?: string | undefined;
@@ -286,6 +287,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   readonly #inFlight = new Set<string>();
   /** Mensagens guiadas por ler; armed: uma ferramenta acabou desde que foram mandadas. */
   readonly #steers = new Map<string, { turnId: string; text: string; armed: boolean }>();
+  /** Ferramentas da Solline só de leitura: correm sem pedir autorização. */
+  readonly #autoAllow = new Set<string>();
   #queue: AsyncQueue<SDKUserMessage> | undefined;
   #query: Query | undefined;
   #pump: Promise<void> | undefined;
@@ -330,11 +333,20 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   }
 
   async start(): Promise<AgentStartResult> {
-    const query = this.#options.queryFn ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
+    // O SDK só se carrega quando faz falta: nos testes com queryFn e sem cérebro, nunca.
+    const brain = this.#options.brain;
+    const sdk =
+      this.#options.queryFn && !brain ? undefined : await import('@anthropic-ai/claude-agent-sdk');
+    const query = this.#options.queryFn ?? sdk?.query;
+    if (!query) throw new Error('O Agent SDK não carregou');
     const queue = new AsyncQueue<SDKUserMessage>();
     this.#queue = queue;
     this.#shell.starting();
-    const q = query({ prompt: queue, options: this.#sdkOptions() });
+    const inProcess = brain && sdk ? claudeBrain(sdk, brain) : undefined;
+    // As ferramentas só de leitura da Solline passam pelo canUseTool sem perguntar. Não vão em
+    // allowedTools: o SDK avisa que isso tira o canUseTool a essas ferramentas.
+    for (const name of inProcess?.allowedTools ?? []) this.#autoAllow.add(name);
+    const q = query({ prompt: queue, options: this.#sdkOptions(inProcess) });
     this.#query = q;
     this.#pump = this.#runPump(q);
     try {
@@ -476,7 +488,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     if (this.#pump) await withTimeout(this.#pump, 5_000, 'Fechar a sessão').catch(() => undefined);
   }
 
-  #sdkOptions(): Options {
+  #sdkOptions(brain?: ClaudeBrain): Options {
     const options = this.#options;
     return {
       cwd: options.cwd,
@@ -500,19 +512,23 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       stderr: (data) => {
         this.#stderr = (this.#stderr + data).slice(-STDERR_LIMIT);
       },
-      ...(options.mcpServers?.length
+      ...(options.mcpServers?.length || brain
         ? {
-            mcpServers: Object.fromEntries(
-              options.mcpServers.map((s) => [
-                s.name,
-                {
-                  type: 'stdio' as const,
-                  command: s.command,
-                  args: [...s.args],
-                  env: { ...s.env },
-                },
-              ]),
-            ),
+            mcpServers: {
+              ...Object.fromEntries(
+                (options.mcpServers ?? []).map((s) => [
+                  s.name,
+                  {
+                    type: 'stdio' as const,
+                    command: s.command,
+                    args: [...s.args],
+                    env: { ...s.env },
+                  },
+                ]),
+              ),
+              // Por último: o nome "solline" é da Solline, nenhum servidor do catálogo o ocupa.
+              ...(brain ? { [brain.server.name]: brain.server } : {}),
+            },
           }
         : {}),
       ...(options.fork && this.#point
@@ -530,6 +546,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
   }
 
   readonly #canUseTool: CanUseTool = async (toolName, input, options) => {
+    if (this.#autoAllow.has(toolName)) return { behavior: 'allow', updatedInput: input };
     const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
     this.#emit(deltas);
     const trusted = this.#options.projectTrusted === true;

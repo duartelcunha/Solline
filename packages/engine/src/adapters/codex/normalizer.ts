@@ -6,6 +6,7 @@ import type {
   ToolBlock,
   ToolCategory,
 } from '@solline/protocol';
+import { BRAIN_SERVER_NAME, brainToolLabel } from '../../brain/tool.ts';
 import { baseName, clip } from '../claude/tools.ts';
 import { errorNotice, interruptedNotice, userTurnDelta } from '../shared/turns.ts';
 import type { CommandAction } from './protocol/v2/CommandAction';
@@ -272,7 +273,10 @@ export class CodexNormalizer {
           kind: 'tool',
           id: item.id,
           name: `mcp__${item.server}__${item.tool}`,
-          summary: `${item.server}: ${item.tool}`,
+          summary:
+            item.server === BRAIN_SERVER_NAME
+              ? brainToolLabel(item.tool)
+              : `${item.server}: ${item.tool}`,
           input: item.arguments,
           state:
             !done || item.status === 'inProgress'
