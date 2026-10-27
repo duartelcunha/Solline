@@ -5,13 +5,17 @@ import { SpaceManager } from '../src/spaces/manager.ts';
 function setup() {
   const saved: unknown[] = [];
   const sends: string[] = [];
+  const starts: unknown[] = [];
   let fail = false;
   const manager = new SpaceManager({
     save: (state) => {
       if (fail) throw new Error('disco cheio');
       saved.push(structuredClone(state));
     },
-    create: async () => 'session',
+    create: async (start) => {
+      starts.push(start);
+      return 'session';
+    },
     send: async (_id, text, turnId) => {
       sends.push(text);
       return { turnId, how: 'queued' };
@@ -26,6 +30,7 @@ function setup() {
     manager,
     saved,
     sends,
+    starts,
     fail: () => {
       fail = true;
     },
@@ -91,6 +96,33 @@ describe('espaços e delegação', () => {
     expect(manager.snapshot().tasks[0]?.status).toBe('review');
     await expect(manager.delegate(input)).rejects.toThrow();
     expect(sends).toHaveLength(1);
+  });
+  it('a sessão aberta por uma delegação nasce com a origem da tarefa (só o id)', async () => {
+    const { manager, starts } = setup();
+    const task = manager.createTask({ projectId: 'p', title: 'Arranjar', description: '' });
+    await manager.delegate(
+      {
+        id: task.id,
+        requestId: crypto.randomUUID(),
+        target: { kind: 'new', agent: 'claude' },
+        text: 'Arranjar',
+        memoryIds: [],
+      },
+      { projectId: 'p', cwd: '/project', trusted: true, agent: 'claude' },
+    );
+    expect(starts).toEqual([
+      expect.objectContaining({ origin: { kind: 'task', taskId: task.id } }),
+    ]);
+    // Numa conversa que já existe, não se abre sessão nenhuma.
+    const other = manager.createTask({ projectId: 'p', title: 'Outra', description: '' });
+    await manager.delegate({
+      id: other.id,
+      requestId: crypto.randomUUID(),
+      target: { kind: 'existing', sessionId: 'session' },
+      text: 'Outra',
+      memoryIds: [],
+    });
+    expect(starts).toHaveLength(1);
   });
   it('isola projetos e memórias, e só promove memórias por escolha explícita', async () => {
     const { manager, sends } = setup();

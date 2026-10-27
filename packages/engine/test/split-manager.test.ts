@@ -84,7 +84,13 @@ async function setup(
   const dirs = await repo();
   const worktrees = new WorktreeManager({ root: path.join(dirs.data, 'worktrees') });
   const trees = new Map<string, Worktree>();
-  const created: { id: string; agent: string; after: string | undefined; raceId: string }[] = [];
+  const created: {
+    id: string;
+    agent: string;
+    after: string | undefined;
+    raceId: string;
+    origin: unknown;
+  }[] = [];
   const sent = new Map<string, { text: string; how: string | undefined }[]>();
   const closed: [string, string | undefined][] = [];
   const replies = new Map(Object.entries(options.replies ?? {}));
@@ -106,6 +112,7 @@ async function setup(
         agent: payload.agent,
         after: payload.startAfter,
         raceId: payload.raceId ?? '',
+        origin: payload.origin,
       });
       return {
         session: { id, agent: payload.agent, state: 'starting', settings: { model: null } },
@@ -292,6 +299,11 @@ describe('lançar por fases', SLOW, () => {
     t.turn('s1');
     await waitFor(() => t.manager.get(race.id).lanes.length === 3, LONG);
     expect(t.created.map((c) => c.after)).toEqual([undefined, 's1', 's1']);
+    expect(t.created.map((c) => c.origin)).toEqual([
+      { kind: 'part', raceId: race.id },
+      { kind: 'part', raceId: race.id, sessionId: 's1' },
+      { kind: 'part', raceId: race.id, sessionId: 's1' },
+    ]);
     // Partem do commit da zero: o ficheiro dela já lá está, e a base da nova worktree é esse commit.
     for (const id of ['s2', 's3']) {
       expect(await readFile(path.join(t.treeOf(id).cwd, 'src/core/tipos.ts'), 'utf8')).toContain(

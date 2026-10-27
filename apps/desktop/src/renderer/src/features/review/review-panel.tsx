@@ -103,7 +103,12 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   const setNote = (note: string) => actions.editReview(sessionId, { note });
   const [sending, setSending] = useState(false);
   const [celebrate, setCelebrate] = useState(false);
-  const findings = useSession(sessionId, (s) => s.quality?.review.findings ?? NO_FINDINGS);
+  const allFindings = useSession(sessionId, (s) => s.quality?.review.findings ?? NO_FINDINGS);
+  // Os descartados deixam de aparecer (continuam no motor, para as contas).
+  const findings = useMemo(
+    () => allFindings.filter((f) => f.status !== 'dismissed'),
+    [allFindings],
+  );
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [fixing, setFixing] = useState(false);
   // Achados novos (outro turno) recomeçam a escolha.

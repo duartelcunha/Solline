@@ -17,6 +17,7 @@ import {
   type CheckSpec,
   type Checks,
   type Quality,
+  type ReviewTrigger,
   type Orphan,
   type SetupSpec,
   type SetupState,
@@ -227,6 +228,7 @@ export class SessionManager {
     const info: SessionInfo = {
       id: sessionId,
       ...(payload.raceId ? { raceId: payload.raceId } : {}),
+      ...(payload.origin ? { origin: payload.origin } : {}),
       ...(port !== undefined ? { port } : {}),
       ...(prepares ? { setup: { state: 'running' as const, tail: null, durationMs: null } } : {}),
       projectId: payload.projectId,
@@ -966,7 +968,7 @@ export class SessionManager {
   }
 
   /** A segunda opinião sobre um turno, se ele mudou ficheiros. Uma falha fica no estado. */
-  async #review(sessionId: string, turnId: string): Promise<void> {
+  async #review(sessionId: string, turnId: string, trigger: ReviewTrigger = 'turn'): Promise<void> {
     const entry = this.#sessions.get(sessionId);
     const memory = this.#memory.get(sessionId);
     const checkpoints = memory?.checkpoints;
@@ -976,12 +978,28 @@ export class SessionManager {
     const completed = this.#beforeEffect('quality.run', sessionId);
     const turn = memory.turns.find((t) => t.id === turnId && t.role === 'user');
     // Uma falha do diff chega ao estado como erro: o revisor nunca parece ter aprovado.
-    await memory.quality.review(turnId, async () => {
-      const diff = await checkpoints.diff({ kind: 'turn', turnId });
-      return diff.length === 0
-        ? null
-        : { cwd: entry.info.cwd, diff, request: turn ? textOf(turn) : '' };
-    });
+    const vendor = this.#reviewer?.vendor;
+    await memory.quality.review(
+      turnId,
+      async () => {
+        const diff = await checkpoints.diff({ kind: 'turn', turnId });
+        return diff.length === 0
+          ? null
+          : { cwd: entry.info.cwd, diff, request: turn ? textOf(turn) : '' };
+      },
+      {
+        trigger,
+        ...(vendor
+          ? {
+              reviewer: {
+                vendor,
+                ...(this.#reviewer?.model ? { model: this.#reviewer.model } : {}),
+                sameVendor: entry.info.agent === vendor,
+              },
+            }
+          : {}),
+      },
+    );
     completed();
   }
 
@@ -1466,6 +1484,7 @@ export class SessionManager {
         available: false,
         enabled: false,
         review: NO_REVIEW,
+        stats: { fixed: 0, dismissed: 0, total: 0 },
       }
     );
   }
@@ -1485,15 +1504,30 @@ export class SessionManager {
     const last = memory.checkpoints?.timeline().checkpoints.at(-1);
     if (!last || last.state !== 'done') throw new Error('Ainda não há nenhum turno acabado');
     // Não espera pelo fim (uma revisão leva segundos); o resultado chega por session.quality.
-    void this.#review(sessionId, last.turnId);
+    void this.#review(sessionId, last.turnId, 'manual');
     return memory.quality.state;
   }
 
   /** Pede ao agente da sessão para corrigir os achados escolhidos. */
   async fix(sessionId: string, ids: readonly string[]): Promise<string> {
-    const findings = this.#memoryOf(sessionId).quality?.pick(ids) ?? [];
-    if (findings.length === 0) throw new Error('Esses achados já não existem');
-    return (await this.send(sessionId, fixMessage(findings))).turnId;
+    const quality = this.#memoryOf(sessionId).quality;
+    const findings = quality?.pick(ids) ?? [];
+    if (!quality || findings.length === 0) throw new Error('Esses achados já não existem');
+    const { turnId } = await this.send(sessionId, fixMessage(findings));
+    quality.resolve(
+      findings.map((f) => f.id),
+      'fixed',
+    );
+    return turnId;
+  }
+
+  /** Descarta achados: ficam marcados (e contados) e a interface deixa de os mostrar. */
+  dismiss(sessionId: string, ids: readonly string[]): Quality {
+    this.#get(sessionId);
+    const quality = this.#memoryOf(sessionId).quality;
+    if (!quality) throw new Error('A segunda opinião não está disponível');
+    if (quality.pick(ids).length === 0) throw new Error('Esses achados já não existem');
+    return quality.resolve(ids, 'dismissed');
   }
 
   /** Mexer no disco ou na conversa só com o agente parado e nada a meio. */

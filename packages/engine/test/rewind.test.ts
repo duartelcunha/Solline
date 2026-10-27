@@ -476,7 +476,15 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
     makeManager(true, async (input) => {
       seen.push(input);
       return [
-        { path: 'f.txt', line: 1, severity: 'slop', title: 'Valor sem sentido', detail: 'Usa v2.' },
+        {
+          path: 'f.txt',
+          line: 1,
+          severity: 'slop',
+          priority: 3,
+          confidence: 0.7,
+          title: 'Valor sem sentido',
+          detail: 'Usa v2.',
+        },
       ];
     });
     const id = await startSession();
@@ -488,8 +496,36 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
     const findings = quality(id)!.review.findings;
     expect(findings).toEqual([expect.objectContaining({ id: `${t1}-1`, severity: 'slop' })]);
 
+    expect(quality(id)!.review).toMatchObject({ trigger: 'turn', findings: [{ status: 'open' }] });
     await manager.fix(id, [findings[0]!.id]);
     expect(ScriptedAdapter.received.at(-1)!.text).toContain('f.txt:1: Valor sem sentido');
+    expect(manager.quality(id).review.findings[0]).toMatchObject({ status: 'fixed' });
+    expect(manager.quality(id).stats).toEqual({ fixed: 1, dismissed: 0, total: 1 });
+  });
+
+  it('descartar marca o achado, conta-o e sobrevive à recuperação', async () => {
+    makeManager(true, async () => [
+      {
+        path: 'f.txt',
+        line: 1,
+        severity: 'risk',
+        priority: 1,
+        confidence: 0.6,
+        title: 'Valor duvidoso',
+        detail: 'Confirma.',
+      },
+    ]);
+    const id = await startSession();
+    const t1 = await turn(id, 'escreve f.txt=v1');
+    await waitFor(() => quality(id)?.review.state === 'done', 10_000);
+    const after = manager.dismiss(id, [`${t1}-1`]);
+    expect(after.review.findings[0]).toMatchObject({ status: 'dismissed', priority: 1 });
+    expect(after.stats).toEqual({ fixed: 0, dismissed: 1, total: 1 });
+    expect(quality(id)).toMatchObject({ stats: { dismissed: 1 } });
+    expect(() => manager.dismiss(id, ['nada'])).toThrow('já não existem');
+    const saved = manager.recovery().find((r) => r.view.session.id === id);
+    expect(saved?.view.quality?.review.findings[0]?.status).toBe('dismissed');
+    expect(saved?.view.quality?.stats.dismissed).toBe(1);
   });
 
   it('um turno sem ficheiros mudados não gasta o revisor; desligado também não', async () => {

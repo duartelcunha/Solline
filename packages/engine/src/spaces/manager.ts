@@ -172,7 +172,10 @@ export class SpaceManager {
           };
         }
         if (start.projectId !== targetProject) throw new Error('Projeto incorreto.');
-        sessionId = await this.#options.create(start);
+        sessionId = await this.#options.create({
+          ...start,
+          origin: { kind: 'task', taskId: task.id },
+        });
         this.#attempt(task.id, input.requestId, { sessionId });
       }
       const sent = await this.#options.send(sessionId, text, turnId);

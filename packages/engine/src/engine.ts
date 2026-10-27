@@ -510,6 +510,7 @@ export class Engine {
       'quality.setEnabled': async (p) => s.setQualityEnabled(p.sessionId, p.enabled),
       'quality.review': (p) => s.reviewNow(p.sessionId),
       'quality.fix': async (p) => ({ turnId: await s.fix(p.sessionId, p.ids) }),
+      'quality.dismiss': async (p) => s.dismiss(p.sessionId, p.ids),
       'checks.get': async (p) => s.checks(p.sessionId),
       'checks.run': (p) => s.runChecks(p.sessionId),
       'checks.fix': async (p) => ({ turnId: await s.fixCheck(p.sessionId, p.id) }),

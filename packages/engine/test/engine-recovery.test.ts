@@ -357,6 +357,35 @@ describe('durable engine recovery', () => {
       events.filter((event) => event.sequence !== undefined).map((event) => event.sequence),
     ).toEqual(events.filter((event) => event.sequence !== undefined).map((_, index) => index + 1));
   });
+  it('a origem da sessão sobrevive a um reinício (só ids)', async () => {
+    const f = fixture();
+    const { engine } = f.open();
+    const origin = { kind: 'fork', sessionId: 'pai', turnId: 'turno-3' };
+    const started = (await request(engine, 'session.start', {
+      projectId: 'project',
+      cwd: f.project,
+      agent: 'scripted',
+      trusted: true,
+      origin,
+    })) as { session: { id: string; origin?: unknown } };
+    expect(started.session.origin).toEqual(origin);
+    await request(engine, 'engine.flush');
+    const copy = path.join(f.root, 'origin-copy');
+    cpSync(f.dataDir, copy, { recursive: true });
+    rmSync(path.join(copy, 'recovery', 'engine-v1', 'writer.lock'));
+    const snapshot = EngineSnapshot.parse(await request(f.open(copy).engine, 'engine.snapshot'));
+    expect(snapshot.sessions[0]!.session).toMatchObject({ id: started.session.id, origin });
+    // Uma origem com conteúdo a mais é recusada: só ids.
+    await expect(
+      request(engine, 'session.start', {
+        projectId: 'project',
+        cwd: f.project,
+        agent: 'scripted',
+        trusted: true,
+        origin: { kind: 'handoff', sessionId: 'pai', summary: 'texto' },
+      }),
+    ).rejects.toThrow();
+  });
   it('restores an ambiguous provider side effect as unknown, without automatic resend', async () => {
     const f = fixture();
     const { engine } = f.open();

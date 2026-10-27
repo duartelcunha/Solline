@@ -8,6 +8,7 @@ import {
   PermissionAnswer,
   Orphan,
   SessionInfo,
+  SessionOrigin,
   WorktreeStats,
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
@@ -84,6 +85,8 @@ export const SessionCreatePayload = z
     effort: z.string().min(1).max(32).optional(),
     /** Servidores MCP do catálogo a ligar só a esta sessão. */
     mcpServerIds: z.array(z.string().min(1).max(32)).max(8).optional(),
+    /** De onde vem a sessão (só ids). */
+    origin: SessionOrigin.optional(),
   })
   .strict();
 

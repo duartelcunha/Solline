@@ -29,6 +29,8 @@ export interface LaneOpen {
   text: string;
   /** Parte do resultado desta sessão (a worktree dela, gravada) em vez do HEAD do projeto. */
   after?: string | undefined;
+  /** Como a sessão se apresenta na origem: pista de uma corrida (por omissão) ou parte de uma repartição. */
+  kind?: 'lane' | 'part';
 }
 
 export type LaneProject = Omit<
@@ -72,6 +74,11 @@ export class Lanes {
             ...(lane.model ? { model: lane.model } : {}),
             worktree: 'always',
             raceId: group,
+            origin: {
+              kind: lane.kind ?? 'lane',
+              raceId: group,
+              ...(lane.after ? { sessionId: lane.after } : {}),
+            },
             ...(lane.after ? { startAfter: lane.after } : {}),
           }),
         );

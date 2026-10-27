@@ -115,6 +115,7 @@ export function installBridge(scene: Scene) {
             findings: [],
             error: scene === 'quality-error' ? 'O revisor perdeu a ligação.' : null,
           },
+          stats: { fixed: 0, dismissed: 0, total: 0 },
         };
   const qualities = new Map<string, typeof quality>();
   function snapshot(): EngineSnapshot {
@@ -625,6 +626,16 @@ export function installBridge(scene: Scene) {
           throw new Error('QA: achado inesperado');
         state(id, 'running');
         return { turnId: 'fix-1' };
+      }
+      case 'quality.dismiss': {
+        const value = required(qualities.get(id), 'qualidade ausente');
+        const ids = payload.ids as string[];
+        value.review.findings = value.review.findings.map((finding) =>
+          ids.includes(finding.id) ? { ...finding, status: 'dismissed' as const } : finding,
+        );
+        value.stats = { ...value.stats, dismissed: value.stats.dismissed + ids.length };
+        emit({ kind: 'event', type: 'session.quality', sessionId: id, quality: value });
+        return value;
       }
       case 'checks.get':
         return checks;

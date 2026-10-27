@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { CanUseTool, HookCallback, query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { FindingSeverity, type FileDiff, type Finding } from '@solline/protocol';
+import { FindingPriority, FindingSeverity, type FileDiff, type Finding } from '@solline/protocol';
 import { sanitizedEnv } from '../env.ts';
 
 export interface ReviewInput {
@@ -13,10 +13,14 @@ export interface ReviewInput {
   signal?: AbortSignal;
 }
 
-export type ReviewedFinding = Omit<Finding, 'id'>;
+export type ReviewedFinding = Omit<Finding, 'id' | 'status'>;
 
 /** Lê um diff e devolve achados. O revisor por omissão é um Claude só de leitura. */
-export type Reviewer = (input: ReviewInput) => Promise<ReviewedFinding[]>;
+export type Reviewer = ((input: ReviewInput) => Promise<ReviewedFinding[]>) & {
+  /** Quem é (para o resultado dizer quem reviu); revisores de teste podem não dizer. */
+  vendor?: string;
+  model?: string;
+};
 
 const MAX_DIFF_CHARS = 80_000;
 const READ_ONLY = new Set(['Read', 'Grep', 'Glob']);
@@ -27,7 +31,11 @@ const RULES = `# You are the reviewer
 
 Another coding agent just made the change below. Review it with fresh eyes. You can read the surrounding code with Read, Grep and Glob; you cannot change anything.
 
-Report only real problems, most severe first:
+Report only real problems, most severe first. For every finding also give:
+- priority: 0 to 3, where 0 is the most severe (must fix before this ships) and 3 the least (minor). Use the whole range; not everything is 0.
+- confidence: 0 to 1, how sure you are that this is a real problem. Be honest: use below 0.5 when you could not confirm it by reading the code, and do not inflate it.
+
+The kinds of problem:
 - bug: the change does the wrong thing, breaks something, or misses part of the request.
 - risk: likely to break or unsafe (unchecked input at a boundary, swallowed errors, races, secrets).
 - slop: works but is noise. Comments that restate code, dead or commented-out code, needless abstractions or options, code that ignores the style around it, weakened or skipped tests, generic AI-sounding text in the UI or docs.
@@ -45,6 +53,8 @@ const OUTPUT = z.object({
         path: z.string().min(1),
         line: z.number().int().positive().nullable(),
         severity: FindingSeverity,
+        priority: FindingPriority,
+        confidence: z.number().min(0).max(1),
         title: z.string().min(1).max(300),
         detail: z.string().max(2_000),
       }),
@@ -64,10 +74,12 @@ const SCHEMA = {
           path: { type: 'string' },
           line: { type: ['integer', 'null'] },
           severity: { type: 'string', enum: ['bug', 'risk', 'slop'] },
+          priority: { type: 'integer', enum: [0, 1, 2, 3] },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
           title: { type: 'string' },
           detail: { type: 'string' },
         },
-        required: ['path', 'line', 'severity', 'title', 'detail'],
+        required: ['path', 'line', 'severity', 'priority', 'confidence', 'title', 'detail'],
         additionalProperties: false,
       },
     },
@@ -158,7 +170,7 @@ export function insideProject(root: string): HookCallback {
 export function claudeReviewer(
   options: { claudeExecutable?: string | undefined; queryFn?: typeof sdkQuery } = {},
 ): Reviewer {
-  return async (input) => {
+  const review = async (input: ReviewInput): Promise<ReviewedFinding[]> => {
     const query = options.queryFn ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
     const abort = new AbortController();
     input.signal?.addEventListener('abort', () => abort.abort(), { once: true });
@@ -196,4 +208,5 @@ export function claudeReviewer(
     }
     throw new Error('O revisor parou sem resposta');
   };
+  return Object.assign(review, { vendor: 'claude', model: 'sonnet' });
 }

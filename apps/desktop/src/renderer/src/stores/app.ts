@@ -1332,6 +1332,19 @@ export const actions = {
     }
   },
 
+  /** Descarta achados: o motor marca-os e a interface deixa de os mostrar. */
+  async dismissFindings(sessionId: string, ids: string[]): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      const quality = await request('quality.dismiss', { sessionId, ids });
+      sessionStores.get(sessionId)?.setState({ quality });
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
   /** Volta a correr as verificações do projeto agora. */
   async runChecks(sessionId: string): Promise<void> {
     sessionStores.get(sessionId)?.setState({ actionError: null });

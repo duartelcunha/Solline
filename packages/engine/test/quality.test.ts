@@ -64,7 +64,15 @@ describe('revisor', () => {
 
   it('pede um JSON com esquema, só com as três ferramentas e sem definições nem MCP', async () => {
     let options: Record<string, unknown> = {};
-    const finding = { path: 'a.ts', line: 1, severity: 'bug', title: 'x', detail: 'y' };
+    const finding = {
+      path: 'a.ts',
+      line: 1,
+      severity: 'bug',
+      priority: 0,
+      confidence: 0.9,
+      title: 'x',
+      detail: 'y',
+    };
     const review = claudeReviewer({
       queryFn: fakeQuery({ findings: [finding] }, (o) => (options = o)),
     });
@@ -77,6 +85,28 @@ describe('revisor', () => {
       outputFormat: { type: 'json_schema' },
       persistSession: false,
     });
+  });
+
+  it('um achado sem prioridade ou confiança é um erro, não valores inventados', async () => {
+    const bare = { path: 'a.ts', line: 1, severity: 'bug', title: 'x', detail: 'y' };
+    await expect(
+      claudeReviewer({ queryFn: fakeQuery({ findings: [bare] }) })(input),
+    ).rejects.toThrow('formato');
+    const wild = { ...bare, priority: 4, confidence: 0.5 };
+    await expect(
+      claudeReviewer({ queryFn: fakeQuery({ findings: [wild] }) })(input),
+    ).rejects.toThrow('formato');
+  });
+
+  it('o esquema pede prioridade e confiança em cada achado e o revisor diz quem é', async () => {
+    let options: Record<string, unknown> = {};
+    const review = claudeReviewer({ queryFn: fakeQuery({ findings: [] }, (o) => (options = o)) });
+    await review(input);
+    const schema = JSON.stringify(options.outputFormat);
+    expect(schema).toContain('"priority"');
+    expect(schema).toContain('"confidence"');
+    expect(JSON.stringify(options.systemPrompt)).toContain('priority');
+    expect([review.vendor, review.model]).toEqual(['claude', 'sonnet']);
   });
 
   it('uma resposta fora do formato é um erro, não achados inventados', async () => {
@@ -107,6 +137,64 @@ describe('estado da segunda opinião', () => {
     expect(states).toEqual(['running', 'running', 'done']);
   });
 
+  describe('resolução dos achados', () => {
+    const found = [
+      { path: 'a.ts', line: 1, severity: 'bug' as const, priority: 0 as const, confidence: 0.9 },
+      {
+        path: 'b.ts',
+        line: null,
+        severity: 'slop' as const,
+        priority: 3 as const,
+        confidence: 0.4,
+      },
+    ].map((f) => ({ ...f, title: 't', detail: 'd' }));
+    const done = async (extra?: Parameters<SessionQuality['review']>[2]) => {
+      const emitted: number[] = [];
+      const q = new SessionQuality({
+        reviewer: () => Promise.resolve(found),
+        enabled: true,
+        emit: () => emitted.push(1),
+      });
+      await q.review('t1', ready, extra);
+      return { q, emitted };
+    };
+
+    it('os achados nascem abertos e contam no total; o revisor e o gatilho ficam no resultado', async () => {
+      const { q } = await done({
+        trigger: 'manual',
+        reviewer: { vendor: 'claude', model: 'sonnet', sameVendor: true },
+      });
+      expect(q.state.review.findings.map((f) => f.status)).toEqual(['open', 'open']);
+      expect(q.state.review).toMatchObject({
+        trigger: 'manual',
+        reviewer: { vendor: 'claude', model: 'sonnet', sameVendor: true },
+      });
+      expect(q.state.stats).toEqual({ fixed: 0, dismissed: 0, total: 2 });
+    });
+
+    it('corrigir e descartar marcam o estado, contam uma vez e avisam', async () => {
+      const { q, emitted } = await done();
+      const before = emitted.length;
+      q.resolve(['t1-1'], 'fixed');
+      q.resolve(['t1-1'], 'fixed');
+      expect(emitted.length).toBe(before + 1);
+      q.resolve(['t1-2', 'nao-existe'], 'dismissed');
+      expect(q.state.review.findings.map((f) => f.status)).toEqual(['fixed', 'dismissed']);
+      expect(q.state.stats).toEqual({ fixed: 1, dismissed: 1, total: 2 });
+      // Mudar de ideias passa o achado de um contador para o outro.
+      q.resolve(['t1-2'], 'fixed');
+      expect(q.state.stats).toEqual({ fixed: 2, dismissed: 0, total: 2 });
+    });
+
+    it('os contadores sobrevivem a uma revisão nova e somam o total', async () => {
+      const { q } = await done();
+      q.resolve(['t1-1'], 'dismissed');
+      await q.review('t2', ready);
+      expect(q.state.review.findings.map((f) => f.status)).toEqual(['open', 'open']);
+      expect(q.state.stats).toEqual({ fixed: 0, dismissed: 1, total: 4 });
+    });
+  });
+
   it('a mensagem de corrigir diz onde e o quê', () => {
     const message = fixMessage([
       {
@@ -114,6 +202,9 @@ describe('estado da segunda opinião', () => {
         path: 'a.ts',
         line: 3,
         severity: 'risk',
+        priority: 1,
+        confidence: 0.8,
+        status: 'open',
         title: 'Erro engolido',
         detail: 'Mostra-o.',
       },
@@ -122,6 +213,9 @@ describe('estado da segunda opinião', () => {
         path: 'b.ts',
         line: null,
         severity: 'slop',
+        priority: 3,
+        confidence: 0.6,
+        status: 'open',
         title: 'Comentário a mais',
         detail: '',
       },

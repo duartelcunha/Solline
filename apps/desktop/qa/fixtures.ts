@@ -241,6 +241,9 @@ export const qualityFindings: Quality = {
         path: 'src/navigation.ts',
         line: 1,
         severity: 'bug',
+        priority: 0,
+        confidence: 0.9,
+        status: 'open',
         title: 'Preservar a sessão anterior',
         detail: 'A seleção deve sobreviver a uma atualização em segundo plano.',
       },
@@ -249,11 +252,15 @@ export const qualityFindings: Quality = {
         path: 'src/navigation.ts',
         line: null,
         severity: 'risk',
+        priority: 1,
+        confidence: 0.7,
+        status: 'open',
         title: 'Validar a lista vazia',
         detail: 'Uma lista vazia deve apresentar o estado inicial.',
       },
     ],
   },
+  stats: { fixed: 0, dismissed: 0, total: 2 },
 };
 export const longModelLabel =
   'Modelo de investigação para contextos extensos e decisões de navegação entre vários projetos';

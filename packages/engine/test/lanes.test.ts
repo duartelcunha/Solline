@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionState } from '@solline/protocol';
+import type { SessionStartPayload, SessionState } from '@solline/protocol';
 import { Lanes, type LaneSessions } from '../src/races/lanes.ts';
 
 const project = { projectId: 'p', cwd: '/p', trusted: true };
@@ -7,7 +7,12 @@ const project = { projectId: 'p', cwd: '/p', trusted: true };
 /** Sessões de mentira: `failAt` é o índice (a partir de 0) do create que falha. */
 function fake(options: { failAt?: number; missing?: string[] } = {}) {
   const calls = {
-    created: [] as { agent: string; model?: string | undefined; raceId?: string | undefined }[],
+    created: [] as {
+      agent: string;
+      model?: string | undefined;
+      raceId?: string | undefined;
+      origin?: SessionStartPayload['origin'];
+    }[],
     sent: [] as [string, string][],
     closed: [] as [string, string | undefined][],
   };
@@ -15,7 +20,12 @@ function fake(options: { failAt?: number; missing?: string[] } = {}) {
   const sessions: LaneSessions = {
     create: async (payload) => {
       if (calls.created.length === options.failAt) throw new Error('sem espaço');
-      calls.created.push({ agent: payload.agent, model: payload.model, raceId: payload.raceId });
+      calls.created.push({
+        agent: payload.agent,
+        model: payload.model,
+        raceId: payload.raceId,
+        origin: payload.origin,
+      });
       expect(payload.worktree).toBe('always');
       return {
         session: { id: `s${++n}`, agent: payload.agent, state: 'starting', settings: {} },
@@ -51,6 +61,18 @@ describe('Lanes.open', () => {
     expect(calls.sent).toEqual([
       ['s1', 'parte A'],
       ['s2', 'parte B'],
+    ]);
+  });
+
+  it('cada sessão nasce com a origem: pista da corrida ou parte (com o produtor, se houver)', async () => {
+    const { sessions, calls } = fake();
+    await new Lanes(sessions).open(project, 'g1', [
+      { agent: 'claude', text: 'a' },
+      { agent: 'codex', text: 'b', kind: 'part', after: 's0' },
+    ]);
+    expect(calls.created.map((c) => c.origin)).toEqual([
+      { kind: 'lane', raceId: 'g1' },
+      { kind: 'part', raceId: 'g1', sessionId: 's0' },
     ]);
   });
 

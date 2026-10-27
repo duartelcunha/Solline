@@ -374,6 +374,22 @@ export const Orphan = z.object({
 });
 export type Orphan = z.infer<typeof Orphan>;
 
+/**
+ * De onde veio a sessão. Só ids, nunca conteúdo: handoff e fork partem de outra sessão (e de um
+ * turno), lane e part de uma corrida (a parte, da sessão que lhe entregou o resultado), task de
+ * uma tarefa dos Espaços.
+ */
+export const SessionOrigin = z
+  .object({
+    kind: z.enum(['handoff', 'fork', 'lane', 'part', 'task']),
+    sessionId: z.string().optional(),
+    turnId: z.string().optional(),
+    raceId: z.string().optional(),
+    taskId: z.string().optional(),
+  })
+  .strict();
+export type SessionOrigin = z.infer<typeof SessionOrigin>;
+
 export const SessionInfo = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -389,6 +405,10 @@ export const SessionInfo = z.object({
   workspace: Workspace.optional(),
   /** A corrida a que esta sessão pertence (uma pista). */
   raceId: z.string().optional(),
+  /** De onde veio esta sessão (passagem, bifurcação, pista, parte ou tarefa). */
+  origin: SessionOrigin.optional(),
+  /** A sessão a quem esta passou o testemunho; esta deixa de aceitar mensagens. */
+  handedTo: z.string().optional(),
   /** A primeira das 10 portas da sessão (SOLLINE_PORT). */
   port: z.number().int().optional(),
   /** A preparação da worktree (só nas sessões em worktree de projetos de confiança). */

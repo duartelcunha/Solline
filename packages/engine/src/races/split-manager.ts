@@ -453,6 +453,7 @@ export class SplitManager {
       agent: pending.agent,
       model: pending.model,
       after: base,
+      kind: 'part' as const,
       text: `${splitIntro(position, run.launched.length, race.text)}\n\n${contractMessage(pending.part, others, run.checks)}`,
     };
   }

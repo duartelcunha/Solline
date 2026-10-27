@@ -1,4 +1,10 @@
-import type { Finding, Quality } from '@solline/protocol';
+import type {
+  Finding,
+  Quality,
+  QualityStats,
+  ReviewTrigger,
+  ReviewerInfo,
+} from '@solline/protocol';
 import type { ReviewInput, Reviewer } from './reviewer.ts';
 
 export const NO_REVIEW: Quality['review'] = {
@@ -7,6 +13,14 @@ export const NO_REVIEW: Quality['review'] = {
   findings: [],
   error: null,
 };
+
+const NO_STATS: QualityStats = { fixed: 0, dismissed: 0, total: 0 };
+
+/** Quem reviu e porquê: vai para o resultado da revisão. */
+export interface ReviewMeta {
+  trigger?: ReviewTrigger | undefined;
+  reviewer?: ReviewerInfo | undefined;
+}
 
 /**
  * A segunda opinião de uma sessão: liga e desliga, revê um turno de cada vez (um turno novo
@@ -30,6 +44,7 @@ export class SessionQuality {
       available: true,
       enabled: options.enabled,
       review: NO_REVIEW,
+      stats: NO_STATS,
     };
   }
 
@@ -61,13 +76,18 @@ export class SessionQuality {
   async review(
     turnId: string,
     prepare: () => Promise<Omit<ReviewInput, 'signal'> | null>,
+    meta: ReviewMeta = {},
   ): Promise<void> {
+    const who = {
+      ...(meta.trigger ? { trigger: meta.trigger } : {}),
+      ...(meta.reviewer ? { reviewer: meta.reviewer } : {}),
+    };
     this.#running?.abort();
     const abort = new AbortController();
     this.#running = abort;
     this.#set({
       ...this.#state,
-      review: { state: 'running', turnId, findings: [], error: null },
+      review: { state: 'running', turnId, findings: [], error: null, ...who },
     });
     try {
       const input = await prepare();
@@ -78,14 +98,22 @@ export class SessionQuality {
       }
       const found = await this.#reviewer({ ...input, signal: abort.signal });
       if (abort.signal.aborted) return;
-      const findings = found.map((f, i): Finding => ({ ...f, id: `${turnId}-${i + 1}` }));
-      this.#set({ ...this.#state, review: { state: 'done', turnId, findings, error: null } });
+      const findings = found.map((f, i): Finding => ({
+        ...f,
+        id: `${turnId}-${i + 1}`,
+        status: 'open',
+      }));
+      this.#set({
+        ...this.#state,
+        review: { state: 'done', turnId, findings, error: null, ...who },
+        stats: { ...this.#state.stats, total: this.#state.stats.total + findings.length },
+      });
     } catch (error) {
       if (abort.signal.aborted) return;
       const message = error instanceof Error ? error.message : String(error);
       this.#set({
         ...this.#state,
-        review: { state: 'error', turnId, findings: [], error: message },
+        review: { state: 'error', turnId, findings: [], error: message, ...who },
       });
     } finally {
       if (this.#running === abort) this.#running = null;
@@ -96,6 +124,26 @@ export class SessionQuality {
   pick(ids: readonly string[]): Finding[] {
     const wanted = new Set(ids);
     return this.#state.review.findings.filter((f) => wanted.has(f.id));
+  }
+
+  /**
+   * Marca achados como corrigidos ou descartados e conta o que mudou de facto (um achado já
+   * resolvido não conta duas vezes). Devolve o estado novo.
+   */
+  resolve(ids: readonly string[], status: 'fixed' | 'dismissed'): Quality {
+    const wanted = new Set(ids);
+    const stats = { ...this.#state.stats };
+    let changed = false;
+    const findings = this.#state.review.findings.map((f) => {
+      if (!wanted.has(f.id) || f.status === status) return f;
+      changed = true;
+      stats[status]++;
+      if (f.status !== 'open') stats[f.status]--;
+      return { ...f, status };
+    });
+    if (!changed) return this.#state;
+    this.#set({ ...this.#state, review: { ...this.#state.review, findings }, stats });
+    return this.#state;
   }
 
   dispose(): void {

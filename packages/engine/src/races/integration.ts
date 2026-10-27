@@ -690,7 +690,11 @@ export class Integration {
                 request: race.text,
                 signal,
               });
-        integration.review = found.map((f) => ({ id: randomUUID(), ...f }));
+        integration.review = found.map((f) => ({
+          id: randomUUID(),
+          status: 'open' as const,
+          ...f,
+        }));
       } catch (error) {
         if (signal.aborted) return;
         integration.warnings.push(

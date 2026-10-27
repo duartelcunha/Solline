@@ -41,8 +41,13 @@ const ORDER: FindingSeverity[] = ['bug', 'risk', 'slop'];
 function face(quality: Quality): string {
   if (!quality.enabled) return 'off';
   const { review } = quality;
-  if (review.state === 'done') return review.findings.length ? 'found' : 'clean';
+  if (review.state === 'done') return shown(review.findings).length ? 'found' : 'clean';
   return review.state;
+}
+
+/** Os achados à vista: os descartados já não contam. */
+function shown(findings: readonly Finding[]): Finding[] {
+  return findings.filter((f) => f.status !== 'dismissed');
 }
 
 function Counts({ findings }: { findings: readonly Finding[] }) {
@@ -74,6 +79,7 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
   const current = quality ? face(quality) : null;
   if (!quality?.available || !current) return null;
   const { review } = quality;
+  const visible = shown(review.findings);
 
   const label =
     current === 'off'
@@ -83,7 +89,7 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
         : current === 'clean'
           ? 'Revisor sem achados'
           : current === 'found'
-            ? `${review.findings.length} ${review.findings.length === 1 ? 'achado' : 'achados'}`
+            ? `${visible.length} ${visible.length === 1 ? 'achado' : 'achados'}`
             : current === 'error'
               ? `Falhou: ${review.error ?? ''}`
               : 'Revisor ligado';
@@ -112,7 +118,7 @@ export function QualityChip({ sessionId }: { sessionId: string }) {
             ) : current === 'clean' ? (
               <BadgeCheck size={14} strokeWidth={1.75} className="text-success" />
             ) : current === 'found' ? (
-              <Counts findings={review.findings} />
+              <Counts findings={visible} />
             ) : current === 'error' ? (
               <CircleAlert size={14} strokeWidth={1.75} className="text-subtle" />
             ) : (
