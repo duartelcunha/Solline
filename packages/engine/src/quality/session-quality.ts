@@ -5,7 +5,7 @@ import type {
   ReviewTrigger,
   ReviewerInfo,
 } from '@solline/protocol';
-import type { ReviewInput, Reviewer } from './reviewer.ts';
+import { projectFindings, type ReviewInput, type Reviewer } from './reviewer.ts';
 
 export const NO_REVIEW: Quality['review'] = {
   state: 'idle',
@@ -99,7 +99,11 @@ export class SessionQuality {
         return;
       }
       if (!reviewer) throw new Error('Não há revisor disponível');
-      const found = await reviewer({ ...input, signal: abort.signal });
+      const found = projectFindings(
+        await reviewer({ ...input, signal: abort.signal }),
+        input.cwd,
+        input.diff,
+      );
       if (abort.signal.aborted) return;
       const findings = found.map((f, i): Finding => ({
         ...f,

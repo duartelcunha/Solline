@@ -137,6 +137,29 @@ export function promptFor(input: Pick<ReviewInput, 'diff' | 'request' | 'rules'>
   ].join('\n');
 }
 
+/**
+ * Os caminhos dos achados como a interface os ancora: relativos à pasta do projeto e com "/".
+ * O revisor pode responder com o caminho absoluto, com barras do Windows ou com o "a/"/"b/" do
+ * diff; o que cair fora do projeto (um achado inventado ou induzido pelo diff) sai.
+ */
+export function projectFindings(
+  findings: readonly ReviewedFinding[],
+  root: string,
+  diff: readonly Pick<FileDiff, 'path'>[] = [],
+): ReviewedFinding[] {
+  const known = new Set(diff.map((f) => f.path));
+  return findings.flatMap((finding) => {
+    const relative = path.relative(root, path.resolve(root, finding.path));
+    const outside =
+      relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+    if (relative === '' || outside) return [];
+    const plain = relative.replaceAll('\\', '/');
+    const stripped = plain.replace(/^[ab]\//, '');
+    const file = !known.has(plain) && known.has(stripped) ? stripped : plain;
+    return [{ ...finding, path: file }];
+  });
+}
+
 /** Só leitura, sempre: qualquer outra ferramenta é recusada antes de correr. */
 export const readOnly: CanUseTool = (toolName, input) =>
   Promise.resolve(

@@ -16,8 +16,9 @@ const SENSITIVE_FILE: readonly RegExp[] = [
   /(^|\/)[^/]+\.config\.[^/]+$/,
   /(^|\/)package\.json$/,
   /(^|\/)\.github\/workflows\//,
-  // O processo principal do Electron (o preload já está na lista de palavras acima).
-  /(^|\/)src\/main\//,
+  // O processo principal do Electron (o preload já está na lista de palavras acima). Só JS/TS:
+  // em Java e Kotlin todo o código vive em src/main e não é por isso mais sensível.
+  /(^|\/)src\/main\/.*\.[cm]?[jt]sx?$/,
 ];
 
 /** Separa o camelCase e uniformiza as barras: userSession.ts passa a user/session.ts. */

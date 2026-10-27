@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { FileDiff } from '@solline/protocol';
 import {
@@ -184,6 +185,21 @@ describe('estado da segunda opinião', () => {
       // Mudar de ideias passa o achado de um contador para o outro.
       q.resolve(['t1-2'], 'fixed');
       expect(q.state.stats).toEqual({ fixed: 2, dismissed: 0, total: 2 });
+    });
+
+    it('um achado fora do projeto não chega ao estado; um absoluto fica relativo', async () => {
+      const q = new SessionQuality({
+        reviewer: () =>
+          Promise.resolve([
+            { ...found[0]!, path: '../fora.ts' },
+            { ...found[0]!, path: path.resolve(input.cwd, 'src', 'a.ts') },
+          ]),
+        enabled: true,
+        emit: () => undefined,
+      });
+      await q.review('t1', ready);
+      expect(q.state.review.findings.map((f) => f.path)).toEqual(['src/a.ts']);
+      expect(q.state.stats.total).toBe(1);
     });
 
     it('os contadores sobrevivem a uma revisão nova e somam o total', async () => {

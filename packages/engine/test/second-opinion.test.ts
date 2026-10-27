@@ -15,7 +15,7 @@ import {
   type Reviewer,
 } from '../src/index.ts';
 import { REVIEWED_CODEX_VERSION } from '../src/adapters/codex/executable.ts';
-import { OUTPUT, SCHEMA } from '../src/quality/reviewer.ts';
+import { OUTPUT, SCHEMA, projectFindings } from '../src/quality/reviewer.ts';
 import { fakeCodexServer } from './codex-fakes.ts';
 import { waitFor } from './helpers.ts';
 
@@ -112,7 +112,16 @@ describe('quando vale a pena rever um turno', () => {
   });
 
   it('um ficheiro banal com uma linha não vale', () => {
-    for (const file of ['src/button.tsx', 'README.md', 'docs/notas.md', 'src/authors.ts']) {
+    for (const file of [
+      'src/button.tsx',
+      'README.md',
+      'docs/notas.md',
+      'src/authors.ts',
+      // Num projeto Java ou Kotlin todo o código vive em src/main: não é o processo do Electron.
+      'src/main/java/com/acme/Button.java',
+      'app/src/main/kotlin/Util.kt',
+      'src/main/resources/messages.properties',
+    ]) {
       expect(isSensitivePath(file), file).toBe(false);
     }
     expect(reviewWorth([diffOf('src/button.tsx', 1)])).toEqual({
@@ -120,6 +129,47 @@ describe('quando vale a pena rever um turno', () => {
       lines: 1,
       sensitive: [],
     });
+  });
+});
+
+describe('os caminhos dos achados', () => {
+  const root = path.resolve('projeto');
+  const at = (file: string) => ({ ...FOUND, path: file });
+
+  it('ficam relativos ao projeto e com "/", venham absolutos, do Windows ou com o a/ b/ do diff', () => {
+    const found = projectFindings(
+      [
+        at(path.join(root, 'src', 'a.ts')),
+        at('src\\b.ts'),
+        at('b/src/c.ts'),
+        at('./src/d.ts'),
+        // Um caminho que existe mesmo com "b/" à frente fica como está.
+        at('b/real.ts'),
+      ],
+      root,
+      [{ path: 'src/c.ts' }, { path: 'b/real.ts' }],
+    );
+    expect(found.map((f) => f.path)).toEqual([
+      'src/a.ts',
+      'src/b.ts',
+      'src/c.ts',
+      'src/d.ts',
+      'b/real.ts',
+    ]);
+  });
+
+  it('o que cai fora do projeto sai (um diff com instruções não aponta para ~/.ssh)', () => {
+    const outside = [
+      at('../segredos.txt'),
+      at(path.resolve(root, '..', 'outro', 'x.ts')),
+      at(path.join(path.parse(root).root, 'etc', 'passwd')),
+      at('.'),
+    ];
+    expect(projectFindings([...outside, at('src/ok.ts')], root).map((f) => f.path)).toEqual([
+      'src/ok.ts',
+    ]);
+    // Um nome que só começa por ".." continua dentro.
+    expect(projectFindings([at('..notas.md')], root)).toHaveLength(1);
   });
 });
 
