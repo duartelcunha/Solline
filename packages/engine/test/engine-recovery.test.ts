@@ -250,6 +250,7 @@ describe('durable engine recovery', () => {
     });
     races.restoreRecovery([
       {
+        kind: 'race',
         id: 'race',
         projectId: 'project',
         text: 'compare',

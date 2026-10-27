@@ -24,6 +24,7 @@ function heldStart() {
     { version: 1, revision: 0, drafts: {} },
   );
   const race: Race = {
+    kind: 'race',
     id: 'race',
     projectId: 'project',
     text: 'Compare these changes',

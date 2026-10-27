@@ -1,18 +1,10 @@
-import type {
-  EngineEvent,
-  Race,
-  RaceLaneSpec,
-  RacePhase,
-  CommandResult,
-  RaceProposal,
-  SessionStartPayload,
-  SessionState,
-} from '@solline/protocol';
+import type { EngineEvent, Race, RaceLaneSpec, RacePhase, RaceProposal } from '@solline/protocol';
 import type { RawFile } from '../checkpoints/unified-diff.ts';
 import { judgeBothWays, type Judge, type Verdict } from '../verify/judge.ts';
 import { failures, type CheckVerdict } from '../verify/verify.ts';
 import type { Worktree } from '../worktrees/worktrees.ts';
 import type { Assembler, AssemblerLane, CheckContext } from './assembler.ts';
+import { Lanes, type LaneProject, type LaneSessions, type SessionCreateResult } from './lanes.ts';
 import { needsJudge, rankLanes, type LaneOutcome } from './rank.ts';
 
 /**
@@ -23,33 +15,20 @@ import { needsJudge, rankLanes, type LaneOutcome } from './rank.ts';
  * resultado pedaço a pedaço, traz-se para o projeto e fecham-se as pistas.
  */
 
-export interface RaceSessions {
-  create(payload: SessionStartPayload): Promise<SessionCreateResult>;
-  send(sessionId: string, text: string): Promise<unknown>;
-  close(
-    sessionId: string,
-    worktree?: 'bring' | 'keep' | 'discard',
-    dropQueue?: boolean,
-  ): Promise<unknown>;
+export interface RaceSessions extends LaneSessions {
   /** O que a pista mudou face à base e as suas verificações (com a base ao lado). */
   outcome(
     sessionId: string,
     signal?: AbortSignal,
   ): Promise<{ cwd: string; files: readonly RawFile[]; checks: readonly CheckVerdict[] }>;
-  /** A worktree da pista (não há, se a sessão já não existe). */
-  worktreeOf(sessionId: string): Worktree | undefined;
   /** O que correr para verificar o trabalho desta pista. */
   checkContext(sessionId: string): CheckContext;
 }
 
-export type RaceBegin = Omit<SessionStartPayload, 'agent' | 'model' | 'mode' | 'effort'> & {
+export type RaceBegin = LaneProject & {
   text: string;
   lanes: readonly RaceLaneSpec[];
 };
-
-type SessionCreateResult = CommandResult<'session.create'>;
-
-const STOPPED: ReadonlySet<SessionState> = new Set(['idle', 'error']);
 
 export class RaceManager {
   readonly #ranking = new Map<string, AbortController>();
@@ -58,8 +37,7 @@ export class RaceManager {
   readonly #races = new Map<string, Race>();
   readonly #sessions: RaceSessions;
   readonly #emit: (event: EngineEvent) => void;
-  /** As pistas que já começaram a trabalhar (parada antes disso não conta como acabada). */
-  readonly #started = new Set<string>();
+  readonly #core: Lanes;
   readonly #judge: Judge | undefined;
   readonly #assembler: Assembler | undefined;
   /** A worktree completa de cada montagem (só em memória: ao reiniciar, a não trazida vira órfã). */
@@ -75,6 +53,7 @@ export class RaceManager {
     assembler?: Assembler;
   }) {
     this.#sessions = options.sessions;
+    this.#core = new Lanes(options.sessions);
     this.#beforeEffect = options.beforeEffect ?? (() => () => undefined);
     this.#emit = options.emit;
     this.#judge = options.judge;
@@ -85,30 +64,15 @@ export class RaceManager {
   async begin(payload: RaceBegin): Promise<{ race: Race; sessions: SessionCreateResult[] }> {
     const id = crypto.randomUUID();
     const { text, lanes, ...project } = payload;
-    const sessions: SessionCreateResult[] = [];
-    try {
-      for (const lane of lanes) {
-        sessions.push(
-          await this.#sessions.create({
-            ...project,
-            agent: lane.agent,
-            ...(lane.model ? { model: lane.model } : {}),
-            worktree: 'always',
-            raceId: id,
-          }),
-        );
-      }
-    } catch (error) {
-      // Uma pista que não abre desfaz as outras: uma corrida coxa não compara nada.
-      await Promise.all(
-        sessions.map((s) =>
-          this.#sessions.close(s.session.id, 'discard', true).catch(() => undefined),
-        ),
-      );
-      throw error;
-    }
+    // Uma pista que não abre desfaz as outras: uma corrida coxa não compara nada.
+    const { sessions, send } = await this.#core.open(
+      project,
+      id,
+      lanes.map((lane) => ({ ...lane, text })),
+    );
     const race: Race = {
       id,
+      kind: 'race',
       projectId: payload.projectId,
       text,
       phase: 'running',
@@ -121,7 +85,7 @@ export class RaceManager {
     };
     this.#races.set(id, race);
     this.#changed(race);
-    await Promise.all(sessions.map((s) => this.#sessions.send(s.session.id, text)));
+    await send();
     return { race: { ...race }, sessions };
   }
 
@@ -144,7 +108,7 @@ export class RaceManager {
         race.phase = 'ranked';
         race.assembly = null;
       }
-      for (const lane of race.lanes) lane.state = 'error';
+      this.#core.restored(race.lanes);
       this.#races.set(race.id, race);
     }
   }
@@ -154,14 +118,9 @@ export class RaceManager {
     if (this.#stopping) return;
     if (event.type !== 'session.state') return;
     for (const race of this.#races.values()) {
-      const lane = race.lanes.find((l) => l.sessionId === event.sessionId);
-      if (!lane || lane.state === event.state) continue;
-      lane.state = event.state;
-      if (!STOPPED.has(event.state)) this.#started.add(lane.sessionId);
-      if (
-        race.phase === 'running' &&
-        race.lanes.every((l) => this.#started.has(l.sessionId) && STOPPED.has(l.state))
-      ) {
+      const seen = this.#core.observe(race.lanes, event);
+      if (!seen) continue;
+      if (race.phase === 'running' && seen.settled) {
         race.phase = 'done';
         this.#changed(race);
         void this.rank(race.id).catch((error) =>
@@ -324,14 +283,10 @@ export class RaceManager {
       throw new Error('Espera que a corrida acabe de trabalhar antes de a fechar.');
     if (keep !== undefined && !race.lanes.some((l) => l.sessionId === keep))
       throw new Error('Essa pista não é desta corrida.');
-    for (const lane of race.lanes) {
-      await this.#sessions
-        .close(lane.sessionId, lane.sessionId === keep ? 'keep' : 'discard', true)
-        .catch((error: unknown) => {
-          // Uma pista que já não existe (o motor reiniciou) não impede de fechar a corrida.
-          if (this.#sessions.worktreeOf(lane.sessionId)) throw error;
-        });
-    }
+    await this.#core.close(
+      race.lanes.map((l) => l.sessionId),
+      keep,
+    );
     if (race.assembly)
       await this.#assembler?.discard(race.assembly, race.assembly.brought ? 'if-merged' : 'always');
     this.#assemblies.delete(raceId);

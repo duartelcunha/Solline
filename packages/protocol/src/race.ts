@@ -12,11 +12,34 @@ export const RaceLaneSpec = z
   .strict();
 export type RaceLaneSpec = z.infer<typeof RaceLaneSpec>;
 
+/**
+ * A parte de uma repartição que esta pista faz: o objetivo e o contrato (o que pode e não pode
+ * tocar, as interfaces combinadas, o que se espera no fim). A parte zero corre primeiro.
+ */
+export const SplitPart = z
+  .object({
+    title: z.string().min(1).max(200),
+    goal: z.string().min(1).max(20_000),
+    /** Caminhos ou globs que a parte pode tocar. */
+    allowed: z.array(z.string().min(1).max(500)).max(200),
+    forbidden: z.array(z.string().min(1).max(500)).max(200),
+    interfaces: z.string().max(20_000),
+    expected: z.string().max(20_000),
+    /** O id de uma verificação do projeto que tem de passar (se houver). */
+    check: z.string().min(1).max(200).nullable(),
+    /** A parte zero: prepara o terreno e corre antes das outras. */
+    zero: z.boolean(),
+  })
+  .strict();
+export type SplitPart = z.infer<typeof SplitPart>;
+
 export const RaceLane = z.object({
   sessionId: z.string(),
   agent: AgentId,
   model: z.string().nullable(),
   state: SessionState,
+  /** Só nas repartições: a parte que a pista faz. */
+  part: SplitPart.optional(),
 });
 export type RaceLane = z.infer<typeof RaceLane>;
 
@@ -121,8 +144,14 @@ export const RaceAssembly = z.object({
 });
 export type RaceAssembly = z.infer<typeof RaceAssembly>;
 
+/** race: o mesmo pedido em todas as pistas · split: cada pista faz uma parte diferente. */
+export const RaceKind = z.enum(['race', 'split']);
+export type RaceKind = z.infer<typeof RaceKind>;
+
 export const Race = z.object({
   id: z.string(),
+  /** Sem `kind` (corridas gravadas antes das repartições) é uma corrida. */
+  kind: RaceKind.default('race'),
   projectId: z.string(),
   text: z.string(),
   lanes: z.array(RaceLane),

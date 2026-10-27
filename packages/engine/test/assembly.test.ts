@@ -220,6 +220,7 @@ describe('a montagem na corrida', { timeout: 60_000 }, () => {
     });
     manager.restoreRecovery([
       {
+        kind: 'race',
         id: 'r',
         projectId: 'p',
         text: 'Muda o ficheiro\ncom duas linhas',
