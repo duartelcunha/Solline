@@ -506,3 +506,34 @@
   Só voltam com um caso concreto e o ensaio completo das falhas.
 - Descartado: onboarding promocional, mega-definições, tokens e daemon globais (DEL-286).
 - As provas e a matriz completa vivem fora do repositório, na pasta de investigação do Codex.
+
+## M4, fatia 5: montar, trazer e fechar (29/10/2026)
+
+- Uma pista pode escrever mais de um hunk numa zona; o candidato é o que a pista escreveu na zona
+  inteira, para nunca se montar meia mudança.
+- A worktree da montagem é irmã das pistas (mesmo commit, dependências ligadas) e conta como em
+  uso: não aparece como órfã. Ao reiniciar, a montagem por trazer volta a "ordenada" e a worktree
+  fica como órfã; uma já trazida só falta fechar.
+- Fechar a corrida pede uma confirmação nativa e deixa guardar o branch de uma pista.
+- O redesign do Codex trazia barras de scroll finas; voltou a regra do Duarte: sem barras.
+
+## M4.5: repartição (29/10/2026)
+
+- Pesquisa antes do grilling (nova regra): partir só compensa quando as partes não se tocam; o
+  planeador pode recusar; agentes não conversam entre si; contrato por parte; integração em série.
+- Partes diferentes não se montam por zonas: integram-se por merge, uma a uma, produtor primeiro
+  (parte zero, depois cada predecessor), com o Verificador depois de cada junção. Uma parte que vem
+  depois de outra parte do resultado dela (`startAfter`), não da base.
+- O planeador (Claude Sonnet, só leitura) propõe; quem lança é o Duarte. Checks só os do projeto
+  guardado e só em projetos de confiança, também no motor. Uma parte sem verificação não lança.
+- Conflito: sessão normal na worktree da ponta, com a mensagem do conflito; a resolução só é aceite
+  se contiver o que já estava juntado e passar a verificação. Nunca se descarta uma ponta com
+  trabalho que a nova não contém.
+- Resumos entre partes: gerados pela Solline, em fila, só para partes ainda a trabalhar. Escrita fora
+  do âmbito ou colisão (`git merge-tree`) é aviso, nunca interrupção; problemas de uma parte nunca
+  chegam como erro do motor (abriam a janela de recuperação).
+- Parar a repartição limpa as partes por lançar. Uma parte interrompida não lança as seguintes.
+- Medir sem inventar: custo somado, tempo da pista mais lenta contra a soma, conflitos, falhas
+  depois de integrar.
+- Por fazer: bloquear mensagens à sessão que resolve, prévia de colisões mais leve (um snapshot por
+  pista), cancelar o planeador a meio, partes ligadas às tarefas dos Espaços.

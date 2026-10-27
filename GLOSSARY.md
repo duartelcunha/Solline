@@ -52,3 +52,11 @@ Os nomes do domínio da Solline, como o código os usa.
 - **Recuperação**: o registo durável e cifrado de sessões, tarefas e corridas. Depois de um fecho
   inesperado nada se perde: as pistas voltam em erro e uma corrida que estava a correr ou a ordenar
   volta a "acabaram todas".
+- **Repartição**: um pedido partido em 2 a 4 partes diferentes que correm ao mesmo tempo e se
+  juntam no fim. É uma função pedida, nunca o padrão.
+- **Parte**: o que uma pista de uma repartição faz, com o seu contrato.
+- **Contrato**: objetivo, o que pode e não pode tocar, interfaces combinadas, resultado esperado e a
+  verificação do projeto que tem de passar.
+- **Parte zero**: a que fixa uma interface antes das outras arrancarem, que partem do resultado dela.
+- **Integração**: juntar as partes numa worktree de integração, uma a uma, com as verificações
+  depois de cada junção; num conflito, uma sessão normal resolve e as verificações confirmam.

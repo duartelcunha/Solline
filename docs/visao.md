@@ -108,12 +108,27 @@ tentativas. É o primeiro marco que nenhuma outra ferramenta oferece.
 
 Inspiração: `/best-of-n` do Cursor, tentativas múltiplas do Vibe Kanban.
 
-Estado (27/10/2026): fatias 1 a 4 feitas. Uma corrida abre 2 a 4 pistas em worktrees, lado a lado
-(o cartão na mesa, os pedidos num só sítio), e quando param ordena-as pela execução (verificações
-contra a base, depois consenso) com o juiz cego só nos empates. Falta montar o resultado hunk a hunk
-(fatia 5). Adiados com nome: testes gerados para distinguir as pistas, juiz de outro fabricante e a
-quota à vista antes de lançar. Em paralelo, o Codex entregou o redesign, os espaços e tarefas, a
-pesquisa Ctrl+K, a retoma da navegação e a recuperação (ver `DECISIONS.md`).
+Estado (29/10/2026): feito. Uma corrida abre 2 a 4 pistas em worktrees, lado a lado (o cartão na
+mesa, os pedidos num só sítio), ordena-as pela execução (verificações contra a base, depois
+consenso) com o juiz cego só nos empates, e deixa montar o resultado hunk a hunk, trazer e fechar.
+Adiados com nome: testes gerados para distinguir as pistas, juiz de outro fabricante e a quota à
+vista antes de lançar. Em paralelo, o Codex entregou o redesign, os espaços e tarefas, a pesquisa
+Ctrl+K, a retoma da navegação e a recuperação (ver `DECISIONS.md`).
+
+### M4.5: repartição
+
+Um pedido grande partido em 2 a 4 partes diferentes, cada uma num agente e numa worktree, com um
+contrato por parte, e juntas no fim, uma a uma. É uma função que o Duarte pede (pílula "Partir"),
+nunca o caminho por omissão: a pesquisa mostra que só compensa quando as partes não se tocam, por
+isso o planeador também responde "não partir".
+
+Estado (29/10/2026): feito. Planeador só de leitura, contrato por parte (âmbito, interfaces,
+verificação), verificações antes de lançar (partes que se tocam ficam em sequência, custo à vista),
+parte zero que fixa a interface, resumos do que os outros mudaram no fim de cada turno, avisos de
+escrita fora do âmbito e de colisões, integração em série com o Verificador depois de cada junção,
+sessão normal para resolver conflitos, revisor no fim, métricas e recuperação. Por fazer, com
+nome: bloquear mensagens à sessão que resolve um conflito, prévia de colisões mais leve, cancelar o
+planeador a meio, ligar as partes às tarefas dos Espaços.
 
 ### M5: segunda opinião e passagem de testemunho
 
