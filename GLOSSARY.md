@@ -30,3 +30,25 @@ Os nomes do domínio da Solline, como o código os usa.
 - **Juiz cego**: desempata tentativas que a execução não separou. Vê o pedido, os diffs e as
   verificações, com as tentativas por letra; nunca o agente nem o que ele disse. Julga nas duas
   ordens; se discordarem, é empate e decide o Duarte.
+- **Corrida**: o mesmo pedido em 2 a 4 pistas ao mesmo tempo. Acaba quando todas param e é então
+  ordenada.
+- **Pista**: uma sessão de uma corrida, sempre na sua worktree, com o agente e o modelo que escolheste.
+- **Veredicto**: a ordem das pistas (execução, depois consenso, depois o juiz só nos empates), com o
+  melhor e o pior de cada uma. Um empate que ninguém desfez fica para ti: "escolhe tu".
+- **Consenso**: pistas que chegaram ao mesmo patch (sem contar espaços nem ordem dos ficheiros)
+  formam um grupo; o grupo maior ganha entre pistas igualmente verdes.
+- **Espaço**: onde vivem as tarefas, memórias e sugestões de um projeto, ou do "Geral" quando não
+  pertencem a nenhum. Cada espaço tem as suas definições de análise e aprendizagem.
+- **Tarefa**: o que queres ver feito (`todo`, `active`, `review`, `done`). Guarda as tentativas e
+  pode vir de uma memória ou de uma sugestão.
+- **Tentativa**: uma delegação concreta de uma tarefa a uma sessão, com o resultado e as mudanças.
+- **Delegação**: passar uma tarefa a uma sessão existente ou nova. É sempre um gesto teu: nada
+  arranca agentes sozinho, nem ao navegar nem ao retomar.
+- **Memória**: algo que a Solline aprendeu e pode dar aos agentes. Fica `pending` até a aprovares
+  (modo de aprendizagem "aprovação") e podes desligá-la (`disabled`).
+- **Sugestão**: uma proposta da análise (`suggested`, `accepted`, `dismissed`), com as fontes.
+- **Retoma**: abrir a Solline onde estavas (projeto, tarefa, painel, sessão ou corrida). Também podes
+  escolher abrir nas Tarefas do Geral ou na Mesa. Guarda só identificadores, nunca conteúdo.
+- **Recuperação**: o registo durável e cifrado de sessões, tarefas e corridas. Depois de um fecho
+  inesperado nada se perde: as pistas voltam em erro e uma corrida que estava a correr ou a ordenar
+  volta a "acabaram todas".

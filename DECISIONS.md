@@ -479,3 +479,30 @@
   mesmo tempo e devolvia um diff vazio).
 - Adiado com nome: os testes gerados para distinguir as pistas e o juiz de outro fabricante (Codex
   em sandbox só de leitura); por agora o juiz é o Claude.
+
+## A linha do Codex passa a ser o tronco (22 a 23/10/2026)
+
+- O Codex continuou a partir do commit da fatia 4 do M4 (36 commits): redesign (porcelana e carvão,
+  Geist, paper-bots), espaços e tarefas com delegação manual, memória com aprovação, pesquisa Ctrl+K,
+  retoma da navegação, recuperação das sessões e corridas, controlos da janela e uma bateria de QA
+  reproduzível. A versão estável está nesse ponto.
+- O branch `feat/design-qualidade` é antepassado direto: o trabalho novo parte do tronco do Codex.
+- Retoma: `navigation.json` guarda só identificadores e preferências, com gravação atómica; um
+  destino apagado recua para um válido e um ficheiro corrompido nunca é reescrito. Por omissão
+  "Retomar onde estava"; "Tarefas do Geral" e "Mesa" só valem na abertura seguinte.
+- Recuperação: journal durável e cifrado; as pistas de uma corrida voltam em erro e a corrida a
+  correr ou a ordenar volta a "acabaram todas". Os comandos de corrida passam por `beforeEffect`.
+- Nada foi enviado para o remoto; a promoção deixou uma cópia da versão anterior para reverter.
+
+## Investigação do Orca (23/10/2026)
+
+- Estudado em quarentena (programa oficial e fonte). Não é cobertura de execução completa do Orca:
+  contas, agentes reais, agendador, browser e terminal completos ficaram por provar. Nenhum código
+  nem recurso foi copiado.
+- Entrou: pesquisa global local, retoma da navegação, escolhas de arranque, voltar da sessão
+  delegada à tarefa certa.
+- Mantido: motor, ponte, interface; espaços, filas, revisão e verificações já existentes.
+- Adiado (não proibido): terminal embutido, browser e editor completos, agendador genérico.
+  Só voltam com um caso concreto e o ensaio completo das falhas.
+- Descartado: onboarding promocional, mega-definições, tokens e daemon globais (DEL-286).
+- As provas e a matriz completa vivem fora do repositório, na pasta de investigação do Codex.

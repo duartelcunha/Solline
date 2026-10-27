@@ -108,6 +108,13 @@ tentativas. É o primeiro marco que nenhuma outra ferramenta oferece.
 
 Inspiração: `/best-of-n` do Cursor, tentativas múltiplas do Vibe Kanban.
 
+Estado (27/10/2026): fatias 1 a 4 feitas. Uma corrida abre 2 a 4 pistas em worktrees, lado a lado
+(o cartão na mesa, os pedidos num só sítio), e quando param ordena-as pela execução (verificações
+contra a base, depois consenso) com o juiz cego só nos empates. Falta montar o resultado hunk a hunk
+(fatia 5). Adiados com nome: testes gerados para distinguir as pistas, juiz de outro fabricante e a
+quota à vista antes de lançar. Em paralelo, o Codex entregou o redesign, os espaços e tarefas, a
+pesquisa Ctrl+K, a retoma da navegação e a recuperação (ver `DECISIONS.md`).
+
 ### M5: segunda opinião e passagem de testemunho
 
 No fim de cada turno (ou antes de um commit), um revisor de outro fabricante lê o diff e os achados
