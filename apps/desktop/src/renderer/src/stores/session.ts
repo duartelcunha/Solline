@@ -97,11 +97,13 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
           return { ...data, capabilities: delta.capabilities };
         case 'turn.start': {
           const turns = applyDelta(data.turns, delta);
-          // Uma sessão de passagem já vem com o nome do objetivo: a primeira mensagem é o aviso.
+          // Uma sessão de passagem já vem com o nome do objetivo, e uma bifurcação com o da origem:
+          // a primeira mensagem não lho muda.
           const first =
             delta.turn.role === 'user' &&
             data.turns.length === 0 &&
-            data.info.origin?.kind !== 'handoff';
+            data.info.origin?.kind !== 'handoff' &&
+            data.info.origin?.kind !== 'fork';
           const text = delta.turn.blocks.find((b) => b.kind === 'text');
           const title = first && text?.kind === 'text' ? titleFrom(text.text) : data.info.title;
           return { ...data, turns, info: { ...data.info, title } };

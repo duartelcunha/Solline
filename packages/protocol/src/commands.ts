@@ -13,6 +13,7 @@ import {
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
 import { handoffCommandSchemas } from './handoff.ts';
+import { forkCommandSchemas } from './fork.ts';
 import { Race, RaceProposal, RaceStartPayload } from './race.ts';
 import {
   SplitPlanNowPayload,
@@ -355,6 +356,7 @@ export const commandSchemas = {
   ...qualityCommandSchemas,
   ...checksCommandSchemas,
   ...handoffCommandSchemas,
+  ...forkCommandSchemas,
 } as const;
 
 /**

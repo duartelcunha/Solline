@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -367,6 +367,80 @@ mais
 });
 
 // Cada chamada ao git é um processo novo; com o antivírus a pesar, chega a 1 s cada.
+describe('materializar um checkpoint noutra pasta', { timeout: 30_000 }, () => {
+  let target: string;
+
+  beforeEach(async () => {
+    target = path.join(root, 'target');
+    await mkdir(target);
+  });
+
+  const put = (rel: string, text: string) =>
+    mkdir(path.dirname(path.join(target, rel)), { recursive: true }).then(() =>
+      writeFile(path.join(target, rel), text),
+    );
+  const got = (rel: string) => readFile(path.join(target, rel), 'utf8');
+
+  it('põe a pasta como no fim do turno e deixa em paz o .git, os ignorados e o node_modules', async () => {
+    // A origem e a pasta de destino partem do mesmo ponto.
+    for (const dir of [project, target]) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, '.gitignore'), 'ignored.log\n');
+      await writeFile(path.join(dir, 'a.txt'), 'um\n');
+      await writeFile(path.join(dir, 'gone.txt'), 'g\n');
+    }
+    // O destino tem o que um repositório e uma instalação lá deixam.
+    await put('.git/marker', 'não mexer');
+    await put('ignored.log', 'meu log');
+    await put('node_modules/pkg/index.js', 'dep');
+    await put('so-no-destino.txt', 'não estava na origem');
+
+    const cp = await open();
+    await begin(cp, 't1', 'Muda e apaga');
+    await write('a.txt', 'dois\n');
+    await write('gone.txt', 'ainda\n');
+    await rm(path.join(project, 'gone.txt'));
+    await write('novo/c.txt', 'c\n');
+    await write('ignored.log', 'log da origem');
+    await cp.endTurn(last);
+    await begin(cp, 't2', 'Depois');
+    await write('a.txt', 'tres\n');
+    await write('outro.txt', 'o\n');
+    await cp.endTurn(last);
+    const sourceAfter = await read('a.txt');
+
+    const result = await cp.materialize('t1', target);
+    expect(result).toEqual({ written: 2, removed: 2 });
+    // O que o checkpoint tinha...
+    expect(await got('a.txt')).toBe('dois\n');
+    expect(await got('novo/c.txt')).toBe('c\n');
+    expect(existsSync(path.join(target, 'gone.txt'))).toBe(false);
+    expect(existsSync(path.join(target, 'so-no-destino.txt'))).toBe(false);
+    expect(existsSync(path.join(target, 'outro.txt'))).toBe(false);
+    // ...e o que não é do checkpoint não se toca.
+    expect(await got('.git/marker')).toBe('não mexer');
+    expect(await got('ignored.log')).toBe('meu log');
+    expect(await got('node_modules/pkg/index.js')).toBe('dep');
+    expect(await got('.gitignore')).toBe('ignored.log\n');
+    // A origem e a linha do tempo dela ficam como estavam.
+    expect(await read('a.txt')).toBe(sourceAfter);
+    expect(cp.timeline().checkpoints.map((c) => c.turnId)).toEqual(['t1', 't2']);
+    expect(cp.timeline().rewoundTo).toBeNull();
+    expect(cp.timeline().undo).toBeNull();
+    // Repetir não muda nada.
+    expect(await cp.materialize('t1', target)).toEqual({ written: 0, removed: 0 });
+  });
+
+  it('recusa um turno sem checkpoint ou ainda a correr, sem escrever', async () => {
+    await write('a.txt', 'um\n');
+    const cp = await open();
+    await expect(cp.materialize('nada', target)).rejects.toThrow('Este turno não tem checkpoint');
+    await begin(cp, 't1', 'A meio');
+    await expect(cp.materialize('t1', target)).rejects.toThrow('ainda não acabou');
+    expect(await readdir(target)).toEqual([]);
+  });
+});
+
 describe('custo de cada ação em chamadas ao git', { timeout: 30_000 }, () => {
   it('rejeitar um ficheiro inteiro não repete fotografias ao disco', async () => {
     await write('notes.txt', 'The quick alpha fox.\n');

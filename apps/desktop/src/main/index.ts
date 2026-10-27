@@ -525,9 +525,10 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
     }
     await reconcilePolicy(engine, policyProjects, command, payload);
     const result = await engine.request(command, payload);
-    // A sessão que recebe o testemunho passa a ser seguida, como qualquer sessão nova.
-    if (command === 'handoff.start') {
-      const { session } = result as CommandResult<'handoff.start'>;
+    // A sessão que recebe o testemunho, ou que nasce de uma bifurcação, passa a ser seguida,
+    // como qualquer sessão nova.
+    if (command === 'handoff.start' || command === 'session.fork') {
+      const { session } = result as CommandResult<'handoff.start' | 'session.fork'>;
       const project = await projects.get(session.projectId);
       attention.track(session, project?.name ?? basename(session.cwd));
     }

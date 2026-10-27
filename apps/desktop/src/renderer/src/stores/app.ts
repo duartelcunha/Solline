@@ -1315,6 +1315,34 @@ export const actions = {
     }
   },
 
+  /**
+   * "Bifurcar daqui": o motor abre uma sessão nova, na sua worktree, com os ficheiros como
+   * ficaram depois desse turno e a conversa até lá; a interface abre-a. A de origem não muda.
+   */
+  async forkSession(sessionId: string, turnId: string): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      const { session, capabilities, turns } = await request('session.fork', {
+        sessionId,
+        turnId,
+      });
+      const store = createSessionStore(session, session.projectId, capabilities);
+      // O histórico vem na resposta (os eventos dele são os mesmos turnos: não se repetem).
+      store.setState({ turns });
+      adoptStore(session.id, store);
+      useApp.setState((s) => ({
+        sessionIds: [session.id, ...s.sessionIds.filter((id) => id !== session.id)],
+        activeSessionId: session.id,
+        view: 'session',
+      }));
+      loadSessionExtras(session.id, store);
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
   /** "Retomar aqui": a pasta volta a esta sessão e a outra fica em pausa. */
   async resumeHandoff(sessionId: string): Promise<boolean> {
     sessionStores.get(sessionId)?.setState({ actionError: null });

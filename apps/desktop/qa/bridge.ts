@@ -669,6 +669,53 @@ export function installBridge(scene: Scene) {
         emit({ kind: 'event', type: 'session.handoff', sessionId: id, handedTo: session.id });
         return { session: { ...session }, capabilities, turnId: 'handoff-1' };
       }
+      case 'session.fork': {
+        const { handedTo: _handedTo, ...source } = structuredClone(
+          required(sessions.get(id), `sessão ${id}`),
+        );
+        const saved = required(canonical.get(id), `sessão ${id}`);
+        const at = saved.turns.findIndex((t) => t.id === payload.turnId && t.role === 'user');
+        if (at === -1) throw new Error('QA: turno desconhecido');
+        const next = saved.turns.findIndex((t, i) => i > at && t.role === 'user');
+        const turns = structuredClone(saved.turns.slice(0, next === -1 ? undefined : next));
+        const session: SessionInfo = {
+          ...source,
+          id: `session-${++count}`,
+          title: `${source.title} (bifurcação)`,
+          state: 'idle',
+          workspace: {
+            kind: 'worktree',
+            branch: 'solline/qa-bifurcacao',
+            stats: { files: 0, additions: 0, deletions: 0 },
+          },
+          origin: { kind: 'fork', sessionId: id, turnId: String(payload.turnId) },
+        };
+        sessions.set(session.id, session);
+        canonical.set(session.id, {
+          session,
+          capabilities: structuredClone(capabilities),
+          turns,
+          usage: { costUsd: null, models: [], context: null, tokens: null },
+          queue: { items: [], paused: false },
+          timeline: null,
+          quality: structuredClone(quality),
+          checks: null,
+          conflicts: null,
+          interrupted: false,
+          error: null,
+        });
+        qualities.set(session.id, structuredClone(quality));
+        reviews.set(session.id, {
+          timeline: structuredClone(initialTimeline),
+          files: [structuredClone(diff)],
+        });
+        return {
+          session: { ...session },
+          capabilities,
+          turns: structuredClone(turns),
+          conversation: 'summary' as const,
+        };
+      }
       case 'handoff.resume': {
         const session = required(sessions.get(id), `sessão ${id}`);
         const paused = session.handedTo ? sessions.get(session.handedTo) : undefined;

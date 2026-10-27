@@ -10,6 +10,7 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import { z } from 'zod';
 import { Checkpoint as CheckpointSchema, DiffStats as DiffStatsSchema } from '@solline/protocol';
@@ -454,6 +455,52 @@ export class SessionCheckpoints {
     });
   }
 
+  /**
+   * Põe noutra pasta (a worktree de uma bifurcação) os ficheiros como estavam no fim de um turno.
+   * Compara o que a pasta tem agora com a árvore do checkpoint, pelo mesmo git sombra e com as
+   * mesmas regras (o que o .gitignore deixa de fora, o node_modules e os ficheiros grandes nunca
+   * entram): escreve o que falta ou difere e apaga o que o checkpoint já não tinha. Não toca no
+   * .git da pasta, nem no índice dela, nem nesta sessão (nem no disco, nem na linha do tempo).
+   */
+  materialize(turnId: string, target: string): Promise<{ written: number; removed: number }> {
+    return this.#serial(async () => {
+      this.#require();
+      const entry = this.#entry(turnId);
+      if (entry.checkpoint.state !== 'done' || !entry.after)
+        throw new Error('Este turno ainda não acabou');
+      const other = this.#git.withWorkTree(target);
+      const index = `fork-${this.#sessionId}-${randomUUID()}`;
+      let current: string;
+      try {
+        // As regras de exclusão desta sessão (os ficheiros grandes) valem também para a pasta nova.
+        await other.run(
+          [
+            '-c',
+            `core.excludesFile=${this.#excludeFile}`,
+            'add',
+            '--all',
+            '--ignore-errors',
+            '--',
+            '.',
+          ],
+          { index, okCodes: [0, 1] },
+        );
+        current = await other.text(['write-tree'], { index });
+      } finally {
+        await rm(path.join(this.#git.gitDir, index), { force: true }).catch(() => undefined);
+      }
+      const changed = (await this.#diffEntries(current, entry.after))
+        .filter((e) => !e.skipped)
+        .map((e) => e.path);
+      const plan = await this.#plan(entry.after, changed, target);
+      await this.#execute(plan, target);
+      return {
+        written: plan.filter((step) => step.item).length,
+        removed: plan.filter((step) => !step.item).length,
+      };
+    });
+  }
+
   /** A conversa voltou a antes deste turno: ele e os seguintes saem da linha do tempo. */
   truncate(turnId: string): Promise<void> {
     return this.#serial(() => {
@@ -704,8 +751,12 @@ export class SessionCheckpoints {
    * o primeiro, para uma recusa (link simbólico, pasta no lugar de um ficheiro) não deixar o
    * disco a meio.
    */
-  async #plan(tree: string, paths: readonly string[]): Promise<RestoreStep[]> {
-    const root = await realpath(this.#git.workTree);
+  async #plan(
+    tree: string,
+    paths: readonly string[],
+    workTree = this.#git.workTree,
+  ): Promise<RestoreStep[]> {
+    const root = await realpath(workTree);
     const items = await this.#lsTree(tree, paths);
     const steps: RestoreStep[] = [];
     for (const rel of paths) {
@@ -717,8 +768,8 @@ export class SessionCheckpoints {
   }
 
   /** Escreve o plano: os que existem na árvore ficam iguais, os outros são apagados. */
-  async #execute(steps: readonly RestoreStep[]): Promise<void> {
-    const root = await realpath(this.#git.workTree);
+  async #execute(steps: readonly RestoreStep[], workTree = this.#git.workTree): Promise<void> {
+    const root = await realpath(workTree);
     for (const { target, item } of steps) {
       if (item) {
         const blob = await this.#git.run(['cat-file', 'blob', item.sha], { bare: true });

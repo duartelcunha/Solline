@@ -43,7 +43,7 @@ import { readProjectRules } from './quality/rules.ts';
 import { NO_REVIEW, SessionQuality, fixMessage } from './quality/session-quality.ts';
 import { ProjectChecks, checkFixMessage } from './checks/project-checks.ts';
 import type { RunCommand } from './checks/run.ts';
-import type { Worktree, WorktreeManager } from './worktrees/worktrees.ts';
+import { slug, type Worktree, type WorktreeManager } from './worktrees/worktrees.ts';
 import { SessionTurns, type How, type Submitted } from './session-turns.ts';
 import { PortAllocator } from './workspace/ports.ts';
 import { SETUP_TIMEOUT_MS, copyEnvFiles, detectSetup, envFilesIn } from './workspace/setup.ts';
@@ -218,6 +218,11 @@ export class SessionManager {
   async create(
     payload: SessionStartPayload,
     inherit?: { workspace: Workspace },
+    /**
+     * Bifurcação: a sessão nasce numa worktree já preparada (com os ficheiros do checkpoint) e,
+     * com `point`, o agente continua a conversa desse ponto em vez de começar do zero.
+     */
+    forked?: { worktree: Worktree; point?: string | undefined },
   ): Promise<SessionResult> {
     const definition = this.#registry.get(payload.agent);
     if (!definition) throw new Error(`Agente desconhecido: ${payload.agent}`);
@@ -237,14 +242,21 @@ export class SessionManager {
         'Com um servidor MCP que corre programas, escolhe um modo que pergunte antes',
       );
     }
-    const place: { cwd: string; workspace: Workspace; worktree?: Worktree; key: string } = inherit
-      ? { cwd: payload.cwd, workspace: structuredClone(inherit.workspace), key: '' }
-      : await this.#placeFor(
-          payload.projectId,
-          payload.cwd,
-          payload.worktree === 'always',
-          payload.startAfter,
-        );
+    const place: { cwd: string; workspace: Workspace; worktree?: Worktree; key: string } = forked
+      ? {
+          cwd: forked.worktree.cwd,
+          workspace: { kind: 'worktree', branch: forked.worktree.branch, stats: NO_STATS },
+          worktree: forked.worktree,
+          key: '',
+        }
+      : inherit
+        ? { cwd: payload.cwd, workspace: structuredClone(inherit.workspace), key: '' }
+        : await this.#placeFor(
+            payload.projectId,
+            payload.cwd,
+            payload.worktree === 'always',
+            payload.startAfter,
+          );
     if (payload.setup !== undefined) this.#setups.set(payload.projectId, payload.setup);
     const sessionId = crypto.randomUUID();
     const port = await this.#ports.reserve(sessionId).catch(() => undefined);
@@ -295,10 +307,15 @@ export class SessionManager {
     this.#memory.set(info.id, memory);
     let result: SessionResult;
     try {
-      result = await this.#start(info, definition, payload.trusted, mcp, undefined, {
-        model: payload.model,
-        effort: payload.effort,
-      });
+      result = await this.#start(
+        info,
+        definition,
+        payload.trusted,
+        mcp,
+        undefined,
+        { model: payload.model, effort: payload.effort },
+        forked?.point,
+      );
     } catch (error) {
       this.#memory.delete(info.id);
       this.#ports.release(info.id);
@@ -1851,6 +1868,132 @@ export class SessionManager {
     this.#emit({ kind: 'event', type: 'session.handoff', sessionId, handedTo });
   }
 
+  /**
+   * Bifurca a sessão no fim de um turno: uma sessão nova, do mesmo agente e modelo, na sua própria
+   * worktree com os ficheiros como ficaram depois desse turno (o checkpoint). A conversa continua
+   * pelo próprio agente quando ele sabe (fork no ponto guardado) e, nos outros, com um resumo do
+   * que ficou até lá. A origem não muda (nem a conversa, nem a pasta, nem os checkpoints).
+   * Recusa em projetos sem git, com a origem a trabalhar ou com um turno sem checkpoint acabado.
+   */
+  async fork(sourceId: string, turnId: string): Promise<EngineCommandResult<'session.fork'>> {
+    const source = this.#get(sourceId);
+    const memory = this.#memoryOf(sourceId);
+    if (memory.closing) throw new Error('A sessão está a fechar');
+    if (this.#handingOff.has(sourceId))
+      throw new Error('A passagem de testemunho está a meio: espera que acabe.');
+    this.#requireIdle(source, memory, 'bifurcar');
+    // Os turnos e os pontos de onde se parte não mudam enquanto se copia.
+    return memory.cycle.exclusive('bifurcar', () => this.#fork(source, memory, turnId));
+  }
+
+  async #fork(
+    source: Entry,
+    memory: Memory,
+    turnId: string,
+  ): Promise<EngineCommandResult<'session.fork'>> {
+    const sourceId = source.info.id;
+    const index = memory.turns.findIndex((t) => t.id === turnId && t.role === 'user');
+    if (index === -1) throw new Error('Este turno já não está na conversa');
+    const checkpoints = this.#checkpoints(sourceId);
+    await checkpoints.ready;
+    if (!checkpoints.has(turnId)) throw new Error('Este turno não tem checkpoint');
+    const worktrees = this.#requireWorktrees();
+    // O turno e a resposta dele: tudo até ao pedido seguinte.
+    const next = memory.turns.findIndex((t, i) => i > index && t.role === 'user');
+    const upTo = memory.turns.slice(0, next === -1 ? memory.turns.length : next);
+    // A conversa pelo agente, no ponto em que ele estava ao fim deste turno (o que guardou antes
+    // do pedido seguinte; no último, o de agora). Sem ponto, a sessão nova começa com um resumo.
+    const point = this.#forkPoint(source, memory, next === -1 ? undefined : memory.turns[next]?.id);
+
+    // Os ficheiros: uma worktree nova da mesma base, com o que o checkpoint tinha.
+    const sibling = this.#worktreeOwnerOf(source);
+    const fresh = sibling
+      ? await worktrees.createFrom(sibling)
+      : await worktrees.create(source.info.cwd, source.info.projectId);
+    if (!fresh) throw new Error('Bifurcar só funciona em projetos git.');
+    let worktree = fresh;
+    try {
+      await checkpoints.materialize(turnId, worktree.cwd);
+      const words = slug(source.info.title).split('-').slice(0, 3);
+      worktree = await worktrees.rename(worktree, `${words.join(' ')} bifurcacao`);
+    } catch (error) {
+      await worktrees.remove(worktree, 'always').catch(() => undefined);
+      throw error;
+    }
+
+    let created: SessionResult;
+    try {
+      created = await this.create(
+        {
+          projectId: source.info.projectId,
+          cwd: resolve(worktree.top, relative(worktree.path, worktree.cwd)),
+          trusted: source.trusted,
+          agent: source.info.agent,
+          ...(source.info.settings.model ? { model: source.info.settings.model } : {}),
+          ...(source.info.settings.effort ? { effort: source.info.settings.effort } : {}),
+          origin: { kind: 'fork', sessionId: sourceId, turnId },
+        },
+        undefined,
+        { worktree, point },
+      );
+    } catch (error) {
+      await worktrees.remove(worktree, 'always').catch(() => undefined);
+      throw error;
+    }
+
+    const id = created.session.id;
+    const entry = this.#get(id);
+    const target = this.#memoryOf(id);
+    try {
+      // O branch já tem nome, o título já é o da origem: a primeira mensagem não lhos muda.
+      target.named = true;
+      entry.info.title = `${source.info.title.slice(0, 64)} (bifurcação)`;
+      const history = upTo.map(settledCopy);
+      const deltas = this.#deltaFor(entry.info, target);
+      for (const turn of history) deltas({ type: 'turn.start', turn });
+      if (point === undefined)
+        target.context = summaryOf(
+          history,
+          'Esta conversa é uma bifurcação de uma sessão anterior, a partir de um dos turnos dela. O que ficou até aí, por ordem:',
+        );
+      await this.#emitWorkspace(id);
+      return {
+        session: { ...entry.info },
+        capabilities: created.capabilities,
+        turns: structuredClone(history),
+        conversation: point === undefined ? 'summary' : 'agent',
+      };
+    } catch (error) {
+      await this.close(id, 'discard', true).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** O ponto de rebobinar do agente ao fim de um turno (undefined: sem como o agente continuar). */
+  #forkPoint(source: Entry, memory: Memory, nextTurnId: string | undefined): string | undefined {
+    let rewinds = false;
+    try {
+      rewinds = source.adapter.capabilities().features.rewind;
+    } catch {
+      /* Um agente que nunca arrancou não diz o que sabe. */
+    }
+    if (!rewinds || !source.adapter.rewindPoint) return undefined;
+    return (nextTurnId ? memory.points.get(nextTurnId) : source.adapter.rewindPoint()) ?? undefined;
+  }
+
+  /** A worktree que a pasta da sessão tem agora: a dela, ou a de quem recebeu o testemunho. */
+  #worktreeOwnerOf(entry: Entry): Worktree | undefined {
+    const seen = new Set<string>();
+    let current: Entry | undefined = entry;
+    while (current && !seen.has(current.info.id)) {
+      seen.add(current.info.id);
+      const worktree = this.#memory.get(current.info.id)?.worktree;
+      if (worktree) return worktree;
+      current = current.info.handedTo ? this.#sessions.get(current.info.handedTo) : undefined;
+    }
+    return undefined;
+  }
+
   /** Mexer no disco ou na conversa só com o agente parado e nada a meio. */
   #requireIdle(entry: Entry, memory: Memory, what: string): void {
     const state = entry.info.state;
@@ -2014,7 +2157,8 @@ export class SessionManager {
         delta.type === 'turn.start' &&
         delta.turn.role === 'user' &&
         memory.turns.length === 0 &&
-        info.origin?.kind !== 'handoff'
+        info.origin?.kind !== 'handoff' &&
+        info.origin?.kind !== 'fork'
       ) {
         const text = delta.turn.blocks.find((block) => block.kind === 'text');
         if (text?.kind === 'text')
@@ -2030,6 +2174,23 @@ export class SessionManager {
     if (!entry) throw new Error('Sessão desconhecida (o motor pode ter reiniciado)');
     return entry;
   }
+}
+
+/**
+ * Uma cópia de um turno para o histórico de uma bifurcação: o que estava a meio quando a origem
+ * parou (um pedido por responder, uma ferramenta a correr) fica fechado, como na recuperação.
+ */
+function settledCopy(turn: Turn): Turn {
+  const copy = structuredClone(turn);
+  for (const block of copy.blocks) {
+    if (
+      (block.kind === 'permission' || block.kind === 'plan' || block.kind === 'question') &&
+      block.status === 'pending'
+    )
+      block.status = 'cancelled';
+    if (block.kind === 'tool' && block.state === 'running') block.state = 'error';
+  }
+  return copy;
 }
 
 /**

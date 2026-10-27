@@ -124,6 +124,16 @@ export class ShadowGit {
     this.#env = shadowEnv(this.gitDir, this.workTree);
   }
 
+  /** O mesmo repositório sombra a olhar para outra pasta (os objetos são os mesmos). */
+  withWorkTree(workTree: string): ShadowGit {
+    return new ShadowGit({
+      gitDir: this.gitDir,
+      workTree,
+      executable: this.#executable,
+      timeoutMs: this.#timeoutMs,
+    });
+  }
+
   /** Cria o repositório (uma chamada ao git: cada uma custa ~100 ms no Windows). */
   async init(): Promise<void> {
     await mkdir(this.gitDir, { recursive: true });

@@ -550,6 +550,7 @@ export class Engine {
       }),
       'session.rewind': (p) =>
         s.rewind(p.sessionId, p.turnId, { files: p.files, conversation: p.conversation }),
+      'session.fork': (p) => s.fork(p.sessionId, p.turnId),
       'quality.get': async (p) => s.quality(p.sessionId),
       'quality.setEnabled': async (p) => s.setQualityEnabled(p.sessionId, p.enabled),
       'quality.review': (p) => s.reviewNow(p.sessionId, p),
