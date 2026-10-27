@@ -17,6 +17,7 @@ import { IPC, type Theme } from '@solline/protocol/bridge';
 import {
   CommandNameSchema,
   RaceStartPayload,
+  SplitStartPayload,
   SessionCreatePayload,
   commandSchemas,
   isMainCommand,
@@ -318,6 +319,21 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       const project = await projects.get(request.projectId);
       if (!project) throw new Error('Projeto desconhecido');
       const started = await engine.request('race.begin', {
+        ...request,
+        cwd: project.path,
+        trusted: project.trusted,
+        checks: project.checks ?? null,
+        setup: project.setup ?? null,
+      });
+      for (const created of started.sessions) attention.track(created.session, project.name);
+      return started;
+    }
+    case 'split.start': {
+      // Como numa corrida: a pasta, a confiança e as definições vêm do projeto guardado.
+      const request = SplitStartPayload.parse(payload);
+      const project = await projects.get(request.projectId);
+      if (!project) throw new Error('Projeto desconhecido');
+      const started = await engine.request('split.begin', {
         ...request,
         cwd: project.path,
         trusted: project.trusted,

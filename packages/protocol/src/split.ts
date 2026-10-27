@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgentId } from './conversation.ts';
 import { SplitPart } from './race.ts';
 
 /**
@@ -74,6 +75,31 @@ export const SplitPlanResult = z
     review: SplitReview,
     /** O custo do planeamento (USD), quando o SDK o diz. */
     cost: z.number().nullable(),
+  })
+  .strict();
+
+/** Uma parte a lançar: o contrato e quem a faz. */
+export const SplitPartSpec = z
+  .object({
+    part: SplitPart,
+    agent: AgentId,
+    model: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+export type SplitPartSpec = z.infer<typeof SplitPartSpec>;
+
+/** Lança a repartição: o pedido original e as 2 a 4 partes (a interface só manda ids de projeto). */
+export const SplitStartPayload = z
+  .object({
+    projectId: z.string().min(1).max(64),
+    text: Text,
+    parts: z
+      .array(SplitPartSpec)
+      .min(2)
+      .max(4)
+      .refine((specs) => zeroFirst(specs.map((s) => s.part)), {
+        message: 'A parte zero tem de ser a primeira (e só pode haver uma)',
+      }),
   })
   .strict();
 

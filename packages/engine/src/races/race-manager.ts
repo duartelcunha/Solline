@@ -6,6 +6,7 @@ import type { Worktree } from '../worktrees/worktrees.ts';
 import type { Assembler, AssemblerLane, CheckContext } from './assembler.ts';
 import { Lanes, type LaneProject, type LaneSessions, type SessionCreateResult } from './lanes.ts';
 import { needsJudge, rankLanes, type LaneOutcome } from './rank.ts';
+import { RaceRegistry } from './race-registry.ts';
 
 /**
  * As corridas: o mesmo pedido em várias pistas, cada uma uma sessão normal na sua worktree. A
@@ -34,7 +35,7 @@ export class RaceManager {
   readonly #ranking = new Map<string, AbortController>();
   #stopping = false;
   readonly #beforeEffect: (command: string, raceId: string) => () => void;
-  readonly #races = new Map<string, Race>();
+  readonly #registry: RaceRegistry;
   readonly #sessions: RaceSessions;
   readonly #emit: (event: EngineEvent) => void;
   readonly #core: Lanes;
@@ -47,6 +48,8 @@ export class RaceManager {
     beforeEffect?: (command: string, raceId: string) => () => void;
     sessions: RaceSessions;
     emit: (event: EngineEvent) => void;
+    /** Onde vivem as corridas (partilhado com as repartições); sem isto, um registo só seu. */
+    registry?: RaceRegistry;
     /** Sem juiz, os empates do topo ficam para ti. */
     judge?: Judge;
     /** Sem montador, as corridas ordenam mas não montam (sem git, por exemplo). */
@@ -56,6 +59,7 @@ export class RaceManager {
     this.#core = new Lanes(options.sessions);
     this.#beforeEffect = options.beforeEffect ?? (() => () => undefined);
     this.#emit = options.emit;
+    this.#registry = options.registry ?? new RaceRegistry(options.emit);
     this.#judge = options.judge;
     this.#assembler = options.assembler;
   }
@@ -83,24 +87,32 @@ export class RaceManager {
         state: s.session.state,
       })),
     };
-    this.#races.set(id, race);
+    this.#registry.add(race);
     this.#changed(race);
     await send();
     return { race: { ...race }, sessions };
   }
 
+  /** Qualquer corrida ou repartição (o registo é um só). */
   get(raceId: string): Race {
-    const race = this.#races.get(raceId);
-    if (!race) throw new Error('Corrida desconhecida');
+    return this.#registry.get(raceId);
+  }
+
+  /** Só as corridas: as repartições têm o seu gestor. */
+  #raceOf(raceId: string): Race {
+    const race = this.#registry.get(raceId);
+    if (race.kind !== 'race') throw new Error('Isto é uma repartição, não uma corrida.');
     return race;
   }
 
+  /** Tudo o que há para gravar (corridas e repartições). */
   recovery(): Race[] {
-    return structuredClone([...this.#races.values()]);
+    return this.#registry.recovery();
   }
 
   restoreRecovery(races: Race[]): void {
     for (const race of structuredClone(races)) {
+      if (race.kind !== 'race') continue;
       if (race.phase === 'running' || race.phase === 'ranking') race.phase = 'done';
       // A worktree de uma montagem por trazer não sobrevive ao reinício (fica como órfã, que se
       // traz ou se deita fora na lista); uma já trazida só falta fechar.
@@ -109,7 +121,7 @@ export class RaceManager {
         race.assembly = null;
       }
       this.#core.restored(race.lanes);
-      this.#races.set(race.id, race);
+      this.#registry.add(race);
     }
   }
 
@@ -117,7 +129,8 @@ export class RaceManager {
   observe(event: EngineEvent): void {
     if (this.#stopping) return;
     if (event.type !== 'session.state') return;
-    for (const race of this.#races.values()) {
+    for (const race of this.#registry.all()) {
+      if (race.kind !== 'race') continue;
       const seen = this.#core.observe(race.lanes, event);
       if (!seen) continue;
       if (race.phase === 'running' && seen.settled) {
@@ -141,7 +154,7 @@ export class RaceManager {
    * empate no topo entre soluções diferentes. Nunca descarta pistas: só as ordena.
    */
   async rank(raceId: string): Promise<Race> {
-    const race = this.get(raceId);
+    const race = this.#raceOf(raceId);
     if (this.#stopping || race.phase !== 'done') return race;
     const abort = new AbortController();
     this.#ranking.set(raceId, abort);
@@ -195,7 +208,7 @@ export class RaceManager {
 
   /** O que se pode montar com as pistas, zona a zona, com a escolha de partida. */
   async proposal(raceId: string): Promise<RaceProposal> {
-    const race = this.get(raceId);
+    const race = this.#raceOf(raceId);
     if (race.phase !== 'ranked' && race.phase !== 'assembled')
       throw new Error('Só se monta uma corrida já ordenada.');
     const assembler = this.#requireAssembler();
@@ -207,7 +220,7 @@ export class RaceManager {
    * montar outra vez troca a montagem anterior (se ainda não foi trazida).
    */
   async assemble(raceId: string, picks: readonly string[]): Promise<Race> {
-    const race = this.get(raceId);
+    const race = this.#raceOf(raceId);
     const before = race.phase;
     if (before !== 'ranked' && before !== 'assembled')
       throw new Error('Só se monta uma corrida já ordenada.');
@@ -254,7 +267,7 @@ export class RaceManager {
   async bring(
     raceId: string,
   ): Promise<{ race: Race; merged: boolean; conflicts: string[]; into: string }> {
-    const race = this.get(raceId);
+    const race = this.#raceOf(raceId);
     const worktree = this.#assemblies.get(raceId);
     if (race.phase !== 'assembled' || !race.assembly || race.assembly.brought)
       throw new Error('Não há nenhuma montagem por trazer.');
@@ -277,7 +290,7 @@ export class RaceManager {
    * pedido, e a montagem (o branch dela só fica se já tiver sido trazido).
    */
   async close(raceId: string, keep?: string): Promise<{ closed: boolean; race: Race }> {
-    const race = this.get(raceId);
+    const race = this.#raceOf(raceId);
     if (race.phase === 'closed') return { closed: true, race };
     if (race.phase === 'running' || race.phase === 'ranking' || race.phase === 'assembling')
       throw new Error('Espera que a corrida acabe de trabalhar antes de a fechar.');
@@ -297,9 +310,9 @@ export class RaceManager {
 
   /** As worktrees das montagens que ainda existem (não são órfãs). */
   worktreePaths(): string[] {
-    return [...this.#races.values()].flatMap((race) =>
-      race.phase !== 'closed' && race.assembly ? [race.assembly.path] : [],
-    );
+    return this.#registry
+      .all()
+      .flatMap((race) => (race.phase !== 'closed' && race.assembly ? [race.assembly.path] : []));
   }
 
   #requireAssembler(): Assembler {
@@ -319,7 +332,8 @@ export class RaceManager {
   stopForRecovery(): void {
     this.#stopping = true;
     for (const abort of this.#ranking.values()) abort.abort();
-    for (const race of this.#races.values()) if (race.phase === 'ranking') race.phase = 'done';
+    for (const race of this.#registry.all())
+      if (race.kind === 'race' && race.phase === 'ranking') race.phase = 'done';
   }
 
   setPhase(raceId: string, phase: RacePhase): void {
@@ -329,10 +343,6 @@ export class RaceManager {
   }
 
   #changed(race: Race): void {
-    this.#emit({
-      kind: 'event',
-      type: 'race.state',
-      race: { ...race, lanes: race.lanes.map((l) => ({ ...l })) },
-    });
+    this.#registry.changed(race);
   }
 }

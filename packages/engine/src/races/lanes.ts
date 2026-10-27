@@ -27,9 +27,14 @@ export interface LaneOpen {
   agent: SessionStartPayload['agent'];
   model?: string | undefined;
   text: string;
+  /** Parte do resultado desta sessão (a worktree dela, gravada) em vez do HEAD do projeto. */
+  after?: string | undefined;
 }
 
-export type LaneProject = Omit<SessionStartPayload, 'agent' | 'model' | 'mode' | 'effort'>;
+export type LaneProject = Omit<
+  SessionStartPayload,
+  'agent' | 'model' | 'mode' | 'effort' | 'startAfter'
+>;
 
 export interface OpenedLanes {
   sessions: SessionCreateResult[];
@@ -67,6 +72,7 @@ export class Lanes {
             ...(lane.model ? { model: lane.model } : {}),
             worktree: 'always',
             raceId: group,
+            ...(lane.after ? { startAfter: lane.after } : {}),
           }),
         );
       }
@@ -86,6 +92,11 @@ export class Lanes {
         );
       },
     };
+  }
+
+  /** A pista já chegou a trabalhar (uma sessão que só ficou pronta ainda não conta). */
+  hasStarted(sessionId: string): boolean {
+    return this.#started.has(sessionId);
   }
 
   /**

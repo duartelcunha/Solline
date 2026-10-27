@@ -55,6 +55,7 @@ const LABELS: Record<string, string> = {
   'session.closeNow': 'Fechar sessão',
   'session.start': 'Abrir sessão',
   'race.begin': 'Iniciar corrida',
+  'split.begin': 'Iniciar repartição',
 };
 
 /** Preserved intents are evidence, never a queue to retry. Text stays selectable. */

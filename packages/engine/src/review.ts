@@ -7,7 +7,7 @@ export function textOf(turn: Turn): string {
 }
 
 /** Só o que o agente disse ao utilizador: sem thinking, ferramentas nem subagentes. */
-function assistantText(turn: Turn): string {
+export function assistantText(turn: Turn): string {
   return turn.blocks
     .flatMap((b) => (b.kind === 'text' && b.parentToolId === null ? [b.text] : []))
     .join('\n')

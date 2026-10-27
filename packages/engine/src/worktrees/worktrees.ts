@@ -147,6 +147,22 @@ export class WorktreeManager {
     );
   }
 
+  /**
+   * Uma worktree nova que parte do resultado de outra: grava tudo o que a outra tem por gravar
+   * e usa esse commit como base (e não a base da outra). A outra fica como estava, só com o
+   * commit a mais; o diff dela face à sua base não muda.
+   */
+  async createAfter(sibling: Worktree): Promise<Worktree> {
+    await this.commitAll(sibling, 'Solline: parte concluída');
+    const head = (await this.#run(sibling.path, ['rev-parse', 'HEAD'])).out.trim();
+    return this.#add(
+      sibling.top,
+      path.relative(sibling.path, sibling.cwd),
+      head,
+      sibling.projectId,
+    );
+  }
+
   async #add(top: string, rel: string, base: string, projectId: string): Promise<Worktree> {
     const suffix = randomBytes(3)
       .toString('base64url')
@@ -237,6 +253,63 @@ export class WorktreeManager {
         ...(counts.get(r.path) ?? { additions: 0, deletions: 0, binary: false }),
       }));
     return entries.length ? parsePatch(patch, entries) : [];
+  }
+
+  /**
+   * Os ficheiros em que o trabalho de duas worktrees chocaria se se juntasse agora (um merge de
+   * mentira, sem escrever em nenhum branch). Conta o que cada uma tem por gravar: cada estado
+   * vira um commit solto, feito num índice temporário, sem tocar nos branches nem no índice dos
+   * agentes. Sem conflitos, devolve uma lista vazia.
+   */
+  async collisions(a: Worktree, b: Worktree): Promise<string[]> {
+    const [left, right] = await Promise.all([this.#snapshot(a), this.#snapshot(b)]);
+    const merged = await this.#run(
+      a.top,
+      ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', left, right],
+      true,
+    );
+    if (merged.code === 0) return [];
+    if (merged.code !== 1) throw new Error(`git merge-tree: código ${merged.code}`);
+    // <árvore>\0<ficheiro>\0…\0\0: os ficheiros em conflito vêm logo a seguir à árvore.
+    const names: string[] = [];
+    for (const token of merged.out.split('\0').slice(1)) {
+      if (!token) break;
+      names.push(token);
+    }
+    return [...new Set(names)];
+  }
+
+  /** O estado atual da worktree (com o que está por gravar) num commit solto, filho do HEAD. */
+  async #snapshot(wt: Worktree): Promise<string> {
+    const file = `${wt.path}.${randomBytes(8).toString('hex')}.index`;
+    const index = { GIT_INDEX_FILE: file };
+    try {
+      await this.#run(wt.path, ['read-tree', 'HEAD'], false, index);
+      await this.#run(wt.path, ['add', '-A'], false, index);
+      const tree = (await this.#run(wt.path, ['write-tree'], false, index)).out.trim();
+      const { out } = await this.#run(
+        wt.path,
+        [
+          '-c',
+          'user.name=Solline',
+          '-c',
+          'user.email=solline@localhost',
+          '-c',
+          'commit.gpgsign=false',
+          'commit-tree',
+          tree,
+          '-p',
+          'HEAD',
+          '-m',
+          'Solline: estado temporário',
+        ],
+        false,
+        index,
+      );
+      return out.trim();
+    } finally {
+      await rm(file, { force: true }).catch(() => undefined);
+    }
   }
 
   /** Como #run, mas devolve os bytes (o patch volta ao git tal como saiu). */

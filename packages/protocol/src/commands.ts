@@ -18,6 +18,7 @@ import {
   SplitPlanResult,
   SplitReview,
   SplitReviewPayload,
+  SplitStartPayload,
 } from './split.ts';
 import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
@@ -95,6 +96,8 @@ export const SessionStartPayload = SessionCreatePayload.extend({
   /** always: worktree mesmo com a pasta livre (as pistas de uma corrida). */
   worktree: z.enum(['auto', 'always']).optional(),
   raceId: z.string().optional(),
+  /** Com `worktree: 'always'`: parte do resultado desta sessão em vez do HEAD do projeto. */
+  startAfter: z.string().min(1).max(128).optional(),
 }).strict();
 export type SessionStartPayload = z.infer<typeof SessionStartPayload>;
 
@@ -305,6 +308,14 @@ export const commandSchemas = {
   'split.plan': { payload: SplitPlanPayload, result: SplitPlanResult },
   /** Confere um plano (por exemplo depois de o editares): puro, sem gastar nada. */
   'split.review': { payload: SplitReviewPayload, result: SplitReview },
+  /**
+   * Lança a repartição (main): a parte zero sozinha primeiro, depois as outras, cada uma numa
+   * sessão e worktree próprias. Devolve a repartição e as sessões que já arrancaram.
+   */
+  'split.start': {
+    payload: SplitStartPayload,
+    result: z.object({ race: Race, sessions: z.array(SessionCreateResult) }),
+  },
   /** Volta a preparar a worktree da sessão (depois de uma falha). */
   'setup.retry': { payload: SessionRef, result: Empty },
   ...reviewCommandSchemas,
@@ -328,6 +339,7 @@ export const MAIN_COMMANDS = [
   'race.start',
   'race.close',
   'split.plan',
+  'split.start',
   'session.create',
   'session.close',
   'worktrees.discard',
@@ -384,6 +396,16 @@ export const internalCommandSchemas = {
   /** Abre a corrida com a pasta e a confiança do projeto (o main resolveu-as). */
   'race.begin': {
     payload: RaceStartPayload.extend({
+      cwd: z.string().min(1),
+      trusted: z.boolean(),
+      checks: CheckList.nullable().optional(),
+      setup: SetupSpec.nullable().optional(),
+    }).strict(),
+    result: z.object({ race: Race, sessions: z.array(SessionCreateResult) }),
+  },
+  /** Lança a repartição com a pasta e a confiança do projeto (o main resolveu-as). */
+  'split.begin': {
+    payload: SplitStartPayload.extend({
       cwd: z.string().min(1),
       trusted: z.boolean(),
       checks: CheckList.nullable().optional(),

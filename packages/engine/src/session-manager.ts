@@ -32,7 +32,7 @@ import { interruptedAdapter } from './recovery/interrupted-adapter.ts';
 import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/types.ts';
 import type { SessionCheckpoints } from './checkpoints/session-checkpoints.ts';
 import type { CheckpointStore } from './checkpoints/store.ts';
-import { commentsMessage, summaryOf, textOf } from './review.ts';
+import { assistantText, commentsMessage, summaryOf, textOf } from './review.ts';
 import type { Reviewer } from './quality/reviewer.ts';
 import { NO_REVIEW, SessionQuality, fixMessage } from './quality/session-quality.ts';
 import { ProjectChecks, checkFixMessage } from './checks/project-checks.ts';
@@ -216,6 +216,7 @@ export class SessionManager {
       payload.projectId,
       payload.cwd,
       payload.worktree === 'always',
+      payload.startAfter,
     );
     if (payload.setup !== undefined) this.#setups.set(payload.projectId, payload.setup);
     const sessionId = crypto.randomUUID();
@@ -1024,10 +1025,16 @@ export class SessionManager {
     projectId: string,
     projectPath: string,
     always = false,
+    after?: string,
   ): Promise<{ cwd: string; workspace: Workspace; worktree?: Worktree; key: string }> {
     if (always) {
       // As pistas de uma corrida: cada uma na sua worktree, sempre (sem git não há corrida).
-      const worktree = await this.#worktrees?.create(projectPath, projectId);
+      // Uma parte que segue outra (repartição) parte do resultado dela, não do HEAD do projeto.
+      const sibling = after ? this.#memory.get(after)?.worktree : undefined;
+      if (after && !sibling) throw new Error('A parte anterior já não está disponível.');
+      const worktree = sibling
+        ? await this.#worktrees?.createAfter(sibling)
+        : await this.#worktrees?.create(projectPath, projectId);
       if (!worktree)
         throw new Error('As corridas precisam de um projeto git com pelo menos um commit');
       return {
@@ -1108,6 +1115,13 @@ export class SessionManager {
             ...(signal ? { signal } : {}),
           });
     return { cwd: info.cwd, files, checks };
+  }
+
+  /** O que o agente disse no fim do último turno (vazio se ainda não disse nada). */
+  laneDigest(sessionId: string): string {
+    this.#get(sessionId);
+    const last = this.#memoryOf(sessionId).turns.findLast((t) => t.role === 'assistant');
+    return last ? assistantText(last) : '';
   }
 
   /** A worktree da sessão, se tiver uma. */

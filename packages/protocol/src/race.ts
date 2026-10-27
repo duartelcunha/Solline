@@ -148,16 +148,53 @@ export type RaceAssembly = z.infer<typeof RaceAssembly>;
 export const RaceKind = z.enum(['race', 'split']);
 export type RaceKind = z.infer<typeof RaceKind>;
 
+/**
+ * Um aviso de uma repartição, nunca um castigo: a pista mexeu fora do que o contrato permite
+ * (`outside`) ou o que ela tem já choca com o de outra pista (`collision`, com a pista `other`).
+ */
+export const SplitWarning = z
+  .object({
+    sessionId: z.string(),
+    kind: z.enum(['outside', 'collision']),
+    path: z.string(),
+    other: z.string().optional(),
+  })
+  .strict();
+export type SplitWarning = z.infer<typeof SplitWarning>;
+
+/**
+ * Uma parte que ainda não arrancou. `after` é a parte de cuja entrega arranca (o resultado dela é
+ * a base desta); sem `after`, arranca do HEAD do projeto.
+ */
+export const SplitPending = z
+  .object({
+    index: z.number().int().min(0),
+    part: SplitPart,
+    agent: AgentId,
+    model: z.string().min(1).max(200).optional(),
+    after: z.number().int().min(0).nullable(),
+  })
+  .strict();
+export type SplitPending = z.infer<typeof SplitPending>;
+
+/** O que só as repartições têm: as partes por arrancar e os avisos até agora. */
+export const RaceSplit = z
+  .object({ pending: z.array(SplitPending), warnings: z.array(SplitWarning) })
+  .strict();
+export type RaceSplit = z.infer<typeof RaceSplit>;
+
 export const Race = z.object({
   id: z.string(),
   /** Sem `kind` (corridas gravadas antes das repartições) é uma corrida. */
   kind: RaceKind.default('race'),
   projectId: z.string(),
   text: z.string(),
+  /** Só as pistas que já arrancaram (as partes por arrancar estão em `split.pending`). */
   lanes: z.array(RaceLane),
   phase: RacePhase,
   verdict: RaceVerdict.nullable().optional(),
   assembly: RaceAssembly.nullable().optional(),
+  split: RaceSplit.optional(),
 });
 export type Race = z.infer<typeof Race>;
 

@@ -16,6 +16,7 @@ import { SessionQuality } from '../src/quality/session-quality.ts';
 import { registryOf } from '../src/agents/registry.ts';
 import type { AdapterSink, AgentStartOptions } from '../src/adapters/types.ts';
 import { RaceManager } from '../src/races/race-manager.ts';
+import { SplitManager } from '../src/races/split-manager.ts';
 
 const key = Buffer.alloc(32, 11);
 const roots: string[] = [];
@@ -264,6 +265,52 @@ describe('durable engine recovery', () => {
     expect(races.get('race')).toMatchObject({
       phase: 'done',
       lanes: [{ state: 'error' }, { state: 'error' }],
+    });
+    expect(events).toEqual([]);
+  });
+  it('restores interrupted splits without launching pending parts or digesting', () => {
+    const refused = async (): Promise<never> => {
+      throw new Error('must not run on restore');
+    };
+    const events: EngineEvent[] = [];
+    const splits = new SplitManager({
+      sessions: {
+        create: refused,
+        send: refused,
+        close: refused,
+        worktreeOf: () => undefined,
+        laneDigest: () => {
+          throw new Error('must not run on restore');
+        },
+      },
+      emit: (event) => events.push(event),
+    });
+    const part = {
+      title: 'Parte',
+      goal: 'Fazer a parte',
+      allowed: [],
+      forbidden: [],
+      interfaces: '',
+      expected: '',
+      check: 'test',
+      zero: false,
+    };
+    splits.restoreRecovery([
+      {
+        kind: 'split',
+        id: 'split',
+        projectId: 'project',
+        text: 'dividir',
+        phase: 'running',
+        lanes: [{ sessionId: 'one', agent: 'scripted', model: null, state: 'running', part }],
+        split: { pending: [{ index: 1, part, agent: 'scripted', after: 0 }], warnings: [] },
+      },
+    ]);
+    expect(splits.get('split')).toMatchObject({
+      kind: 'split',
+      phase: 'done',
+      lanes: [{ state: 'error' }],
+      split: { pending: [{ index: 1 }] },
     });
     expect(events).toEqual([]);
   });

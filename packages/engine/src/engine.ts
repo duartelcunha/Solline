@@ -27,6 +27,8 @@ import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
 import { SessionManager, type ChecksOptions } from './session-manager.ts';
 import { Assembler } from './races/assembler.ts';
 import { RaceManager } from './races/race-manager.ts';
+import { RaceRegistry } from './races/race-registry.ts';
+import { SplitManager } from './races/split-manager.ts';
 import { claudeJudge } from './verify/judge.ts';
 import { claudePlanner, type Planner } from './races/planner.ts';
 import { reviewPlan } from './races/split-review.ts';
@@ -83,6 +85,9 @@ export class Engine {
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
   readonly races: RaceManager;
+  readonly splits: SplitManager;
+  /** Onde vivem as corridas e as repartições (um só registo para as duas). */
+  readonly registry: RaceRegistry;
   readonly logins: LoginManager;
   readonly #handlers: Handlers;
   readonly #checkpoints: CheckpointStore | undefined;
@@ -133,7 +138,7 @@ export class Engine {
       (options.dataDir ? fileAgentSettings(options.dataDir) : memoryAgentSettings());
     const env = options.env ?? process.env;
     // As corridas seguem as sessões pelos eventos delas (o estado de cada pista).
-    const box: { races?: RaceManager } = {};
+    const box: { races?: RaceManager; splits?: SplitManager } = {};
     const emitAll = (event: EngineEvent) => {
       if (this.#disposed) return;
       this.sessions?.observeRecovery(event);
@@ -159,6 +164,7 @@ export class Engine {
       }
       emit(sequenced);
       box.races?.observe(event);
+      box.splits?.observe(event);
       this.spaces?.observe(event);
     };
     // Nos testes isolados não se correm comandos do repositório da própria Solline.
@@ -191,10 +197,12 @@ export class Engine {
           ? undefined
           : (options.checks ?? (options.isolated ? undefined : {})),
     });
+    this.registry = new RaceRegistry(emitAll);
     this.races = new RaceManager({
       beforeEffect: (command, raceId) => this.#prepare(command, { raceId }),
       sessions: this.sessions,
       emit: emitAll,
+      registry: this.registry,
       ...(worktrees ? { assembler: new Assembler({ worktrees }) } : {}),
       // O juiz só desempata; nos testes isolados não se gasta a subscrição com ele.
       ...(options.isolated || options.reviewer === false
@@ -209,7 +217,14 @@ export class Engine {
           (options.isolated || options.reviewer === false
             ? undefined
             : claudePlanner({ claudeExecutable: options.claudeExecutable })));
+    this.splits = new SplitManager({
+      sessions: this.sessions,
+      emit: emitAll,
+      registry: this.registry,
+      worktrees,
+    });
     box.races = this.races;
+    box.splits = this.splits;
     this.sessions.claimWorktrees(() => this.races.worktreePaths());
     this.spaces = new SpaceManager({
       save: (spaces) => emitAll({ kind: 'event', type: 'spaces.changed', spaces }),
@@ -269,6 +284,7 @@ export class Engine {
     if (this.#journal) this.#journal.records.length = 0;
     this.sessions.restoreRecovery(restored.sessions, restored.setups);
     this.races.restoreRecovery(restored.snapshot.races);
+    this.splits.restoreRecovery(restored.snapshot.races);
     this.spaces.restore(restored.snapshot.spaces);
     for (const operation of restored.snapshot.operations)
       this.#operations.set(operation.id, operation);
@@ -397,6 +413,18 @@ export class Engine {
       'session.resumeQueue': async (p) => (s.resumeQueue(p.sessionId), ok),
       'session.bring': (p) => s.bring(p.sessionId),
       'race.begin': (p) => this.races.begin(p),
+      'split.begin': async ({ cwd, trusted, checks, setup, ...request }) => {
+        // As partes só valem com uma verificação do projeto: as guardadas ou as que se encontram.
+        const specs = checks ?? (await detectChecks(cwd));
+        return this.splits.begin({
+          ...request,
+          cwd,
+          trusted,
+          ...(checks !== undefined ? { checks } : {}),
+          ...(setup !== undefined ? { setup } : {}),
+          checkRefs: specs.filter((c) => c.enabled).map((c) => ({ id: c.id, label: c.label })),
+        });
+      },
       'split.planNow': async (p) => {
         if (!this.#planner) throw new Error('O planeador não está disponível');
         const { plan, cost } = await this.#planner({
@@ -413,11 +441,14 @@ export class Engine {
         return { plan, review, cost };
       },
       'split.review': async (p) => reviewPlan(p.parts, p.checkIds),
-      'race.get': async (p) => this.races.get(p.raceId),
+      'race.get': async (p) => this.registry.get(p.raceId),
       'race.proposal': (p) => this.races.proposal(p.raceId),
       'race.assemble': (p) => this.races.assemble(p.raceId, p.picks),
       'race.bring': (p) => this.races.bring(p.raceId),
-      'race.closeNow': (p) => this.races.close(p.raceId, p.keep),
+      'race.closeNow': (p) =>
+        this.registry.get(p.raceId).kind === 'split'
+          ? this.splits.close(p.raceId, p.keep)
+          : this.races.close(p.raceId, p.keep),
       'worktrees.list': async () => ({ orphans: await s.orphans() }),
       'worktrees.bring': (p) => s.bringOrphan(p.id),
       'worktrees.discardNow': async (p) => (await s.discardOrphan(p.id), ok),
@@ -591,6 +622,7 @@ export class Engine {
     this.#stopping = true;
     await this.analysis.stop();
     this.races.stopForRecovery();
+    this.splits.stopForRecovery();
     await this.logins.cancelAll();
     await this.sessions.stopForRecovery();
     // An accepted start/send/merge can still be awaiting a provider or Git. Its final
