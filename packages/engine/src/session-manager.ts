@@ -1344,6 +1344,9 @@ export class SessionManager {
   }> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
+    // A meio de uma passagem a worktree está a mudar de dono: fechar agora podia apagá-la.
+    if (this.#handingOff.has(sessionId))
+      throw new Error('A passagem de testemunho está a meio: espera que acabe.');
     const queued = memory.cycle.queue.items.length;
     if (queued > 0 && !dropQueue) return { closed: false, queued };
     // A fechar: um "Trazer" que comece agora recusa (não se apaga a worktree a meio dele).
@@ -1369,7 +1372,17 @@ export class SessionManager {
     await memory.bringing?.catch(() => undefined);
     await memory.naming;
     const worktree = memory.worktree;
-    if (worktree && this.#worktrees) {
+    // Passagens de testemunho: quem a passou a esta sessão (os herdeiros) não pode ficar a apontar
+    // para uma sessão fechada nem sem pasta. Se esta passou a outra, eles passam a apontar para
+    // essa; se é esta que tem a pasta, ela volta ao primeiro herdeiro, com a worktree (que é dos
+    // dois: nada se pergunta, nada se apaga) e os outros passam a apontar para ele.
+    const heirs = [...this.#sessions.values()].filter(
+      (other) => other.info.id !== sessionId && other.info.handedTo === sessionId,
+    );
+    const onward = entry.info.handedTo;
+    const heir = onward ? undefined : heirs[0];
+    const returns = Boolean(heir && worktree && !this.#memory.get(heir.info.id)?.worktree);
+    if (worktree && this.#worktrees && !returns) {
       // Uma contagem que falha conta como "há mudanças": pergunta em vez de apagar.
       const stats = await this.#worktrees
         .stats(worktree)
@@ -1396,16 +1409,15 @@ export class SessionManager {
     memory.cycle.clear();
     this.#sessions.delete(sessionId);
     this.#memory.delete(sessionId);
-    // Quem tinha passado o testemunho a esta sessão volta a poder enviar (já não há para quem esperar).
-    for (const other of this.#sessions.values()) {
-      if (other.info.handedTo !== sessionId) continue;
-      delete other.info.handedTo;
-      this.#emit({
-        kind: 'event',
-        type: 'session.handoff',
-        sessionId: other.info.id,
-        handedTo: null,
-      });
+    for (const other of heirs) {
+      const to = onward ?? (other === heir ? null : (heir?.info.id ?? null));
+      this.#setHandedTo(other.info.id, to === other.info.id ? null : to);
+    }
+    if (returns && heir && worktree) {
+      const heirMemory = this.#memoryOf(heir.info.id);
+      heirMemory.worktree = worktree;
+      heirMemory.named = true;
+      await this.#emitWorkspace(heir.info.id);
     }
     memory.preparing?.abort();
     this.#ports.release(sessionId);
@@ -1418,7 +1430,7 @@ export class SessionManager {
       this.#checks.delete(cwd);
       this.#checkProjects.delete(cwd);
     }
-    if (worktree && this.#worktrees) {
+    if (worktree && this.#worktrees && !returns) {
       const current = memory.worktree ?? worktree;
       const branch = choice === 'discard' ? 'always' : choice === 'keep' ? 'keep' : 'if-merged';
       await this.#worktrees.remove(current, branch).catch((error) => {

@@ -577,7 +577,11 @@ describe('passar o testemunho no SessionManager', { timeout: 60_000 }, () => {
     await expect(manager.handoff(second, { agent: 'claude', text: draft })).rejects.toThrow(
       /meio|testemunho/,
     );
-    await first;
+    // Fechar a origem a meio apagaria a worktree que está a mudar de dono.
+    await expect(manager.close(second, 'discard', true)).rejects.toThrow('a meio');
+    const { session } = await first;
+    expect(manager.worktreeOf(session.id)).toBeDefined();
+    expect(await manager.orphans()).toEqual([]);
   });
 
   it('sem worktree partilha a pasta do projeto, sem inventar uma', async () => {
@@ -659,14 +663,52 @@ describe('passar o testemunho no SessionManager', { timeout: 60_000 }, () => {
     await turn(second, 'escreve f.txt=ainda-aqui');
   });
 
-  it('fechar a sessão que recebeu o testemunho liberta a origem', async () => {
+  it('fechar a sessão que recebeu o testemunho devolve a pasta (e a worktree) à origem', async () => {
     const { second } = await worktreeSession();
+    const wt = manager.worktreeOf(second)!;
     const { session } = await manager.handoff(second, { agent: 'codex', text: draft });
     await idle(session.id);
-    expect(await manager.close(session.id, 'keep')).toEqual({ closed: true });
+    await turn(session.id, 'escreve h.txt=z');
+    // Há mudanças por trazer, mas a worktree também é da origem: nada se pergunta nem se apaga.
+    expect(await manager.close(session.id)).toEqual({ closed: true });
     expect(view(second).session.handedTo).toBeUndefined();
     expect(handoffs(second).at(-1)?.handedTo).toBeNull();
+    expect(manager.worktreeOf(second)).toEqual(wt);
+    expect(view(second).session.workspace).toMatchObject({ kind: 'worktree', branch: wt.branch });
+    expect(git(view(second).session.cwd, 'status', '--porcelain')).toContain('h.txt');
+    expect(await manager.orphans()).toEqual([]);
     await expect(manager.resumeHere(second)).rejects.toThrow('já tem a pasta');
+    // A origem continua a trabalhar na pasta, que ainda existe.
+    await turn(second, 'escreve f.txt=depois');
+  });
+
+  it('fechar com "deitar fora" quem recebeu o testemunho não apaga o trabalho da origem', async () => {
+    const { second } = await worktreeSession();
+    const wt = manager.worktreeOf(second)!;
+    const { session } = await manager.handoff(second, { agent: 'codex', text: draft });
+    await idle(session.id);
+    expect(await manager.close(session.id, 'discard')).toEqual({ closed: true });
+    expect(manager.worktreeOf(second)).toEqual(wt);
+    expect(git(view(second).session.cwd, 'status', '--porcelain')).toContain('f.txt');
+  });
+
+  it('numa cadeia, fechar a do meio liga a primeira a quem tem a pasta', async () => {
+    const { second: a } = await worktreeSession();
+    const wt = manager.worktreeOf(a)!;
+    const b = (await manager.handoff(a, { agent: 'codex', text: draft })).session;
+    await idle(b.id);
+    const c = (await manager.handoff(b.id, { agent: 'claude', text: draft })).session;
+    await idle(c.id);
+    expect(await manager.close(b.id)).toEqual({ closed: true });
+    // A não pode voltar a escrever na pasta enquanto C a tem.
+    expect(view(a).session.handedTo).toBe(c.id);
+    await expect(manager.send(a, 'olá')).rejects.toThrow('passou o testemunho a');
+    expect(manager.worktreeOf(c.id)).toEqual(wt);
+    // E fechar C devolve-a a A.
+    expect(await manager.close(c.id)).toEqual({ closed: true });
+    expect(view(a).session.handedTo).toBeUndefined();
+    expect(manager.worktreeOf(a)).toEqual(wt);
+    await turn(a, 'escreve f.txt=fim');
   });
 
   it('os ficheiros tocados são os que a Solline contou: worktree contra a base, ou o checkpoint', async () => {
