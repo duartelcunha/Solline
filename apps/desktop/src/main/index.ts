@@ -69,9 +69,15 @@ const drafts = new UiRecoveryStore(
   ),
 );
 const attention = new AttentionTracker();
+/** O nome dos projetos com repartições abertas, para o título dos avisos das partes tardias. */
+const projectNames = new Map<string, string>();
 const engine = new EngineHost((event) => {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
   win?.webContents.send(IPC.event, event);
+  // Uma parte que arranca depois da parte zero só aparece num race.state: passa a ser seguida
+  // (só o estado dela; nunca o conteúdo).
+  if (event.type === 'race.state' && event.race.kind === 'split')
+    attention.trackLanes(event.race.lanes, projectNames.get(event.race.projectId) ?? 'Projeto');
   const notice = attention.observe(event, win?.isFocused() ?? false);
   if (notice) notify(notice);
   if (event.type === 'engine.error' && !event.sessionId) recovery?.show('crashed', event.message);
@@ -336,6 +342,7 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       const request = SplitStartPayload.parse(payload);
       const project = await projects.get(request.projectId);
       if (!project) throw new Error('Projeto desconhecido');
+      projectNames.set(project.id, project.name);
       const started = await engine.request('split.begin', {
         ...request,
         cwd: project.path,

@@ -12,6 +12,9 @@ import type {
   Race,
   RaceLaneSpec,
   RaceProposal,
+  SplitPart,
+  SplitPartSpec,
+  SplitReview,
   DiffScope,
   EngineEvent,
   FileDiff,
@@ -142,6 +145,23 @@ export async function flushDrafts(): Promise<void> {
   await Promise.all(draftWrites.values());
 }
 
+/** A loja de uma sessão do snapshot, com tudo o que o motor já sabe dela. */
+function storeFromItem(item: EngineSnapshot['sessions'][number]): SessionStore {
+  const store = createSessionStore(item.session, item.session.projectId, item.capabilities);
+  store.setState({
+    turns: item.turns,
+    usage: item.usage,
+    queue: item.queue,
+    timeline: item.timeline,
+    quality: item.quality,
+    checks: item.checks,
+    conflicts: item.conflicts,
+    error: item.error,
+    interrupted: item.interrupted,
+  });
+  return store;
+}
+
 export function restoreSnapshot(snapshot: EngineSnapshot, ui: UiRecoveryState): void {
   if (snapshot.spaces) useSpaces.setState({ data: snapshot.spaces });
   if (snapshot.durability.status === 'failed')
@@ -152,18 +172,9 @@ export function restoreSnapshot(snapshot: EngineSnapshot, ui: UiRecoveryState): 
   sessionStores.clear();
   earlyEvents.clear();
   for (const item of snapshot.sessions) {
-    const store = createSessionStore(item.session, item.session.projectId, item.capabilities);
+    const store = storeFromItem(item);
     const draft = ui.drafts[item.session.id];
     store.setState({
-      turns: item.turns,
-      usage: item.usage,
-      queue: item.queue,
-      timeline: item.timeline,
-      quality: item.quality,
-      checks: item.checks,
-      conflicts: item.conflicts,
-      error: item.error,
-      interrupted: item.interrupted,
       composerText: draft?.pendingSend
         ? [draft.pendingSend, draft.text].filter(Boolean).join('\n')
         : (draft?.text ?? ''),
@@ -353,8 +364,11 @@ function setActionError(sessionId: string, error: unknown): void {
 /** Eventos de sessões que a interface ainda não conhece (chegaram antes da resposta). */
 const earlyEvents = new Map<string, EngineEvent[]>();
 
-/** Regista a loja de uma sessão nova e aplica-lhe o que já tinha chegado. */
-function adoptStore(id: string, store: SessionStore): void {
+/**
+ * Regista a loja de uma sessão nova e aplica-lhe o que já tinha chegado. Se a loja vem de um
+ * snapshot (`afterSequence`), os eventos que o snapshot já contém não se aplicam outra vez.
+ */
+function adoptStore(id: string, store: SessionStore, afterSequence?: number): void {
   draftSubscriptions.get(id)?.();
   sessionStores.set(id, store);
   draftSubscriptions.set(
@@ -370,7 +384,50 @@ function adoptStore(id: string, store: SessionStore): void {
   );
   const early = earlyEvents.get(id);
   earlyEvents.delete(id);
-  for (const event of early ?? []) store.setState(reduceSession(store.getState(), event));
+  for (const event of early ?? []) {
+    if (
+      afterSequence !== undefined &&
+      event.sequence !== undefined &&
+      event.sequence <= afterSequence
+    )
+      continue;
+    store.setState(reduceSession(store.getState(), event));
+  }
+}
+
+/** Repartições a arrancar: os eventos das primeiras pistas chegam antes da resposta do arranque. */
+let startingSplits = 0;
+/** Pistas cuja loja está a ser pedida ao motor (uma só vez de cada). */
+const adopting = new Set<string>();
+
+/**
+ * Uma parte que arranca depois da parte zero chega à interface só por um race.state: ainda não
+ * há loja para ela. Pede-se o snapshot ao motor e adotam-se as pistas que faltam.
+ */
+async function adoptMissingLanes(race: Race): Promise<void> {
+  const missing = race.lanes
+    .map((lane) => lane.sessionId)
+    .filter((id) => !sessionStores.has(id) && !adopting.has(id));
+  if (missing.length === 0) return;
+  for (const id of missing) adopting.add(id);
+  try {
+    const snapshot = await request('engine.snapshot', {});
+    const adopted: string[] = [];
+    for (const item of snapshot.sessions) {
+      const id = item.session.id;
+      if (!missing.includes(id) || sessionStores.has(id)) continue;
+      adoptStore(id, storeFromItem(item), snapshot.sequence);
+      adopted.push(id);
+    }
+    if (adopted.length > 0)
+      useApp.setState((s) => ({
+        sessionIds: [...adopted.filter((id) => !s.sessionIds.includes(id)), ...s.sessionIds],
+      }));
+  } catch {
+    // Sem a loja a pista fica vazia; o próximo race.state volta a tentar.
+  } finally {
+    for (const id of missing) adopting.delete(id);
+  }
 }
 
 /** Todos os eventos do motor entram por aqui. */
@@ -381,6 +438,8 @@ export function dispatch(event: EngineEvent): void {
   }
   if (event.type === 'race.state') {
     useApp.setState((s) => ({ races: { ...s.races, [event.race.id]: event.race } }));
+    if (event.race.kind === 'split' && event.race.phase !== 'closed' && startingSplits === 0)
+      void adoptMissingLanes(event.race);
     return;
   }
   // Um erro de uma sessão (uma mensagem da fila que não seguiu) fica nessa sessão; sem sessão,
@@ -437,6 +496,24 @@ export function dispatch(event: EngineEvent): void {
 
 /** Todos os eventos de sessão passam pela mesma fila, para uma transformação não trocar a ordem. */
 const enqueue = morphUpdate;
+
+/** As sessões de resolução de conflitos de cada repartição (fecham com ela). */
+const resolvers = new Map<string, Set<string>>();
+
+/** A segunda opinião e as verificações de uma sessão acabada de abrir. */
+function loadSessionExtras(sessionId: string, store: SessionStore): void {
+  // Um evento que chegue primeiro é mais recente: o pedido inicial não o pisa.
+  void request('quality.get', { sessionId })
+    .then((quality) => {
+      if (store.getState().quality === null) store.setState({ quality });
+    })
+    .catch(() => undefined);
+  void request('checks.get', { sessionId })
+    .then((checks) => {
+      if (store.getState().checks === null) store.setState({ checks });
+    })
+    .catch(() => undefined);
+}
 
 /** O agente das sessões abertas sem escolher: o primeiro pronto, senão o Claude. */
 function defaultAgent(): AgentId {
@@ -673,9 +750,11 @@ export const actions = {
     try {
       const result = await request('race.close', { raceId, ...(keep ? { keep } : {}) });
       if (!result.closed) return false;
-      const lanes = new Set(
-        useApp.getState().races[raceId]?.lanes.map((lane) => lane.sessionId) ?? [],
-      );
+      const lanes = new Set([
+        ...(useApp.getState().races[raceId]?.lanes.map((lane) => lane.sessionId) ?? []),
+        ...(resolvers.get(raceId) ?? []),
+      ]);
+      resolvers.delete(raceId);
       for (const id of lanes) {
         sessionStores.delete(id);
         draftSubscriptions.get(id)?.();
@@ -699,6 +778,103 @@ export const actions = {
       return true;
     } catch (error) {
       useApp.setState({ notice: `Não consegui fechar a corrida. ${message(error)}` });
+      return false;
+    }
+  },
+
+  /**
+   * Pede ao planeador que corte o pedido em partes (ou diga que não vale a pena). Só lê o
+   * projeto; null se falhou (o erro fica no aviso).
+   */
+  async planSplit(projectId: string, text: string): Promise<CommandResult<'split.plan'> | null> {
+    try {
+      return await request('split.plan', { projectId, text });
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui ler o projeto para partir. ${message(error)}` });
+      return null;
+    }
+  },
+
+  /** Confere um plano sem gastar nada; null se falhou (a revisão só deixa de aparecer). */
+  async reviewSplit(parts: SplitPart[], checkIds: string[]): Promise<SplitReview | null> {
+    try {
+      return await request('split.review', { parts, checkIds });
+    } catch {
+      return null;
+    }
+  },
+
+  /** Lança a repartição: a interface adota as sessões que já arrancaram e abre a vista. */
+  async startSplit(projectId: string, text: string, parts: SplitPartSpec[]): Promise<boolean> {
+    startingSplits++;
+    try {
+      const { race, sessions } = await request('split.start', { projectId, text, parts });
+      for (const created of sessions) {
+        adoptStore(
+          created.session.id,
+          createSessionStore(created.session, projectId, created.capabilities),
+        );
+      }
+      useApp.setState((s) => ({
+        sessionIds: [...sessions.map((c) => c.session.id), ...s.sessionIds],
+        races: { ...s.races, [race.id]: s.races[race.id] ?? race },
+        activeRaceId: race.id,
+        view: 'race',
+      }));
+      startingSplits--;
+      // As partes que arrancaram entretanto (depois da zero) só chegaram por race.state.
+      void adoptMissingLanes(useApp.getState().races[race.id] ?? race);
+      return true;
+    } catch (error) {
+      startingSplits--;
+      useApp.setState({ notice: `A repartição não arrancou. ${message(error)}` });
+      return false;
+    }
+  },
+
+  /** Junta as partes, uma a uma, com a verificação de cada uma. O estado chega por evento. */
+  async integrateSplit(raceId: string): Promise<boolean> {
+    try {
+      const race = await request('split.integrate', { raceId });
+      useApp.setState((s) => ({ races: { ...s.races, [raceId]: race } }));
+      return true;
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui integrar. ${message(error)}` });
+      return false;
+    }
+  },
+
+  /**
+   * Abre a sessão que resolve o conflito. Não muda de vista: quem a quiser ver clica em abrir.
+   * Devolve o id da sessão (null se falhou).
+   */
+  async resolveSplit(raceId: string): Promise<string | null> {
+    try {
+      const { race, session } = await request('split.resolve', { raceId });
+      const id = session.session.id;
+      const store = createSessionStore(session.session, race.projectId, session.capabilities);
+      adoptStore(id, store);
+      resolvers.set(raceId, new Set([...(resolvers.get(raceId) ?? []), id]));
+      useApp.setState((s) => ({
+        sessionIds: s.sessionIds.includes(id) ? s.sessionIds : [id, ...s.sessionIds],
+        races: { ...s.races, [raceId]: race },
+      }));
+      loadSessionExtras(id, store);
+      return id;
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui abrir a resolução. ${message(error)}` });
+      return null;
+    }
+  },
+
+  /** Retoma a integração depois de a sessão de resolução gravar o merge. */
+  async continueSplit(raceId: string): Promise<boolean> {
+    try {
+      const race = await request('split.continue', { raceId });
+      useApp.setState((s) => ({ races: { ...s.races, [raceId]: race } }));
+      return true;
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui continuar. ${message(error)}` });
       return false;
     }
   },
@@ -761,17 +937,7 @@ export const actions = {
         activeSessionId: session.id,
         view: 'session',
       }));
-      // Um evento que chegue primeiro é mais recente: o pedido inicial não o pisa.
-      void request('quality.get', { sessionId: session.id })
-        .then((quality) => {
-          if (store.getState().quality === null) store.setState({ quality });
-        })
-        .catch(() => undefined);
-      void request('checks.get', { sessionId: session.id })
-        .then((checks) => {
-          if (store.getState().checks === null) store.setState({ checks });
-        })
-        .catch(() => undefined);
+      loadSessionExtras(session.id, store);
     } catch (error) {
       useApp.setState({ notice: `Não foi possível abrir a sessão. ${message(error)}` });
     } finally {

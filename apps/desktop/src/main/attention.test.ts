@@ -94,6 +94,22 @@ describe('avisos fora da app', () => {
     expect(t.observe(failing('s2'), false)).toBeNull();
   });
 
+  it('as pistas que arrancam depois da primeira numa repartição passam a ser seguidas', () => {
+    const t = tracker();
+    const lanes = [
+      { sessionId: 's1', agent: 'claude', state: 'running' as const },
+      { sessionId: 's3', agent: 'codex', state: 'idle' as const },
+    ];
+    t.trackLanes(lanes, 'solline');
+    // A que já se seguia mantém o estado; a nova avisa como qualquer outra.
+    expect(t.observe(state('s3', 'running'), false)).toBeNull();
+    expect(t.observe(state('s3', 'needs-you'), false)).toMatchObject({
+      title: 'Codex · solline',
+      body: 'Precisa de ti',
+    });
+    expect(t.observe(state('s1', 'running'), false)).toBeNull();
+  });
+
   it('o nome do agente', () => {
     expect(agentLabel('codex')).toBe('Codex');
     expect(agentLabel('opencode')).toBe('Opencode');

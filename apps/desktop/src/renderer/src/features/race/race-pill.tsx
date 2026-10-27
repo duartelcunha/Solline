@@ -4,6 +4,7 @@ import type { AgentCapabilities, RaceLaneSpec, SessionSettings } from '@solline/
 import { MenuShell } from '../../components/menu.tsx';
 import { useApp } from '../../stores/app.ts';
 import { shortModelName } from '../composer/pills.tsx';
+import { laneKey, laneOptions, type LaneOption } from './lane-options.ts';
 
 /** Pastilha do compositor (o mesmo desenho das outras). */
 const pillClass =
@@ -11,13 +12,7 @@ const pillClass =
 
 export const MAX_LANES = 4;
 
-interface Option {
-  key: string;
-  lane: RaceLaneSpec;
-  label: string;
-}
-
-const laneKey = (lane: RaceLaneSpec) => `${lane.agent}:${lane.model ?? ''}`;
+type Option = LaneOption;
 
 /**
  * "N×": o mesmo pedido em várias pistas. A primeira é sempre a sessão como está (agente e
@@ -41,18 +36,13 @@ export function RacePill({
   const agents = useApp((s) => s.agents);
   const current: RaceLaneSpec = { agent, ...(settings.model ? { model: settings.model } : {}) };
   // As outras pistas possíveis: os outros modelos deste agente e os outros agentes prontos.
-  const options: Option[] = [
-    ...capabilities.models
-      .filter((m) => m.id !== settings.model && m.id !== 'default')
-      .map((m) => ({
-        key: `${agent}:${m.id}`,
-        lane: { agent, model: m.id },
-        label: shortModelName(m, m.id),
-      })),
-    ...agents
-      .filter((a) => a.id !== agent && a.status === 'ready')
-      .map((a) => ({ key: `${a.id}:`, lane: { agent: a.id }, label: a.label })),
-  ];
+  const options = laneOptions({
+    agent,
+    model: settings.model,
+    models: capabilities.models,
+    agents,
+    modelLabel: (m) => shortModelName(m, m.id),
+  });
   const extras = lanes.slice(1);
   const chosen = new Set(extras.map(laneKey));
   const count = Math.max(1, lanes.length);

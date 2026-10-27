@@ -44,6 +44,20 @@ export class AttentionTracker {
     });
   }
 
+  /**
+   * As pistas de uma repartição que arrancam depois da primeira só aparecem num race.state:
+   * passam a ser seguidas aqui, sem tocar no conteúdo delas. As que já se seguem ficam como estão.
+   */
+  trackLanes(
+    lanes: readonly { sessionId: string; agent: string; state: SessionState }[],
+    project: string,
+  ): void {
+    for (const lane of lanes) {
+      if (this.#sessions.has(lane.sessionId)) continue;
+      this.track({ id: lane.sessionId, agent: lane.agent, state: lane.state }, project);
+    }
+  }
+
   /** O aviso que este evento merece, ou null. Atualiza sempre o estado guardado. */
   observe(event: EngineEvent, focused: boolean): Attention | null {
     if (event.type === 'session.checks') return this.#checks(event, focused);

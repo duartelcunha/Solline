@@ -6,6 +6,7 @@ import { actions, flushDrafts, useApp, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { SettingsPills } from './pills.tsx';
 import { RacePill } from '../race/race-pill.tsx';
+import { useSplitFlow } from '../split/split-flow.tsx';
 import type { RaceLaneSpec } from '@solline/protocol';
 
 export const money = new Intl.NumberFormat('pt-PT', {
@@ -145,6 +146,15 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
     actions.finishComposerSend(sessionId, ok);
   }
 
+  // Partir: o planeador lê o projeto e propõe o corte; nada arranca sem o teu clique.
+  const split = useSplitFlow({
+    sessionId,
+    projectId,
+    text,
+    disabled: offline || busy,
+    onSendNormal: () => void send(),
+  });
+
   // O botão muda de papel: enviar, parar (a trabalhar sem texto) ou pôr na fila.
   const role: 'send' | 'stop' | 'queue' = !busy ? 'send' : hasText ? 'queue' : 'stop';
 
@@ -178,6 +188,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             </button>
           </p>
         ) : null}
+        {split.card}
         <div className="composer @container rounded-xl border border-line bg-surface shadow-raised transition-[border-color,box-shadow] duration-200 focus-within:border-line-strong">
           <textarea
             ref={input}
@@ -218,6 +229,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
                 disabled={offline || busy}
               />
             ) : null}
+            {capabilities ? split.pill : null}
             {capabilities ? (
               <SettingsPills
                 settings={settings}
@@ -297,6 +309,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
           </div>
         </div>
       </div>
+      {split.dialog}
     </div>
   );
 }
