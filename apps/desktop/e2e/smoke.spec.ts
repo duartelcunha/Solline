@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { basename, join, resolve, dirname } from 'node:path';
 import { removeRecoveryKey } from '../src/main/recovery-key';
 import { observePrompts, type PromptChoice } from '../qa/electron/custom-prompts';
 import {
@@ -10,6 +10,7 @@ import {
   expect,
   test,
   type ElectronApplication,
+  type Locator,
   type Page,
 } from '@playwright/test';
 
@@ -31,6 +32,13 @@ const confirmations: Record<string, PromptChoice> = {
   'Confiança no projeto': { button: 'Não confiar', choice: 'cancel' },
   'Variáveis do agente': { button: 'Cancelar', choice: 'cancel' },
 };
+/** A pasta que o seletor escolhe (muda de projeto para projeto) e as respostas às confirmações. */
+const promptPlan: { directory: string; confirmations: Record<string, PromptChoice> } = {
+  directory: '',
+  confirmations,
+};
+/** Projetos temporários que os testes reais criam (limpos no fim). */
+const extraProjects: string[] = [];
 
 test.beforeAll(async () => {
   userData = await mkdtemp(join(tmpdir(), 'solline-e2e-data-'));
@@ -76,13 +84,14 @@ test.beforeAll(async () => {
     SOLLINE_ISOLATED: '1',
     // Com o SDK real, o revisor e o planeador também correm (leem o projeto, só leitura).
     ...(process.env.SOLLINE_E2E_SDK === '1'
-      ? { SOLLINE_REVIEWER: '1', SOLLINE_PLANNER: '1', SOLLINE_CHECKS: '1' }
+      ? { SOLLINE_REVIEWER: '1', SOLLINE_PLANNER: '1', SOLLINE_DRAFTER: '1', SOLLINE_CHECKS: '1' }
       : {}),
   } as Record<string, string>;
   app = exe
     ? await electron.launch({ executablePath: exe, env })
     : await electron.launch({ args: [join(__dirname, '..', 'out', 'main', 'index.js')], env });
-  promptObserver = observePrompts(app, { directory: project, confirmations });
+  promptPlan.directory = project;
+  promptObserver = observePrompts(app, promptPlan);
   app.on('window', (page) => {
     page.on('pageerror', (error) => rendererErrors.push(error.message));
     page.on('console', (message) => {
@@ -140,12 +149,13 @@ test.afterAll(async () => {
   }
   await promptObserver?.settle();
   promptObserver?.stop();
-  for (const path of [userData, project])
+  for (const path of [userData, project, ...extraProjects])
     if (dirname(resolve(path)) !== resolve(tmpdir()) || !path.includes('solline-e2e-'))
       throw new Error('Unsafe fixture cleanup');
   await removeRecoveryKey(userData);
   await rm(userData, { recursive: true, force: true });
   await rm(project, { recursive: true, force: true });
+  for (const path of extraProjects) await rm(path, { recursive: true, force: true });
   expect(promptObserver?.failures ?? []).toEqual([]);
 });
 
@@ -493,10 +503,13 @@ test('projeto, sessão, mensagem, permissão, ferramenta e resultado (SDK real)'
     expect(notices.map((n) => n.body)).toContain('Turno acabado');
     expect(notices[0]?.title).toMatch(/^Claude · /);
   }
-  // A segunda opinião lê o turno que mudou o notes.txt e acaba limpa ou com achados.
-  await expect(page.getByTestId('quality-chip')).toHaveAttribute('data-quality', /clean|found/, {
-    timeout: 120_000,
-  });
+  // No fim de um turno só se revê o que vale a pena (20 linhas ou mais, ou um caminho sensível):
+  // esta troca de uma palavra fica em silêncio ("idle"); se o revisor correr, acaba limpo ou com achados.
+  await expect(page.getByTestId('quality-chip')).toHaveAttribute(
+    'data-quality',
+    /^(idle|clean|found)$/,
+    { timeout: 120_000 },
+  );
   await shot(page, 'quality-chip');
   // As verificações correm ao mesmo tempo: uma só pastilha mostra o lint que falhou; aberta,
   // os tipos passaram e o lint traz o fim do erro.
@@ -856,4 +869,209 @@ test('Codex por clique: sessão, resposta e tokens (Codex real)', async () => {
   await expect(page.getByTestId('session-tokens')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('session-cost')).toHaveCount(0);
   await shot(page, 'codex-session');
+});
+
+// ---- M5: passagem, bifurcação e segunda opinião a pedido (SDK real) ----
+
+interface Fixture {
+  dir: string;
+  /** A linha do projeto na barra lateral (para não confundir sessões de outros projetos). */
+  scope: Locator;
+}
+
+/** Um projeto git temporário, adicionado pela interface (de confiança) e ativo. */
+async function addGitProject(page: Page): Promise<Fixture> {
+  const dir = await mkdtemp(join(tmpdir(), 'solline-e2e-proj-'));
+  extraProjects.push(dir);
+  await writeFile(join(dir, 'README.md'), '# e2e\n');
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, windowsHide: true });
+  git('init', '--quiet', '-b', 'main');
+  git('config', 'user.email', 'e2e@solline.local');
+  git('config', 'user.name', 'E2E');
+  git('config', 'core.autocrlf', 'false');
+  git('add', '-A');
+  git('commit', '--quiet', '-m', 'início');
+  promptPlan.directory = dir;
+  await chooseTrust(true);
+  const before = await page.getByTestId('project-row').count();
+  await page.getByTestId('add-project').click();
+  await expect(page.getByTestId('project-row')).toHaveCount(before + 1);
+  const scope = page
+    .locator('li')
+    .filter({ has: page.getByRole('button', { name: `Projeto ${basename(dir)}`, exact: true }) });
+  await expect(scope).toHaveCount(1);
+  return { dir, scope };
+}
+
+/** Uma sessão nova no projeto, em Haiku, esforço baixo e a editar sem perguntar. */
+async function startQuickSession(page: Page, fx: Fixture): Promise<void> {
+  await fx.scope.getByTestId('new-session').click();
+  await expect(fx.scope.getByTestId('session-row')).toHaveCount(1, { timeout: 90_000 });
+  await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
+  await page.getByTestId('pill-model').click();
+  await page.getByTestId('model-haiku').click();
+  await page.getByTestId('pill-effort').click();
+  await page.getByTestId('effort-low').click();
+  await page.getByTestId('pill-mode').click();
+  await page.getByTestId('mode-acceptEdits').click();
+  await expect(page.getByTestId('pill-mode')).toContainText('Edits');
+}
+
+/** Envia um pedido e espera pelo fim do turno `turns` (responde a pedidos de permissão). */
+async function runTurn(page: Page, prompt: string, turns: number): Promise<void> {
+  await page.getByTestId('composer-input').fill(prompt);
+  await page.getByTestId('send').click();
+  await expect
+    .poll(
+      async () => {
+        const allow = page
+          .getByTestId('permission-card')
+          .getByRole('button', { name: /Permitir uma vez/ });
+        if (await allow.isVisible().catch(() => false)) await allow.click().catch(() => undefined);
+        if ((await page.getByTestId('user-turn').count()) !== turns) return false;
+        if ((await page.getByTestId('assistant-text').count()) < turns) return false;
+        const row = page.locator('[data-testid="session-row"][aria-current="page"]');
+        return (await row.getAttribute('data-state')) === 'idle';
+      },
+      { timeout: 180_000, intervals: [1_000] },
+    )
+    .toBe(true);
+}
+
+const fileText = (path: string) => readFile(path, 'utf8').catch(() => '');
+const MAKE_A = 'Create a file named a.txt containing exactly the word um. Reply with one word.';
+const MAKE_B = 'Create a file named b.txt containing exactly the word dois. Reply with one word.';
+
+test('passar o testemunho de Claude a Claude: rascunho, envio, banner e retomar (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
+  test.setTimeout(420_000);
+  const page = await app.firstWindow();
+  const fx = await addGitProject(page);
+  await startQuickSession(page, fx);
+  await runTurn(page, MAKE_A, 1);
+  await expect.poll(() => fileText(join(fx.dir, 'a.txt')), { timeout: 30_000 }).toContain('um');
+
+  // "Passar a…" no menu da sessão; o destino é outro modelo do Claude (Codex não existe no e2e).
+  await page.getByTestId('session-menu').click();
+  await page.getByTestId('session-pass-to').click();
+  const dialog = page.getByTestId('handoff-dialog');
+  await expect(dialog).toBeVisible();
+  await page.getByTestId('handoff-agent').click();
+  await page.getByTestId('handoff-option-claude-sonnet').click();
+  await page.getByTestId('handoff-goal').fill('Acrescenta o ficheiro b.txt com a palavra dois.');
+  await page.getByTestId('handoff-draft').click();
+
+  // O rascunho real traz os cabeçalhos fixos e os ficheiros contados pela Solline.
+  const text = page.getByTestId('handoff-text');
+  await expect(dialog).toHaveAttribute('data-step', 'edit', { timeout: 180_000 });
+  await expect(text).toHaveValue(/## Objetivo/);
+  await expect(text).toHaveValue(/## Ficheiros tocados\n- a\.txt/);
+  await expect(page.getByTestId('handoff-error')).toHaveCount(0);
+  await text.fill(`${await text.inputValue()}\n\nNota do teste: nada de mexer em README.md`);
+  await page.getByTestId('handoff-send').click();
+  await expect(dialog).toBeHidden({ timeout: 60_000 });
+
+  // A sessão nova abre com o aviso de passagem como primeira mensagem.
+  await expect(fx.scope.getByTestId('session-row')).toHaveCount(2);
+  await expect(page.getByTestId('user-turn').first()).toContainText(
+    'Passagem de testemunho de Claude',
+  );
+  await expect(page.getByTestId('user-turn').first()).toContainText('Nota do teste');
+  await expect(page.getByTestId('session-origin')).toHaveAttribute('data-kind', 'handoff');
+
+  // "Retomar aqui" espera que o agente novo acabe: interrompe-se o que ele começou a fazer.
+  const newRow = page.locator('[data-testid="session-row"][aria-current="page"]');
+  await expect
+    .poll(
+      async () => {
+        const stop = page.getByTestId('interrupt');
+        if (await stop.isVisible().catch(() => false)) await stop.click().catch(() => undefined);
+        return newRow.getAttribute('data-state');
+      },
+      { timeout: 120_000, intervals: [1_000] },
+    )
+    .toBe('idle');
+
+  // A de origem só se lê: aviso e compositor desligado; "Retomar aqui" devolve a escrita.
+  await fx.scope.getByTestId('session-row').nth(1).click();
+  await expect(page.getByTestId('handed-banner')).toContainText('Passou o testemunho');
+  await expect(page.getByTestId('composer-input')).toBeDisabled();
+  await page.getByTestId('handed-resume').click();
+  await expect(page.getByTestId('handed-banner')).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 60_000 });
+});
+
+test('bifurcar daqui: sessão nova na sua worktree com o estado do primeiro turno (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
+  test.setTimeout(420_000);
+  const page = await app.firstWindow();
+  const fx = await addGitProject(page);
+  await startQuickSession(page, fx);
+  await runTurn(page, MAKE_A, 1);
+  await runTurn(page, MAKE_B, 2);
+  await expect.poll(() => fileText(join(fx.dir, 'b.txt')), { timeout: 30_000 }).toContain('dois');
+
+  // Pela linha do tempo: bifurcar do fim do turno 1.
+  await expect(page.getByTestId('timeline')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('fork-menu')).toBeEnabled({ timeout: 30_000 });
+  await page.getByTestId('fork-menu').click();
+  await page.getByTestId('fork-turn').filter({ hasText: 'Bifurcar do turno 1' }).click();
+
+  await expect(fx.scope.getByTestId('session-row')).toHaveCount(2, { timeout: 60_000 });
+  await expect(page.getByTestId('session-origin')).toHaveAttribute('data-kind', 'fork');
+  await expect(page.getByTestId('session-origin')).toContainText(/bifurcada do turno 1 de/);
+  // Só o turno mantido está no histórico.
+  await expect(page.getByTestId('user-turn')).toHaveCount(1);
+  await expect(page.getByTestId('user-turn')).toContainText('a.txt');
+  await expect(page.getByTestId('workspace-chip')).toHaveAttribute('data-branch', /^solline\//, {
+    timeout: 60_000,
+  });
+
+  // A worktree nova (a única além do projeto) tem a.txt e ainda não tem b.txt.
+  const worktrees = () =>
+    execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: fx.dir, windowsHide: true })
+      .toString()
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('worktree '))
+      .map((line) => line.slice('worktree '.length))
+      .slice(1);
+  await expect.poll(() => worktrees().length, { timeout: 30_000 }).toBe(1);
+  const [forked] = worktrees();
+  if (!forked) throw new Error('worktree da bifurcação em falta');
+  await expect.poll(() => fileText(join(forked, 'a.txt')), { timeout: 30_000 }).toContain('um');
+  expect(existsSync(join(forked, 'b.txt'))).toBe(false);
+  // A origem não mudou.
+  expect(await fileText(join(fx.dir, 'b.txt'))).toContain('dois');
+});
+
+test('segunda opinião a pedido: revisão acaba e diz quem reviu (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
+  test.setTimeout(420_000);
+  const page = await app.firstWindow();
+  const fx = await addGitProject(page);
+  await startQuickSession(page, fx);
+  await runTurn(page, MAKE_A, 1);
+
+  // Um turno pequeno pode não disparar a revisão sozinha; se disparar, espera-se que acabe
+  // (a pedido só se pede com o revisor livre).
+  await expect(page.getByTestId('quality-chip')).toHaveAttribute(
+    'data-quality',
+    /^(idle|clean|found)$/,
+    { timeout: 120_000 },
+  );
+  if (!(await page.getByTestId('review-panel').isVisible()))
+    await page.getByTestId('review-toggle').click();
+  const strip = page.getByTestId('quality-strip');
+  await expect(strip).toBeVisible();
+  await expect(page.getByTestId('second-opinion')).toBeEnabled();
+  await page.getByTestId('second-opinion').click();
+  await page.getByTestId('second-opinion-turn').click();
+
+  // Acaba com achados ou com o estado calmo; o erro nunca conta.
+  await expect(page.getByTestId('quality-byline')).toContainText('a pedido', { timeout: 180_000 });
+  await expect(strip).toHaveAttribute('data-phase', /clean|found/, { timeout: 180_000 });
+  await expect(page.getByTestId('quality-byline')).toContainText(/Revisto por Claude/);
+  await expect(page.getByTestId('quality-byline')).toContainText('mesmo fabricante');
+  await expect(page.getByTestId('quality-headline')).toHaveText(/Sem achados|achado/);
+  await expect(page.getByTestId('quality-headline')).not.toContainText('falhou');
 });
