@@ -327,6 +327,20 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       for (const created of started.sessions) attention.track(created.session, project.name);
       return started;
     }
+    case 'split.plan': {
+      // A pasta e as verificações vêm do projeto guardado; o planeador só lê.
+      const request = payload as CommandPayload<'split.plan'>;
+      const project = await projects.get(request.projectId);
+      if (!project) throw new Error('Projeto desconhecido');
+      const specs =
+        project.checks ??
+        (await engine.request('projects.detectChecks', { cwd: project.path })).checks;
+      return engine.request('split.planNow', {
+        text: request.text,
+        cwd: project.path,
+        checks: specs.filter((c) => c.enabled).map((c) => ({ id: c.id, label: c.label })),
+      });
+    }
     case 'session.create': {
       // A interface pede pelo projeto; a pasta vem sempre do que está guardado aqui.
       const start = await resolveSessionStart(projects, SessionCreatePayload.parse(payload));

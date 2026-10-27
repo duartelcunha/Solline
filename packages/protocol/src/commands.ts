@@ -12,6 +12,13 @@ import {
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
 import { Race, RaceProposal, RaceStartPayload } from './race.ts';
+import {
+  SplitPlanNowPayload,
+  SplitPlanPayload,
+  SplitPlanResult,
+  SplitReview,
+  SplitReviewPayload,
+} from './split.ts';
 import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
@@ -291,6 +298,13 @@ export const commandSchemas = {
       .strict(),
     result: z.object({ closed: z.boolean(), race: Race.optional() }),
   },
+  /**
+   * Pede ao planeador (main) que corte o pedido em partes, ou diga que não vale a pena. Só lê o
+   * código e gasta um turno; devolve o plano, a revisão e o custo.
+   */
+  'split.plan': { payload: SplitPlanPayload, result: SplitPlanResult },
+  /** Confere um plano (por exemplo depois de o editares): puro, sem gastar nada. */
+  'split.review': { payload: SplitReviewPayload, result: SplitReview },
   /** Volta a preparar a worktree da sessão (depois de uma falha). */
   'setup.retry': { payload: SessionRef, result: Empty },
   ...reviewCommandSchemas,
@@ -313,6 +327,7 @@ export const MAIN_COMMANDS = [
   'projects.setSetup',
   'race.start',
   'race.close',
+  'split.plan',
   'session.create',
   'session.close',
   'worktrees.discard',
@@ -376,6 +391,8 @@ export const internalCommandSchemas = {
     }).strict(),
     result: z.object({ race: Race, sessions: z.array(SessionCreateResult) }),
   },
+  /** Planeia a repartição com a pasta e as verificações do projeto (o main resolveu-as). */
+  'split.planNow': { payload: SplitPlanNowPayload, result: SplitPlanResult },
   /** Fecha a corrida (o main já confirmou). */
   'race.closeNow': {
     payload: z

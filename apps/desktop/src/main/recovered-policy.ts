@@ -16,6 +16,8 @@ const INSPECTION = new Set<CommandName>([
   'review.diff',
   'quality.get',
   'checks.get',
+  // Pura: confere um plano, não toca em nada.
+  'split.review',
 ]);
 const GLOBAL = new Set<CommandName>([
   'engine.flush',

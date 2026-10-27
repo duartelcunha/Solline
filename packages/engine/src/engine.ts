@@ -28,6 +28,8 @@ import { SessionManager, type ChecksOptions } from './session-manager.ts';
 import { Assembler } from './races/assembler.ts';
 import { RaceManager } from './races/race-manager.ts';
 import { claudeJudge } from './verify/judge.ts';
+import { claudePlanner, type Planner } from './races/planner.ts';
+import { reviewPlan } from './races/split-review.ts';
 import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
@@ -59,6 +61,8 @@ export interface EngineOptions {
   checkpoints?: CheckpointStoreOptions | false;
   /** A segunda opinião no fim de cada turno (por omissão um Claude só de leitura); false desliga. */
   reviewer?: Reviewer | false;
+  /** Quem corta um pedido em partes (por omissão um Claude só de leitura); false desliga. */
+  planner?: Planner | false;
   /** As verificações do projeto no fim de cada turno (por omissão ligadas, menos isolado); false desliga. */
   checks?: ChecksOptions | false;
   /** Worktrees para as sessões a mais de um projeto (por omissão na pasta de dados); false desliga. */
@@ -82,6 +86,7 @@ export class Engine {
   readonly logins: LoginManager;
   readonly #handlers: Handlers;
   readonly #checkpoints: CheckpointStore | undefined;
+  readonly #planner: Planner | undefined;
   readonly #epoch = randomUUID();
   readonly #journal: DurableJournal<RecoveryRecord> | undefined;
   readonly #operations = new Map<string, RecoveryOperation>();
@@ -196,6 +201,14 @@ export class Engine {
         ? {}
         : { judge: claudeJudge({ claudeExecutable: options.claudeExecutable }) }),
     });
+    // Como o juiz: nos testes isolados não se gasta a subscrição a planear.
+    this.#planner =
+      options.planner === false
+        ? undefined
+        : (options.planner ??
+          (options.isolated || options.reviewer === false
+            ? undefined
+            : claudePlanner({ claudeExecutable: options.claudeExecutable })));
     box.races = this.races;
     this.sessions.claimWorktrees(() => this.races.worktreePaths());
     this.spaces = new SpaceManager({
@@ -384,6 +397,22 @@ export class Engine {
       'session.resumeQueue': async (p) => (s.resumeQueue(p.sessionId), ok),
       'session.bring': (p) => s.bring(p.sessionId),
       'race.begin': (p) => this.races.begin(p),
+      'split.planNow': async (p) => {
+        if (!this.#planner) throw new Error('O planeador não está disponível');
+        const { plan, cost } = await this.#planner({
+          cwd: p.cwd,
+          request: p.text,
+          checks: p.checks,
+        });
+        const checkIds = p.checks.map((c) => c.id);
+        // "Não partir" não lança partes: o custo é o de um só agente.
+        const review =
+          plan.decision === 'split'
+            ? reviewPlan(plan.parts, checkIds)
+            : { sequential: [], dropped: [], hubs: [], costMultiplier: 1, warnings: [] };
+        return { plan, review, cost };
+      },
+      'split.review': async (p) => reviewPlan(p.parts, p.checkIds),
       'race.get': async (p) => this.races.get(p.raceId),
       'race.proposal': (p) => this.races.proposal(p.raceId),
       'race.assemble': (p) => this.races.assemble(p.raceId, p.picks),
@@ -590,6 +619,8 @@ const READ_ONLY = new Set<EngineCommandName>([
   'worktrees.list',
   'race.get',
   'race.proposal',
+  'split.planNow',
+  'split.review',
   'projects.detectChecks',
   'projects.detectSetup',
   'review.timeline',
