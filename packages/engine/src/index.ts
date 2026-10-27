@@ -1,5 +1,6 @@
 export { Engine, type EngineOptions } from './engine.ts';
 export { SessionManager } from './session-manager.ts';
+export * from './consult/index.ts';
 export { CRAFT_RULES } from './quality/craft.ts';
 export {
   claudeReviewer,

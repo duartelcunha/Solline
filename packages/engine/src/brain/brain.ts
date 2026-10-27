@@ -22,6 +22,9 @@ import {
 } from './tool.ts';
 import { contextTool } from './tools/context.ts';
 
+/** Quanto o agente espera por uma ferramenta da Solline (uma consulta a outro agente demora). */
+export const BRAIN_TOOL_TIMEOUT_SEC = 900;
+
 /** Como o agente chega às ferramentas: dentro do processo (Claude) ou pelo shim stdio (o resto). */
 export type BrainTransport = 'in-process' | 'stdio';
 
@@ -33,6 +36,8 @@ export interface BrainSession {
   describe(): { title: string; folder: string; cwd?: string | undefined };
   /** O turno em curso (só o gestor de sessões o sabe). Sem isto, os turnos contam como externos. */
   turn?(): TurnInfo;
+  /** Ferramentas que esta sessão não recebe (as de consultar e delegar nas sessões que nasceram de uma). */
+  withhold?: readonly string[];
 }
 
 export interface BrainToolInfo {
@@ -40,8 +45,13 @@ export interface BrainToolInfo {
   description: string;
   input: BrainShape;
   readOnly: boolean;
-  /** Corre sem pedir autorização (as só de leitura e as inofensivas). */
+  /**
+   * O agente não pede autorização a esta ferramenta: é só de leitura, é inofensiva ou (gated) pede
+   * ela própria ao utilizador, num cartão da Solline.
+   */
   autoApprove: boolean;
+  /** A ferramenta pede ao utilizador num cartão da Solline antes de fazer seja o que for. */
+  gated: boolean;
 }
 
 /** As ferramentas da Solline atadas a uma sessão, até fecharem ou arrancarem de novo. */
@@ -75,6 +85,11 @@ export function sourceShimPath(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), 'shim', 'solline-brain-shim.cjs');
 }
 
+/** O agente não pede autorização a esta ferramenta (ela é segura por si ou pede ao utilizador). */
+function skipsAgentPrompt(tool: BrainTool): boolean {
+  return tool.autoApprove || tool.gated;
+}
+
 function describeTool(tool: BrainTool): ChannelTool {
   const { $schema: _schema, ...inputSchema } = z.toJSONSchema(z.object(tool.input).strict());
   return {
@@ -92,7 +107,6 @@ function describeTool(tool: BrainTool): ChannelTool {
  */
 export class Brain {
   readonly #tools: readonly BrainTool[];
-  readonly #byName: ReadonlyMap<string, BrainTool>;
   readonly #shim: string | undefined;
   readonly #node: () => string | null;
   readonly #channel: BrainChannel;
@@ -106,7 +120,6 @@ export class Brain {
       if (names.has(tool.name)) throw new Error(`Ferramenta repetida: ${tool.name}`);
       names.add(tool.name);
     }
-    this.#byName = new Map(this.#tools.map((t) => [t.name, t]));
     this.#shim = options.shim;
     this.#node = options.node ?? (() => findNode());
     this.#channel = options.channel ?? new BrainChannel();
@@ -118,9 +131,12 @@ export class Brain {
     return this.#tools.filter((t) => t.readOnly).map((t) => t.name);
   }
 
-  /** Os nomes das ferramentas que correm sem pedir: as só de leitura e as inofensivas. */
+  /**
+   * Os nomes das ferramentas a que o agente não pede autorização: as só de leitura, as inofensivas
+   * e as que pedem elas próprias ao utilizador (gated, senão eram dois pedidos para a mesma coisa).
+   */
   get autoApprovedTools(): readonly string[] {
-    return this.#tools.filter((t) => t.autoApprove).map((t) => t.name);
+    return this.#tools.filter(skipsAgentPrompt).map((t) => t.name);
   }
 
   async bind(session: BrainSession, transport: BrainTransport): Promise<BrainBinding> {
@@ -132,18 +148,22 @@ export class Brain {
       turn: () => session.turn?.() ?? { id: undefined, external: true },
     };
     let revoked = false;
+    const withheld = new Set(session.withhold ?? []);
+    const tools = this.#tools.filter((t) => !withheld.has(t.name));
+    const available = new Map(tools.map((t) => [t.name, t]));
     const call = async (name: string, args: unknown): Promise<BrainResult> => {
       if (revoked) return { text: 'Esta sessão da Solline já fechou.', isError: true };
-      const tool = this.#byName.get(name);
+      const tool = available.get(name);
       if (!tool) return { text: `Ferramenta desconhecida: ${name}`, isError: true };
       return tool.run(context, args);
     };
-    const infos: BrainToolInfo[] = this.#tools.map((t) => ({
+    const infos: BrainToolInfo[] = tools.map((t) => ({
       name: t.name,
       description: t.description,
       input: t.input,
       readOnly: t.readOnly,
-      autoApprove: t.autoApprove,
+      autoApprove: skipsAgentPrompt(t),
+      gated: t.gated,
     }));
     let issued: { token: string; revoke: () => void } | undefined;
     let launch: McpServerLaunch | null = null;
@@ -151,7 +171,7 @@ export class Brain {
       const resolved = await this.#stdioLaunch();
       if (resolved) {
         const channelSession: ChannelSession = {
-          tools: () => this.#tools.map(describeTool),
+          tools: () => tools.map(describeTool),
           call,
         };
         issued = this.#channel.issue(channelSession);
@@ -161,7 +181,9 @@ export class Brain {
           args: [resolved.shim],
           env: { [BRAIN_PIPE_ENV]: resolved.address, [BRAIN_TOKEN_ENV]: issued.token },
           executesCode: false,
-          autoApprove: this.autoApprovedTools,
+          autoApprove: tools.filter(skipsAgentPrompt).map((t) => t.name),
+          // Perguntar a outro agente pode demorar minutos; o Codex corta as ferramentas MCP aos 60 s.
+          toolTimeoutSec: BRAIN_TOOL_TIMEOUT_SEC,
         };
       }
     }

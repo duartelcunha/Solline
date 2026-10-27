@@ -3,6 +3,7 @@ import { useStore } from 'zustand';
 import type {
   AgentDescriptor,
   AgentId,
+  ConsultDecision,
   McpServerDescriptor,
   CommandName,
   CommandPayload,
@@ -186,6 +187,7 @@ export function restoreSnapshot(snapshot: EngineSnapshot, ui: UiRecoveryState): 
     const store = storeFromItem(item);
     const draft = ui.drafts[item.session.id];
     store.setState({
+      consults: (snapshot.consults ?? []).filter((c) => c.sessionId === item.session.id),
       composerText: draft?.pendingSend
         ? [draft.pendingSend, draft.text].filter(Boolean).join('\n')
         : (draft?.text ?? ''),
@@ -1328,6 +1330,25 @@ export const actions = {
     sessionStores.get(sessionId)?.setState({ actionError: null });
     try {
       await request('permission.answer', { sessionId, requestId, answer });
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
+    }
+  },
+
+  /**
+   * Responde a um cartão de "Perguntar a…" ou "Delegar". O pedido sai da sessão quando chega o
+   * consult.settled; aqui só se diz ao motor o que decidiste.
+   */
+  async answerConsult(
+    sessionId: string,
+    requestId: string,
+    decision: ConsultDecision,
+  ): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('consult.answer', { sessionId, requestId, decision });
       return true;
     } catch (error) {
       setActionError(sessionId, error);

@@ -65,6 +65,8 @@ export interface McpServerLaunch {
   executesCode: boolean;
   /** Ferramentas só de leitura deste servidor: podem correr sem pedir autorização (as outras pedem). */
   autoApprove?: readonly string[] | undefined;
+  /** Quanto o agente espera por uma ferramenta deste servidor (o Codex corta aos 60 s por omissão). */
+  toolTimeoutSec?: number | undefined;
 }
 
 export interface AgentStartResult {

@@ -4,7 +4,8 @@ import type { SessionInfo, SessionOrigin } from './conversation.ts';
  * A linhagem das sessões, para o Mapa: quem nasceu de quem. Função pura sobre as sessões
  * abertas; só usa ids (a origem de cada sessão), nunca conteúdo.
  *
- * - handoff e fork: filha da sessão de origem (`origin.sessionId`).
+ * - handoff, fork, ask e delegate: filha da sessão de origem (`origin.sessionId`); ask é a consulta
+ *   que um agente abriu (só de leitura) e delegate a tarefa que um agente entregou.
  * - part: filha da sessão que lhe entregou o resultado, se existir; a parte também pertence
  *   ao grupo da sua corrida.
  * - lane: sem pai de sessão; só pertence ao grupo da sua corrida.
@@ -51,7 +52,7 @@ export interface LineageTree {
   detached: LineageDetached[];
 }
 
-const PARENT_KINDS = new Set<LineageKind>(['handoff', 'fork', 'part']);
+const PARENT_KINDS = new Set<LineageKind>(['handoff', 'fork', 'part', 'ask', 'delegate']);
 
 export function lineageTree(sessions: readonly SessionInfo[]): LineageTree {
   const byId = new Map<string, SessionInfo>();

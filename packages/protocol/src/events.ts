@@ -6,6 +6,7 @@ import { Checks, SetupState } from './checks.ts';
 import { Race } from './race.ts';
 import { Quality } from './quality.ts';
 import { Timeline } from './review.ts';
+import { ConsultOutcome, ConsultRequest } from './consult.ts';
 
 /**
  * Eventos que o motor emite sem pedido (motor -> main -> interface).
@@ -43,6 +44,27 @@ export const PermissionRequestEvent = z.object({
   sessionId: z.string(),
   turnId: z.string(),
   request: AskBlock,
+});
+
+/**
+ * Um agente pediu para perguntar a outro ou delegar uma tarefa: o pedido fica à espera do
+ * utilizador (consult.answer) até chegar o consult.settled. Não vai para o diário de recuperação:
+ * depois de reiniciar o motor o agente já não existe, e o pedido cai com ele.
+ */
+export const ConsultRequestEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('consult.request'),
+  sessionId: z.string(),
+  request: ConsultRequest,
+});
+
+/** O pedido deixou de estar à espera: o utilizador decidiu, ou foi cancelado (sessão fechada, turno interrompido). */
+export const ConsultSettledEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('consult.settled'),
+  sessionId: z.string(),
+  requestId: z.string(),
+  outcome: ConsultOutcome,
 });
 
 /** A linha do tempo de uma sessão mudou: checkpoint novo, turno acabado, rever ou rebobinar. */
@@ -141,6 +163,8 @@ export const EngineEvent = z
     SessionEvent,
     SessionStateEvent,
     PermissionRequestEvent,
+    ConsultRequestEvent,
+    ConsultSettledEvent,
     SessionTimelineEvent,
     SessionQualityEvent,
     SessionChecksEvent,
@@ -158,6 +182,8 @@ export type EngineEvent = z.infer<typeof EngineEvent>;
 export type SessionEvent = z.infer<typeof SessionEvent>;
 export type SessionStateEvent = z.infer<typeof SessionStateEvent>;
 export type PermissionRequestEvent = z.infer<typeof PermissionRequestEvent>;
+export type ConsultRequestEvent = z.infer<typeof ConsultRequestEvent>;
+export type ConsultSettledEvent = z.infer<typeof ConsultSettledEvent>;
 export type SessionTimelineEvent = z.infer<typeof SessionTimelineEvent>;
 export type SessionQualityEvent = z.infer<typeof SessionQualityEvent>;
 export type SessionChecksEvent = z.infer<typeof SessionChecksEvent>;

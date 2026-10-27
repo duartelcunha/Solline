@@ -4,6 +4,7 @@ import {
   applyDelta,
   type AgentCapabilities,
   type Checks,
+  type ConsultRequest,
   type SessionQueue,
   type EngineEvent,
   type Quality,
@@ -38,6 +39,11 @@ export interface SessionData {
   checks: Checks | null;
   /** O último "Trazer" deu conflitos nestes ficheiros (para pedir ao agente que os resolva). */
   conflicts: { files: string[]; into: string } | null;
+  /**
+   * Os pedidos de perguntar a outro agente ou delegar que esta sessão fez e esperam por ti (o mais
+   * antigo primeiro). Caem com o motor: depois de reiniciar já não há agente à espera.
+   */
+  consults: ConsultRequest[];
   /** O que escreveste enquanto o agente trabalhava, à espera de seguir. */
   queue: SessionQueue | null;
   /** Desde quando a sessão está no estado atual (ms). */
@@ -72,6 +78,7 @@ export function createSessionStore(
     quality: null,
     checks: null,
     conflicts: null,
+    consults: [],
     queue: null,
     stateSince: Date.now(),
     turnEndedAt: null,
@@ -103,7 +110,9 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
             delta.turn.role === 'user' &&
             data.turns.length === 0 &&
             data.info.origin?.kind !== 'handoff' &&
-            data.info.origin?.kind !== 'fork';
+            data.info.origin?.kind !== 'fork' &&
+            data.info.origin?.kind !== 'ask' &&
+            data.info.origin?.kind !== 'delegate';
           const text = delta.turn.blocks.find((b) => b.kind === 'text');
           const title = first && text?.kind === 'text' ? titleFrom(text.text) : data.info.title;
           return { ...data, turns, info: { ...data.info, title } };
@@ -121,6 +130,13 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
           block: event.request,
         }),
       };
+    case 'consult.request':
+      return {
+        ...data,
+        consults: [...data.consults.filter((c) => c.id !== event.request.id), event.request],
+      };
+    case 'consult.settled':
+      return { ...data, consults: data.consults.filter((c) => c.id !== event.requestId) };
     case 'session.timeline':
       return { ...data, timeline: event.timeline };
     case 'session.quality':

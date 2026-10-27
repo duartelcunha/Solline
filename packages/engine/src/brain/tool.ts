@@ -55,6 +55,12 @@ export interface BrainToolSpec<S extends BrainShape> {
    * para não interromper a sessão. Nunca mude isto para ferramentas com efeitos reais.
    */
   autoApprove?: boolean;
+  /**
+   * A própria ferramenta pede ao utilizador, num cartão da Solline, antes de fazer o que quer que
+   * seja (perguntar a outro agente, delegar). O agente não repete o pedido (senão eram dois
+   * cartões), mas isto NÃO é autoApprove: sem a resposta do utilizador a ferramenta não faz nada.
+   */
+  gated?: boolean;
   handler(ctx: BrainContext, args: z.infer<z.ZodObject<S>>): Promise<unknown> | unknown;
 }
 
@@ -65,6 +71,7 @@ export interface BrainTool {
   readonly input: BrainShape;
   readonly readOnly: boolean;
   readonly autoApprove: boolean;
+  readonly gated: boolean;
   run(ctx: BrainContext, args: unknown): Promise<BrainResult>;
 }
 
@@ -85,6 +92,8 @@ function failure(text: string): BrainResult {
 /** Valida os argumentos, corre a ferramenta e devolve os erros como resultado, nunca como exceção. */
 export function defineBrainTool<S extends BrainShape>(spec: BrainToolSpec<S>): BrainTool {
   if (!TOOL_NAME.test(spec.name)) throw new Error(`Nome de ferramenta inválido: ${spec.name}`);
+  if (spec.gated && (spec.readOnly || spec.autoApprove))
+    throw new Error(`Ferramenta com cartão não pode ser autoApprove: ${spec.name}`);
   const schema = z.object(spec.input).strict();
   return {
     name: spec.name,
@@ -92,6 +101,7 @@ export function defineBrainTool<S extends BrainShape>(spec: BrainToolSpec<S>): B
     input: spec.input,
     readOnly: spec.readOnly,
     autoApprove: spec.readOnly || spec.autoApprove === true,
+    gated: spec.gated === true,
     run: async (ctx, args) => {
       const parsed = schema.safeParse(args ?? {});
       if (!parsed.success) {

@@ -43,6 +43,8 @@ import { WorktreeManager } from './worktrees/worktrees.ts';
 import { ENGINE_VERSION } from './version.ts';
 import { Brain, sourceShimPath, type BrainOptions } from './brain/brain.ts';
 import { contextTool } from './brain/tools/context.ts';
+import { ConsultManager } from './consult/manager.ts';
+import { consultTools } from './consult/tools.ts';
 import { exportRules, readNativeFiles } from './rules/files.ts';
 import { RulesManager } from './rules/manager.ts';
 import { rulesTools } from './rules/tools.ts';
@@ -141,6 +143,8 @@ export class Engine {
   /** As regras do projeto escritas na Solline (iguais para todos os agentes). */
   readonly rules: RulesManager;
   readonly memory: MemoryService;
+  /** "Perguntar a…" e "Delegar": os pedidos dos agentes à espera do utilizador e as sessões que abrem. */
+  readonly consult: ConsultManager;
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
   readonly races: RaceManager;
@@ -228,6 +232,8 @@ export class Engine {
         return;
       }
       emit(sequenced);
+      // Uma consulta ou delegação acaba quando o primeiro turno da sessão que abriu acaba.
+      this.consult?.observe(event);
       box.races?.observe(event);
       box.splits?.observe(event);
       this.spaces?.observe(event);
@@ -253,6 +259,7 @@ export class Engine {
       },
       rules: this.rules,
     });
+    this.consult = new ConsultManager({ emit: emitAll, registry, worktrees });
     this.#brain = options.brain
       ? new Brain({
           ...options.brain,
@@ -260,6 +267,7 @@ export class Engine {
             contextTool,
             ...rulesTools(this.rules),
             ...memoryTools(this.memory),
+            ...consultTools(this.consult),
           ],
           shim: options.brain.shim ?? sourceShimPath(),
         })
@@ -271,6 +279,7 @@ export class Engine {
       registry,
       mcp,
       brain: this.#brain,
+      consult: this.consult,
       rules: this.rules,
       memories: this.memory,
       checkpoints: this.#checkpoints,
@@ -283,6 +292,7 @@ export class Engine {
           ? undefined
           : (options.checks ?? (options.isolated ? undefined : {})),
     });
+    this.consult.attach(this.sessions);
     this.registry = new RaceRegistry(emitAll);
     this.races = new RaceManager({
       beforeEffect: (command, raceId) => this.#prepare(command, { raceId }),
@@ -478,7 +488,15 @@ export class Engine {
         if ('written' in result) this.rules.exported(p.projectId);
         return result;
       },
-      'engine.snapshot': async () => this.#state().snapshot,
+      'engine.snapshot': async () => {
+        // Os pedidos de consulta à espera só vão a quem liga agora; nunca para o diário.
+        const consults = this.consult.pending();
+        return { ...this.#state().snapshot, ...(consults.length ? { consults } : {}) };
+      },
+      'consult.answer': async (p) => (
+        this.consult.answer(p.sessionId, p.requestId, p.decision),
+        ok
+      ),
       'engine.flush': async () => {
         await this.flush();
         return {};
@@ -760,13 +778,15 @@ export class Engine {
       text?: unknown;
       id?: unknown;
       answer?: { decision?: unknown };
+      decision?: unknown;
     };
     // Zod's object strips all non-allowlisted keys, particularly keys/env/provider secrets.
     // This is explanatory metadata only; recovered operations are never executed.
     const details = RecoveryOperationDetails.parse({
       ...input,
       itemId: typeof input?.id === 'string' ? input.id : undefined,
-      decision: input?.answer?.decision,
+      // permission.answer traz a decisão em `answer`; consult.answer traz-a à solta.
+      decision: input?.answer?.decision ?? input?.decision,
     });
     const operation: RecoveryOperation = {
       id,

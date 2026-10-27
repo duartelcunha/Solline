@@ -80,6 +80,8 @@ export const EDGE_LABEL: Record<LineageKind, string> = {
   part: 'parte',
   lane: 'pista',
   task: 'tarefa',
+  ask: 'pergunta',
+  delegate: 'delegação',
 };
 
 const GROUP_LABEL = { race: 'Corrida', task: 'Tarefa' } as const;

@@ -1146,6 +1146,9 @@ ${goal}
         persist();
         return { closed: true };
       }
+      // Os cartões de "Perguntar a…" e "Delegar" são da fase 6: aqui só se aceita a resposta.
+      case 'consult.answer':
+        return {};
       default:
         throw new Error(`QA: comando sem cenário: ${command}`);
     }

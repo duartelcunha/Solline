@@ -379,11 +379,12 @@ export type Orphan = z.infer<typeof Orphan>;
 /**
  * De onde veio a sessão. Só ids, nunca conteúdo: handoff e fork partem de outra sessão (e de um
  * turno), lane e part de uma corrida (a parte, da sessão que lhe entregou o resultado), task de
- * uma tarefa dos Espaços.
+ * uma tarefa dos Espaços. ask e delegate partem da sessão de um agente que perguntou a outro
+ * (a consulta, só de leitura) ou lhe entregou uma tarefa (uma sessão nova numa worktree).
  */
 export const SessionOrigin = z
   .object({
-    kind: z.enum(['handoff', 'fork', 'lane', 'part', 'task']),
+    kind: z.enum(['handoff', 'fork', 'lane', 'part', 'task', 'ask', 'delegate']),
     sessionId: z.string().optional(),
     turnId: z.string().optional(),
     raceId: z.string().optional(),
@@ -407,7 +408,7 @@ export const SessionInfo = z.object({
   workspace: Workspace.optional(),
   /** A corrida a que esta sessão pertence (uma pista). */
   raceId: z.string().optional(),
-  /** De onde veio esta sessão (passagem, bifurcação, pista, parte ou tarefa). */
+  /** De onde veio esta sessão (passagem, bifurcação, pista, parte, tarefa, consulta ou delegação). */
   origin: SessionOrigin.optional(),
   /** A sessão a quem esta passou o testemunho; esta deixa de aceitar mensagens. */
   handedTo: z.string().optional(),

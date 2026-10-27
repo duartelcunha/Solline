@@ -14,6 +14,7 @@ import {
 import { qualityCommandSchemas } from './quality.ts';
 import { handoffCommandSchemas } from './handoff.ts';
 import { forkCommandSchemas } from './fork.ts';
+import { consultCommandSchemas } from './consult.ts';
 import { Race, RaceProposal, RaceStartPayload } from './race.ts';
 import {
   SplitPlanNowPayload,
@@ -99,6 +100,8 @@ export const SessionStartPayload = SessionCreatePayload.extend({
   trusted: z.boolean(),
   checks: CheckList.nullable().optional(),
   setup: SetupSpec.nullable().optional(),
+  /** O título da sessão (uma consulta ou delegação nasce com o dela; a primeira mensagem não o muda). */
+  title: z.string().min(1).max(80).optional(),
   /** always: worktree mesmo com a pasta livre (as pistas de uma corrida). */
   worktree: z.enum(['auto', 'always']).optional(),
   raceId: z.string().optional(),
@@ -360,6 +363,7 @@ export const commandSchemas = {
   ...checksCommandSchemas,
   ...handoffCommandSchemas,
   ...forkCommandSchemas,
+  ...consultCommandSchemas,
 } as const;
 
 /**

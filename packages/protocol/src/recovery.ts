@@ -6,6 +6,7 @@ import { Timeline, ReviewComment } from './review.ts';
 import { Race, RaceLaneSpec } from './race.ts';
 import { SpacesState } from './spaces.ts';
 import { RulesState } from './rules.ts';
+import { ConsultRequest } from './consult.ts';
 
 /** Human inspection only: an allowlist of intent, never an executable replay payload. */
 export const RecoveryOperationDetails = z.object({
@@ -83,6 +84,11 @@ export const EngineSnapshot = z
     spaces: SpacesState.optional(),
     rules: RulesState.optional(),
     operations: z.array(RecoveryOperation),
+    /**
+     * Os pedidos de consulta e delegação à espera agora. Só vive no snapshot de uma interface que
+     * liga (nunca no diário): depois de reiniciar o motor, caem.
+     */
+    consults: z.array(ConsultRequest).optional(),
     durability: z.object({ status: z.enum(['saved', 'failed']), error: z.string().optional() }),
   })
   .strict();

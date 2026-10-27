@@ -14,6 +14,7 @@ const LOCAL_NAMES = new Set([
   'TaskGet',
   'Skill',
 ]);
+const ASK_AGENT = /(^|__|[./:])ask_agent$/;
 const WEBBY = /web|fetch|browse|http|url|curl|wget/i;
 const NETWORK_COMMAND =
   /\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|nc|ncat)\b|https?:\/\//i;
@@ -36,6 +37,8 @@ function commandOf(tool: ToolBlock): string {
  */
 export function toolIsExternal(tool: ToolBlock): boolean {
   const name = tool.name;
+  // A resposta de uma consulta é texto de outro agente, que pode ter lido a web: conta como externa.
+  if (ASK_AGENT.test(name)) return true;
   if (name.startsWith(`mcp__${BRAIN_SERVER_NAME}__`)) return false;
   if (name.startsWith('mcp__')) return true;
   if (tool.category === 'fetch') return true;

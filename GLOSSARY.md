@@ -80,10 +80,19 @@ Os nomes do domínio da Solline, como o código os usa.
   falhar, sai um rascunho mecânico.
 - **Bifurcação**: uma sessão nova a partir de um turno, numa worktree própria, no estado que tinha
   nesse turno. Só em projetos git.
-- **Linhagem**: de que sessão nasceu cada uma (passagem, bifurcação, corrida, parte ou tarefa).
-  Guarda só ids.
+- **Linhagem**: de que sessão nasceu cada uma (passagem, bifurcação, corrida, parte, tarefa, consulta ou
+  delegação). Guarda só ids.
 - **Mapa**: a vista em árvore da linhagem de um projeto. Opcional; a cor é a do fabricante.
 - **Cérebro**: o servidor MCP `solline` que o motor dá aos agentes de cada sessão normal. Em
   processo no Claude; por um shim e um canal local nos outros. Cada chamada sabe de que sessão é.
 - **Regra do projeto**: uma instrução curta, escrita pelo utilizador e guardada na Solline, que chega a
   todos os agentes do projeto no formato de cada um. Com padrões de ficheiro, entra inteira ao tocar neles.
+- **Perguntar a… (`ask_agent`)**: um agente pergunta a outro, com a tua aprovação num cartão. Vai ao
+  fabricante oposto (ou ao mesmo, se o outro não estiver pronto) e a resposta volta ao agente que perguntou.
+- **Delegar (`delegate`)**: um agente entrega uma tarefa a uma sessão nova, com worktree e branch próprios,
+  com a tua aprovação. Quando o primeiro turno acaba, quem delegou recebe na fila um resumo; trazer o
+  trabalho continua a ser teu.
+- **Consulta**: a sessão visível que responde a um «Perguntar a…». Só lê, na mesma pasta, e fica aberta
+  para continuares. Filha de quem perguntou no Mapa.
+- **Cartão de consulta**: o pedido pendente de perguntar ou delegar. Permitir, permitir nesta sessão
+  (por tipo) ou recusar; fechar a sessão ou interromper o turno cancela-o.

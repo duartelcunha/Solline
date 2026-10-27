@@ -16,6 +16,8 @@ import {
   catalogDefinition,
   claudeDefinition,
   codexDefinition,
+  consultTools,
+  contextTool,
   fixedMcpCatalog,
   registryOf,
   sourceShimPath,
@@ -25,6 +27,7 @@ import {
 import { Engine } from '../src/engine.ts';
 import { DurableJournal } from '../src/recovery/journal.ts';
 import type { AgentStartOptions } from '../src/adapters/types.ts';
+import type { BrainTool } from '../src/brain/tool.ts';
 import { hello } from './brain-client.ts';
 import { fakeCodexServer } from './codex-fakes.ts';
 import { fakeAcp } from './fakes/acp-transport.ts';
@@ -44,7 +47,7 @@ afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
 });
 
-function build(options: { node?: string | null } = {}) {
+function build(options: { node?: string | null; tools?: BrainTool[] } = {}) {
   const channel = new BrainChannel({ helloTimeoutMs: 300 });
   const warn = vi.fn();
   const brain = new Brain({
@@ -52,6 +55,7 @@ function build(options: { node?: string | null } = {}) {
     shim: sourceShimPath(),
     node: () => (options.node === undefined ? process.execPath : options.node),
     warn,
+    ...(options.tools ? { tools: options.tools } : {}),
   });
   const claude: ReturnType<typeof fakeQuery>[] = [];
   const codex: ReturnType<typeof fakeCodexServer>[] = [];
@@ -189,6 +193,62 @@ describe('o cérebro nas sessões: Claude, em processo', () => {
     const { capabilities } = await plain.create({ ...base, agent: 'claude' });
     expect(capabilities.features.brain).toBeUndefined();
     await plain.disposeAll();
+  });
+});
+
+describe('perguntar e delegar nos agentes (cartão da Solline, sem pedido do agente por cima)', () => {
+  const stub = { ask: async () => ({}), delegate: async () => ({}) };
+  const tools = () => [contextTool, ...consultTools(stub)];
+
+  it('o Claude corre-as sem pedir ao utilizador no agente: o cartão é da Solline', async () => {
+    const { manager, claude, events } = build({ tools: tools() });
+    await manager.create({ ...base, agent: 'claude' });
+    const options = claude[0]!.options();
+    const ask = (tool: string) =>
+      options.canUseTool!(tool, {}, {
+        signal: new AbortController().signal,
+        toolUseID: 't1',
+        requestId: 'r1',
+      } as Parameters<NonNullable<typeof options.canUseTool>>[2]);
+    for (const name of ['ask_agent', 'delegate'])
+      expect(await ask(`mcp__solline__${name}`)).toEqual({ behavior: 'allow', updatedInput: {} });
+    expect(events.filter((e) => e.type === 'permission.request')).toHaveLength(0);
+  });
+
+  it('o Codex corre-as sem pedir no agente e espera por elas até 15 minutos', async () => {
+    const { manager, codex } = build({ tools: tools() });
+    await manager.create({ ...base, agent: 'codex', mode: 'ask' });
+    expect(codexBrainConfig(codex[0]!)).toMatchObject({
+      tool_timeout_sec: 900,
+      tools: {
+        solline_context: { approval_mode: 'approve' },
+        ask_agent: { approval_mode: 'approve' },
+        delegate: { approval_mode: 'approve' },
+      },
+    });
+  });
+
+  it('uma consulta ou delegação não as recebe: nem no Claude nem no Codex', async () => {
+    const { manager, claude, codex } = build({ tools: tools() });
+    await manager.create({
+      ...base,
+      agent: 'claude',
+      mode: 'plan',
+      origin: { kind: 'ask', sessionId: 'pai' },
+    });
+    const servers = claude[0]!.options().mcpServers as Record<string, { instance: object }>;
+    const registered = (
+      servers.solline!.instance as unknown as { _registeredTools: Record<string, unknown> }
+    )._registeredTools;
+    expect(Object.keys(registered)).toEqual(['solline_context']);
+    await manager.create({
+      ...base,
+      agent: 'codex',
+      mode: 'read-only',
+      origin: { kind: 'delegate', sessionId: 'pai' },
+    });
+    const config = codexBrainConfig(codex[0]!);
+    expect(Object.keys(config!.tools!)).toEqual(['solline_context']);
   });
 });
 

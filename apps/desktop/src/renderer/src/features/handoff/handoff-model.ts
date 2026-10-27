@@ -164,7 +164,8 @@ export interface LineageLine {
 }
 
 /**
- * "veio de <título> ›" no cabeçalho de uma sessão que nasceu de outra (passagem ou bifurcação).
+ * "veio de <título> ›" no cabeçalho de uma sessão que nasceu de outra (passagem, bifurcação,
+ * consulta ou delegação).
  * `parent` é a sessão de origem se ainda estiver aberta; `turnNumber` o número do turno de onde
  * partiu a bifurcação, se se souber.
  */
@@ -173,7 +174,20 @@ export function lineageLine(
   parent: Pick<SessionInfo, 'id' | 'title'> | undefined,
   turnNumber?: number | null,
 ): LineageLine | null {
-  if (!origin || (origin.kind !== 'handoff' && origin.kind !== 'fork')) return null;
+  if (
+    !origin ||
+    (origin.kind !== 'handoff' &&
+      origin.kind !== 'fork' &&
+      origin.kind !== 'ask' &&
+      origin.kind !== 'delegate')
+  )
+    return null;
+  if (origin.kind === 'ask' || origin.kind === 'delegate') {
+    const lead = origin.kind === 'ask' ? 'consulta de' : 'delegada por';
+    return parent
+      ? { lead, title: parent.title, sessionId: parent.id }
+      : { lead: `${lead} uma sessão que já não está aberta`, title: null, sessionId: null };
+  }
   const forked = origin.kind === 'fork';
   const turn = forked && turnNumber ? ` do turno ${turnNumber}` : '';
   if (!parent) {

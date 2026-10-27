@@ -27,6 +27,7 @@ export function mcpServersConfig(
       args: [...server.args],
       env: { ...server.env },
       startup_timeout_sec: 30,
+      ...(server.toolTimeoutSec ? { tool_timeout_sec: server.toolTimeoutSec } : {}),
       default_tools_approval_mode: 'prompt',
       // As ferramentas só de leitura da Solline correm sem pedir; as outras pedem como as de todos.
       ...(server.autoApprove?.length

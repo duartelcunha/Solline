@@ -133,6 +133,23 @@ describe('cabeçalho da sessão', () => {
     );
   });
 
+  it('"consulta de" e "delegada por" nas sessões que um agente abriu', () => {
+    expect(lineageLine({ kind: 'ask', sessionId: 'a' }, { id: 'a', title: 'Plano' })).toEqual({
+      lead: 'consulta de',
+      title: 'Plano',
+      sessionId: 'a',
+    });
+    expect(lineageLine({ kind: 'delegate', sessionId: 'a' }, { id: 'a', title: 'Plano' })).toEqual({
+      lead: 'delegada por',
+      title: 'Plano',
+      sessionId: 'a',
+    });
+    expect(lineageLine({ kind: 'delegate', sessionId: 'x' }, undefined)).toMatchObject({
+      title: null,
+      sessionId: null,
+    });
+  });
+
   it('origem fechada: só se lê, não se abre', () => {
     const line = lineageLine({ kind: 'handoff', sessionId: 'x' }, undefined);
     expect(line).toMatchObject({ title: null, sessionId: null });

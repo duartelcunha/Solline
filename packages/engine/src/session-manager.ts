@@ -61,6 +61,9 @@ import type { RulesManager } from './rules/manager.ts';
 import type { MemoryService } from './memory/manager.ts';
 import { currentTurn } from './memory/external.ts';
 import { renderStart, renderTouched } from './rules/render.ts';
+import type { ConsultManager, ConsultSource } from './consult/manager.ts';
+import { readOnlyModeOf } from './consult/modes.ts';
+import { CONSULT_TOOL_NAMES } from './consult/names.ts';
 
 /** Com um servidor MCP que corre programas ligado, nada de modos sem perguntas. */
 const RESTRICTED_RISKS = new Set(['auto', 'full']);
@@ -79,6 +82,25 @@ function withBrain(capabilities: AgentCapabilities, brain: boolean): AgentCapabi
     ? { ...capabilities, features: { ...capabilities.features, brain: true } }
     : capabilities;
 }
+
+/** Quem nasceu de uma consulta ou delegação não consulta nem delega (profundidade 1). */
+function opensFromConsult(info: Pick<SessionInfo, 'origin'>): boolean {
+  return info.origin?.kind === 'ask' || info.origin?.kind === 'delegate';
+}
+
+/** Uma consulta só lê: nunca muda o modo, não tem checkpoints nem segunda opinião. */
+function isConsult(info: Pick<SessionInfo, 'origin'>): boolean {
+  return info.origin?.kind === 'ask';
+}
+
+/** Nascem com o título que lhes deram (a primeira mensagem é o aviso ou o enquadramento, não o assunto). */
+function keepsTitle(info: Pick<SessionInfo, 'origin'>): boolean {
+  const kind = info.origin?.kind;
+  return kind === 'handoff' || kind === 'fork' || kind === 'ask' || kind === 'delegate';
+}
+
+const READ_ONLY_DENIAL =
+  'Esta é uma consulta só de leitura: não podes alterar nada nem pedir permissões. Lê o que precisares e responde.';
 
 type SessionResult = EngineCommandResult<'session.start'>;
 
@@ -174,6 +196,7 @@ export class SessionManager {
   readonly #registry: AgentRegistry;
   readonly #mcp: McpCatalog | undefined;
   readonly #brain: Brain | undefined;
+  readonly #consult: Pick<ConsultManager, 'interrupted' | 'sessionClosed' | 'stop'> | undefined;
   readonly #rules: RulesManager | undefined;
   readonly #memories: Pick<MemoryService, 'startBlock'> | undefined;
   readonly #checkCwd: (cwd: string) => Promise<void>;
@@ -207,6 +230,8 @@ export class SessionManager {
     mcp?: McpCatalog | undefined;
     /** As ferramentas da Solline para os agentes; sem isto, nenhuma sessão as tem. */
     brain?: Brain | undefined;
+    /** Perguntar a outro agente e delegar: os pedidos pendentes caem com a sessão ou o turno. */
+    consult?: Pick<ConsultManager, 'interrupted' | 'sessionClosed' | 'stop'> | undefined;
     /** As regras do projeto escritas na Solline; sem isto, nenhuma sessão as recebe. */
     rules?: RulesManager | undefined;
     /** A memória partilhada: o índice das aprovadas segue no arranque, ao lado das regras. */
@@ -231,6 +256,7 @@ export class SessionManager {
     this.#registry = options.registry;
     this.#mcp = options.mcp;
     this.#brain = options.brain;
+    this.#consult = options.consult;
     this.#rules = options.rules;
     this.#memories = options.memories;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
@@ -257,7 +283,7 @@ export class SessionManager {
      * Bifurcação: a sessão nasce numa worktree já preparada (com os ficheiros do checkpoint) e,
      * com `point`, o agente continua a conversa desse ponto em vez de começar do zero.
      */
-    forked?: { worktree: Worktree; point?: string | undefined },
+    forked?: { worktree: Worktree; point?: string | undefined; named?: boolean },
   ): Promise<SessionResult> {
     const definition = this.#registry.get(payload.agent);
     if (!definition) throw new Error(`Agente desconhecido: ${payload.agent}`);
@@ -269,6 +295,15 @@ export class SessionManager {
     if (payload.mode && known.length > 0 && !known.some((m) => m.id === payload.mode)) {
       throw new Error(`Modo desconhecido para este agente: ${payload.mode}`);
     }
+    const asking = isConsult({ origin: payload.origin });
+    if (
+      asking &&
+      payload.mode &&
+      !definition.staticModes.some(
+        (m) => m.id === payload.mode && (m.risk === 'read-only' || m.risk === 'plan'),
+      )
+    )
+      throw new Error('Uma consulta só abre num modo de leitura');
     const mcp = await this.#mcpFor(definition, payload.mcpServerIds ?? []);
     const restricted = mcp.some((s) => s.executesCode);
     const risk = known.find((m) => m.id === payload.mode)?.risk;
@@ -306,8 +341,8 @@ export class SessionManager {
       agent: payload.agent,
       cwd: place.cwd,
       workspace: place.workspace,
-      // O título vem da primeira mensagem, na interface.
-      title: 'Nova sessão',
+      // O título vem da primeira mensagem, na interface (menos o de quem já nasce com o dele).
+      title: payload.title ?? 'Nova sessão',
       state: 'starting',
       settings: {
         model: payload.model ?? null,
@@ -326,16 +361,18 @@ export class SessionManager {
       context: undefined,
       intro: undefined,
       rules: { delivered: new Set(), scanned: new Set() },
-      quality: this.#hasReviewer
-        ? new SessionQuality({
-            reviewer: this.#reviewer,
-            enabled: true,
-            emit: (quality) =>
-              this.#emit({ kind: 'event', type: 'session.quality', sessionId: info.id, quality }),
-          })
-        : undefined,
+      // Uma consulta só lê, na pasta de outra sessão: não tem checkpoints nem nada para rever.
+      quality:
+        this.#hasReviewer && !asking
+          ? new SessionQuality({
+              reviewer: this.#reviewer,
+              enabled: true,
+              emit: (quality) =>
+                this.#emit({ kind: 'event', type: 'session.quality', sessionId: info.id, quality }),
+            })
+          : undefined,
       worktree: place.worktree,
-      named: false,
+      named: forked?.named === true,
       naming: undefined,
       bringing: undefined,
       preparing: undefined,
@@ -368,7 +405,9 @@ export class SessionManager {
       void this.#prepare(info.id, payload.cwd, place.worktree.cwd);
     }
     // O primeiro checkpoint (o disco antes de tudo) faz-se por trás: a sessão já está pronta.
-    const checkpoints = this.#store?.open(info.id, info.cwd, () => this.#rewindKind(info.id));
+    const checkpoints = asking
+      ? undefined
+      : this.#store?.open(info.id, info.cwd, () => this.#rewindKind(info.id));
     memory.checkpoints = checkpoints;
     void checkpoints?.ready.then(() => this.#emitTimeline(info.id));
     return result;
@@ -720,12 +759,15 @@ export class SessionManager {
   interrupt(sessionId: string): Promise<void> {
     const entry = this.#get(sessionId);
     this.#memory.get(sessionId)?.cycle.interrupted();
+    // Os pedidos de consulta ou delegação deste turno caem, e as consultas que abriu param.
+    this.#consult?.interrupted(sessionId);
     return entry.adapter.interrupt();
   }
 
   /** Modo, modelo e effort só passam se o agente os anunciou nas capacidades. */
   async setMode(sessionId: string, mode: string): Promise<void> {
-    const { adapter, mcp } = this.#get(sessionId);
+    const { adapter, mcp, info } = this.#get(sessionId);
+    if (isConsult(info)) throw new Error('Esta é uma consulta só de leitura: o modo não muda.');
     const modes = restrict(
       adapter.capabilities(),
       mcp.some((s) => s.executesCode),
@@ -768,6 +810,7 @@ export class SessionManager {
     const memories = [...this.#memory.values()];
     this.#sessions.clear();
     this.#memory.clear();
+    this.#consult?.stop();
     for (const entry of entries) entry.brain?.revoke();
     if (!alreadyStopped) await Promise.all(entries.map((entry) => entry.adapter.close()));
     for (const m of memories) m.quality?.dispose();
@@ -1014,6 +1057,7 @@ export class SessionManager {
       memory.quality?.dispose();
     }
     for (const checks of this.#checks.values()) checks.dispose();
+    this.#consult?.stop();
     for (const entry of this.#sessions.values()) entry.brain?.revoke();
     await Promise.all([...this.#sessions.values()].map((entry) => entry.adapter.close()));
   }
@@ -1463,6 +1507,7 @@ export class SessionManager {
     memory.cycle.clear();
     this.#sessions.delete(sessionId);
     this.#memory.delete(sessionId);
+    this.#consult?.sessionClosed(sessionId);
     for (const other of heirs) {
       const to = onward ?? (other === heir ? null : (heir?.info.id ?? null));
       this.#setHandedTo(other.info.id, to === other.info.id ? null : to);
@@ -2112,6 +2157,8 @@ export class SessionManager {
         describe: () => ({ title: info.title, folder: basename(info.cwd), cwd: info.cwd }),
         // O que o turno leu fora da pasta (web, servidores de terceiros) vê-se na conversa guardada.
         turn: () => currentTurn(this.#memory.get(info.id)?.turns ?? []),
+        // A profundidade é 1: quem nasceu de uma consulta ou delegação não consulta nem delega.
+        ...(opensFromConsult(info) ? { withhold: CONSULT_TOOL_NAMES } : {}),
       },
       definition.brain,
     );
@@ -2298,6 +2345,16 @@ export class SessionManager {
           throw new Error('Este agente não tem um modo que pergunte antes; tira o servidor MCP');
         }
       }
+      // Uma consulta só abre num modo de leitura que o agente tenha: sem ele, não responde.
+      if (isConsult(info)) {
+        const safe = readOnlyModeOf(modes, info.settings.mode);
+        if (!safe)
+          throw new Error('Este agente não tem um modo só de leitura: não responde a consultas');
+        if (safe.id !== info.settings.mode) {
+          await adapter.setMode(safe.id);
+          info.settings = { ...info.settings, mode: safe.id };
+        }
+      }
       return { session: { ...info }, capabilities: visible };
     } catch (error) {
       brain?.revoke();
@@ -2342,6 +2399,18 @@ export class SessionManager {
         });
       },
       ask: (turnId, request) => {
+        // Numa consulta não há nada a decidir: tudo o que pede permissão (escrever, correr comandos,
+        // sair do planeamento) é recusado, sem cartão. As perguntas ao utilizador seguem como sempre.
+        if (isConsult(info) && request.kind !== 'question') {
+          // O adaptador só regista o pedido depois de nos avisar: a resposta vai logo a seguir.
+          queueMicrotask(() => {
+            adapter()?.answerPermission(request.id, {
+              decision: 'deny',
+              message: READ_ONLY_DENIAL,
+            });
+          });
+          return;
+        }
         emit({ kind: 'event', type: 'permission.request', sessionId: info.id, turnId, request });
       },
     };
@@ -2361,8 +2430,7 @@ export class SessionManager {
         delta.type === 'turn.start' &&
         delta.turn.role === 'user' &&
         memory.turns.length === 0 &&
-        info.origin?.kind !== 'handoff' &&
-        info.origin?.kind !== 'fork'
+        !keepsTitle(info)
       ) {
         const text = delta.turn.blocks.find((block) => block.kind === 'text');
         if (text?.kind === 'text')
@@ -2370,6 +2438,25 @@ export class SessionManager {
       }
       if (memory) memory.turns = applyDelta(memory.turns, delta);
       this.#emit({ kind: 'event', type: 'session.event', sessionId: info.id, delta });
+    };
+  }
+
+  /** O que as consultas e delegações precisam de saber de uma sessão aberta (undefined: já não existe). */
+  consultSource(sessionId: string): ConsultSource | undefined {
+    const entry = this.#sessions.get(sessionId);
+    if (!entry) return undefined;
+    const { info } = entry;
+    return {
+      id: info.id,
+      projectId: info.projectId,
+      agent: info.agent,
+      cwd: info.cwd,
+      trusted: entry.trusted,
+      title: info.title,
+      mode: info.settings.mode,
+      origin: info.origin,
+      workspace: info.workspace,
+      handedTo: info.handedTo,
     };
   }
 

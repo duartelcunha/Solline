@@ -25,6 +25,23 @@ describe('lineageTree', () => {
     });
   });
 
+  it('as consultas e as delegações são filhas de quem perguntou ou delegou', () => {
+    const tree = lineageTree([
+      session('a'),
+      session('q', { kind: 'ask', sessionId: 'a', turnId: 't1' }),
+      session('d', { kind: 'delegate', sessionId: 'a', turnId: 't1' }),
+      session('orfa', { kind: 'ask', sessionId: 'fechada' }),
+    ]);
+    expect(tree.roots).toEqual(['a', 'orfa']);
+    expect(tree.children.a).toEqual(['q', 'd']);
+    expect(tree.edges).toEqual([
+      { from: 'a', to: 'q', kind: 'ask', turnId: 't1' },
+      { from: 'a', to: 'd', kind: 'delegate', turnId: 't1' },
+    ]);
+    // A consulta cuja origem fechou fica sem pai, com o que a origem dizia.
+    expect(tree.detached).toEqual([{ id: 'orfa', kind: 'ask', parentId: 'fechada' }]);
+  });
+
   it('sessões sem origem são raízes, pela ordem da lista, com a lista de filhos vazia', () => {
     const tree = lineageTree([session('b'), session('a')]);
     expect(tree.roots).toEqual(['b', 'a']);

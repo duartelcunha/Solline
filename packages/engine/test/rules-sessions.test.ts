@@ -580,6 +580,8 @@ describe('ferramentas das regras: a identidade vem do motor', () => {
       servers.solline!.instance as unknown as { _registeredTools: Record<string, unknown> }
     )._registeredTools;
     expect(Object.keys(tools).sort()).toEqual([
+      'ask_agent',
+      'delegate',
       'list_rules',
       'propose_memory',
       'read_memory',
