@@ -6,6 +6,7 @@ import { actions, flushDrafts, useApp, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { SettingsPills } from './pills.tsx';
 import { RacePill } from '../race/race-pill.tsx';
+import { handedBanner, handedReason } from '../handoff/handoff-model.ts';
 import { useSplitFlow } from '../split/split-flow.tsx';
 import type { RaceLaneSpec } from '@solline/protocol';
 
@@ -114,8 +115,17 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   }, []);
 
   const checks = useSession(sessionId, (s) => s.checks);
+  // Passou o testemunho: só se lê. O compositor diz porquê em vez de falhar ao enviar.
+  const handedTo = useSession(sessionId, (s) => s.info.handedTo);
+  const handedTarget = useApp((s) =>
+    handedTo && s.sessionIds.includes(handedTo) ? handedTo : undefined,
+  );
+  const handedTitle = useSession(handedTarget ?? null, (s) => s.info.title);
+  const handed = handedReason(
+    handedBanner(handedTo, handedTarget ? { id: handedTarget, title: handedTitle } : undefined),
+  );
   const busy = state === 'running' || state === 'needs-you';
-  const offline = engineOffline || state === 'starting' || state === 'error';
+  const offline = engineOffline || state === 'starting' || state === 'error' || handed !== null;
   const hasText = text.trim().length > 0;
   const canSend = !offline && hasText && !sending;
   const canSteer = busy && features?.steer === true;
@@ -203,15 +213,17 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
               }
             }}
             placeholder={
-              offline
-                ? 'A sessão não está ligada'
-                : state === 'needs-you'
-                  ? `O ${agentLabel} aguarda a tua decisão · podes deixar uma mensagem na fila`
-                  : busy
-                    ? canSteer
-                      ? `O ${agentLabel} está a trabalhar · Enter põe na fila, Ctrl+Enter guia agora`
-                      : `O ${agentLabel} está a trabalhar · Enter põe na fila`
-                    : 'Escreve uma mensagem'
+              handed
+                ? handed
+                : offline
+                  ? 'A sessão não está ligada'
+                  : state === 'needs-you'
+                    ? `O ${agentLabel} aguarda a tua decisão · podes deixar uma mensagem na fila`
+                    : busy
+                      ? canSteer
+                        ? `O ${agentLabel} está a trabalhar · Enter põe na fila, Ctrl+Enter guia agora`
+                        : `O ${agentLabel} está a trabalhar · Enter põe na fila`
+                      : 'Escreve uma mensagem'
             }
             aria-label="Mensagem"
             data-testid="composer-input"

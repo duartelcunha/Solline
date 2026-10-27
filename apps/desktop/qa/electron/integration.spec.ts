@@ -915,6 +915,7 @@ test('conflito ao trazer preserva projeto e branch recuperável', async ({ qa })
   await page.getByTestId('workspace-chip').click();
   await expect(page.getByTestId('workspace-bring')).toBeEnabled();
   await page.getByTestId('workspace-bring').click();
+  await page.getByTestId('bring-confirm').click();
   await expect(page.getByTestId('workspace-chip')).toHaveAttribute('data-state', 'closed');
   await expect(page.getByTestId('workspace-bring')).toBeHidden();
   await page.getByTestId('workspace-chip').click();

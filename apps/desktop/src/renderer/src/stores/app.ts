@@ -80,6 +80,12 @@ interface AppState {
     dropQueue?: boolean;
     worktree?: 'bring' | 'keep' | 'discard';
   } | null;
+  /** A sessão cujo diálogo "Passar a…" está aberto. */
+  handoffFor: string | null;
+  /** A sessão cujo "Trazer" espera pela confirmação (com a revisão antes de trazer). */
+  bringFor: string | null;
+  /** O Mapa das sessões ligadas está aberto. */
+  mapOpen: boolean;
   /** A vista principal: a mesa com todas as sessões, ou a conversa da sessão ativa. */
   view: 'desk' | 'session' | 'race' | 'spaces';
   spaceProjectId: string | null;
@@ -111,6 +117,9 @@ export const useApp = create<AppState>(() => ({
   checkingAgents: false,
   loginRequests: [],
   closing: null,
+  handoffFor: null,
+  bringFor: null,
+  mapOpen: false,
   view: 'desk',
   spaceProjectId: null,
   orphans: [],
@@ -982,6 +991,24 @@ export const actions = {
     }
   },
 
+  /**
+   * "Trazer": abre a confirmação e, se há revisor, pede já uma revisão de toda a sessão (antes de
+   * trazer). O resultado é só informação: trazer nunca espera por ele.
+   */
+  askBring(sessionId: string): void {
+    useApp.setState({ bringFor: sessionId });
+    const quality = sessionStores.get(sessionId)?.getState().quality;
+    if (quality?.available && quality.enabled && quality.review.state !== 'running') {
+      void request('quality.review', { sessionId, trigger: 'bring', scope: 'session' }).catch(
+        () => undefined,
+      );
+    }
+  },
+
+  closeBring(): void {
+    useApp.setState({ bringFor: null });
+  },
+
   /** Pede ao agente para resolver os conflitos do último "Trazer" no seu branch. */
   async resolveConflicts(sessionId: string): Promise<void> {
     const store = sessionStores.get(sessionId);
@@ -1362,6 +1389,22 @@ export const actions = {
     }
   },
 
+  openHandoff(sessionId: string): void {
+    useApp.setState({ handoffFor: sessionId });
+  },
+
+  closeHandoff(): void {
+    useApp.setState({ handoffFor: null });
+  },
+
+  openMap(): void {
+    useApp.setState({ mapOpen: true });
+  },
+
+  closeMap(): void {
+    useApp.setState({ mapOpen: false });
+  },
+
   toggleReview(open?: boolean): void {
     useApp.setState((s) => ({ reviewOpen: open ?? !s.reviewOpen }));
   },
@@ -1427,6 +1470,18 @@ export const actions = {
       await request('quality.review', { sessionId });
     } catch (error) {
       setActionError(sessionId, error);
+    }
+  },
+
+  /** Uma segunda opinião agora, a pedido: do último turno ou de toda a sessão. */
+  async secondOpinion(sessionId: string, scope: 'turn' | 'session'): Promise<boolean> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('quality.review', { sessionId, trigger: 'manual', scope });
+      return true;
+    } catch (error) {
+      setActionError(sessionId, error);
+      return false;
     }
   },
 

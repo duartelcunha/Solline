@@ -10,6 +10,10 @@ import { UncertainOperations } from './features/conversation/uncertain-operation
 import { QualityChip } from './features/quality/quality.tsx';
 import { ChecksRow } from './features/quality/checks.tsx';
 import { CloseDialog, WorkspaceChip } from './features/workspace/workspace.tsx';
+import { BringDialog } from './features/workspace/bring-dialog.tsx';
+import { HandoffDialog } from './features/handoff/handoff-dialog.tsx';
+import { SessionMenu } from './features/handoff/pass-to.tsx';
+import { HandedBanner, SessionOriginLink } from './features/handoff/session-lineage.tsx';
 import { Desk, useNeedsYouCount } from './features/desk/desk.tsx';
 import { RaceTitle, RaceView } from './features/race/race.tsx';
 import { IconSwap } from '@solline/ui/icon-swap';
@@ -141,10 +145,13 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
         >
           {title}
         </h1>
-        <span className="session-state-chip" data-state={state}>
-          <SessionMark sessionId={sessionId} size={12} />
-          {label}
-        </span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="session-state-chip shrink-0" data-state={state}>
+            <SessionMark sessionId={sessionId} size={12} />
+            {label}
+          </span>
+          <SessionOriginLink sessionId={sessionId} />
+        </div>
       </div>
     </div>
   );
@@ -192,6 +199,7 @@ function SessionStatus({ sessionId }: { sessionId: string }) {
       </div>
       <Divider />
       <ReviewButton sessionId={sessionId} />
+      <SessionMenu sessionId={sessionId} />
     </div>
   );
 }
@@ -418,6 +426,8 @@ export function App() {
         />
         <AgentsPanel />
         <CloseDialog />
+        <BringDialog />
+        <HandoffDialog />
 
         <main tabIndex={-1} className="flex min-h-0 min-w-0 flex-col">
           <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[12rem] pl-5">
@@ -437,6 +447,9 @@ export function App() {
 
           <NoticeBar notice={notice} />
           {activeSessionId ? <TaskContext sessionId={activeSessionId} /> : null}
+          {activeSessionId ? (
+            <HandedBanner key={activeSessionId} sessionId={activeSessionId} />
+          ) : null}
           <UncertainOperations />
 
           {showingSpaces ? (

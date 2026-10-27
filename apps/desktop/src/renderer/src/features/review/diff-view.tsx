@@ -33,6 +33,8 @@ interface Props {
   onComment: (at: { path: string; side: 'old' | 'new'; line: number }, text: string) => void;
   /** Devolve se correu bem. */
   onAction: (action: ReviewAction, hunk?: Hunk) => Promise<boolean>;
+  /** A sessão a que os achados pertencem (para os corrigir ou dispensar). */
+  sessionId?: string;
   /** O que o revisor achou neste ficheiro. */
   findings?: readonly Finding[];
   picked?: ReadonlySet<string>;
@@ -53,6 +55,7 @@ export function FileDiffView({
   onEditDraft,
   onComment,
   onAction,
+  sessionId,
   findings = [],
   picked,
   onPick,
@@ -87,6 +90,7 @@ export function FileDiffView({
   const finding = (f: Finding) => (
     <FindingRow
       key={f.id}
+      sessionId={sessionId ?? ''}
       finding={f}
       picked={picked?.has(f.id) ?? false}
       onPick={(value) => onPick?.(f.id, value)}

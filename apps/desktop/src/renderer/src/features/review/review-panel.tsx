@@ -22,7 +22,9 @@ import { usePresence } from '@solline/ui/react';
 import { scrollIntoViewSmooth, useDragScroll } from '@solline/ui/scroll';
 import { MenuShell, triggerClass } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { FindingRow } from '../quality/quality.tsx';
+import { FindingRow, FoldedFindings, QualityStrip } from '../quality/quality.tsx';
+import { groupFindings, openFindings } from '../quality/findings-model.ts';
+import { PassToButton } from '../handoff/pass-to.tsx';
 import { commentKey, FileDiffView, type CommentKey } from './diff-view.tsx';
 
 const NO_FINDINGS: readonly Finding[] = [];
@@ -105,10 +107,9 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   const [celebrate, setCelebrate] = useState(false);
   const allFindings = useSession(sessionId, (s) => s.quality?.review.findings ?? NO_FINDINGS);
   // Os descartados deixam de aparecer (continuam no motor, para as contas).
-  const findings = useMemo(
-    () => allFindings.filter((f) => f.status !== 'dismissed'),
-    [allFindings],
-  );
+  const findings = useMemo(() => openFindings(allFindings), [allFindings]);
+  // À vista: até 5, os mais graves e seguros; o resto fica dobrado.
+  const { shown, folded } = useMemo(() => groupFindings(findings), [findings]);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [fixing, setFixing] = useState(false);
   // Achados novos (outro turno) recomeçam a escolha.
@@ -217,7 +218,11 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
 
   const pending = timeline.pending;
   const shownPaths = new Set(files?.map((f) => f.path) ?? []);
-  const elsewhere = files === null ? [] : findings.filter((f) => !shownPaths.has(f.path));
+  const elsewhere = files === null ? [] : shown.filter((f) => !shownPaths.has(f.path));
+  const prefixed = (f: Finding): Finding => ({
+    ...f,
+    title: `${f.path}${f.line ? `:${f.line}` : ''} · ${f.title}`,
+  });
   const total = files?.reduce(
     (acc, f) => ({ add: acc.add + f.additions, del: acc.del + f.deletions }),
     { add: 0, del: 0 },
@@ -299,6 +304,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               </button>
             </>
           ) : null}
+          <PassToButton sessionId={sessionId} />
           {/* Fechar fica à parte, para não se confundir com o "Rejeitar" ao lado. */}
           <span aria-hidden className="mx-2 h-4 w-px bg-line" />
           <button
@@ -313,6 +319,8 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
         </div>
       </header>
 
+      <QualityStrip sessionId={sessionId} />
+
       <div
         ref={filesBox}
         className="scroll-fade-y min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
@@ -323,13 +331,25 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
             {elsewhere.map((f) => (
               <FindingRow
                 key={f.id}
-                finding={{ ...f, title: `${f.path}${f.line ? `:${f.line}` : ''} · ${f.title}` }}
+                sessionId={sessionId}
+                finding={prefixed(f)}
                 picked={picked.has(f.id)}
                 onPick={(value) => pick(f.id, value)}
               />
             ))}
           </section>
         ) : null}
+        <FoldedFindings count={folded.length}>
+          {folded.map((f) => (
+            <FindingRow
+              key={f.id}
+              sessionId={sessionId}
+              finding={prefixed(f)}
+              picked={picked.has(f.id)}
+              onPick={(value) => pick(f.id, value)}
+            />
+          ))}
+        </FoldedFindings>
         {files === null ? null : files.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <span
@@ -355,7 +375,8 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
               onAction={(action, hunk) =>
                 act(action, { path: file.path, ...(hunk ? { hunk } : {}) })
               }
-              findings={findings.filter((f) => f.path === file.path)}
+              sessionId={sessionId}
+              findings={shown.filter((f) => f.path === file.path)}
               picked={picked}
               onPick={pick}
             />

@@ -646,6 +646,8 @@ test('uma segunda sessão trabalha na sua worktree e traz por merge (SDK real)',
   await shot(page, 'worktree-chip');
   await chip.click();
   await page.getByTestId('workspace-bring').click();
+  // Trazer pede confirmação (com a revisão antes de trazer, só informativa).
+  await page.getByTestId('bring-confirm').click();
   await expect
     .poll(() => readFile(join(project, 'wt.txt'), 'utf8').catch(() => ''), { timeout: 30_000 })
     .toContain('hello');

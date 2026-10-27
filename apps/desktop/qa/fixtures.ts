@@ -262,6 +262,105 @@ export const qualityFindings: Quality = {
   },
   stats: { fixed: 0, dismissed: 0, total: 2 },
 };
+/**
+ * Uma revisão de outro fabricante (Codex a rever o Claude): 3 achados à vista e 3 dobrados
+ * (um de ruído e dois com pouca confiança), com os contadores de uma sessão onde já se corrigiu
+ * e dispensou.
+ */
+export const qualityFolded: Quality = {
+  available: true,
+  enabled: true,
+  review: {
+    state: 'done',
+    turnId: 'user-1',
+    error: null,
+    trigger: 'turn',
+    reviewer: { vendor: 'codex', model: 'gpt-5.5', sameVendor: false },
+    findings: [
+      {
+        id: 'finding-1',
+        path: 'src/navigation.ts',
+        line: 1,
+        severity: 'bug',
+        priority: 0,
+        confidence: 0.92,
+        status: 'open',
+        title: 'Preservar a sessão anterior',
+        detail: 'A seleção deve sobreviver a uma atualização em segundo plano.',
+      },
+      {
+        id: 'finding-2',
+        path: 'src/navigation.ts',
+        line: null,
+        severity: 'risk',
+        priority: 1,
+        confidence: 0.8,
+        status: 'open',
+        title: 'Validar a lista vazia',
+        detail: 'Uma lista vazia deve apresentar o estado inicial.',
+      },
+      {
+        id: 'finding-3',
+        path: 'src/shortcuts.ts',
+        line: 12,
+        severity: 'risk',
+        priority: 2,
+        confidence: 0.74,
+        status: 'open',
+        title: 'Escape fecha duas camadas',
+        detail: 'Com um menu aberto dentro de um diálogo, a tecla fecha as duas.',
+      },
+      {
+        id: 'finding-4',
+        path: 'src/navigation.ts',
+        line: 1,
+        severity: 'slop',
+        priority: 3,
+        confidence: 0.9,
+        status: 'open',
+        title: 'Nome pouco claro para a variável previous',
+        detail: 'Um nome como lastActive diz melhor o que guarda.',
+      },
+      {
+        id: 'finding-5',
+        path: 'src/navigation.ts',
+        line: null,
+        severity: 'risk',
+        priority: 2,
+        confidence: 0.45,
+        status: 'open',
+        title: 'Possível corrida entre dois eventos de foco',
+        detail: 'Só acontece se os eventos chegarem pela ordem inversa.',
+      },
+      {
+        id: 'finding-6',
+        path: 'src/shortcuts.ts',
+        line: null,
+        severity: 'bug',
+        priority: 1,
+        confidence: 0.55,
+        status: 'open',
+        title: 'O atalho pode colidir com o do sistema',
+        detail: 'Depende da disposição do teclado.',
+      },
+    ],
+  },
+  stats: { fixed: 3, dismissed: 1, total: 10 },
+};
+/** Sem achados e do mesmo fabricante: um bom resultado, com a nota de que vale menos. */
+export const qualityClean: Quality = {
+  available: true,
+  enabled: true,
+  review: {
+    state: 'done',
+    turnId: 'user-1',
+    error: null,
+    findings: [],
+    trigger: 'manual',
+    reviewer: { vendor: 'claude', model: 'sonnet', sameVendor: true },
+  },
+  stats: { fixed: 0, dismissed: 0, total: 0 },
+};
 export const longModelLabel =
   'Modelo de investigação para contextos extensos e decisões de navegação entre vários projetos';
 export const longModeLabel =
@@ -289,6 +388,10 @@ export const scenes = [
   'tool-error',
   'quality-findings',
   'quality-error',
+  'quality-folded',
+  'quality-clean',
+  'handed-off',
+  'lineage',
   'unavailable-mcp',
   'long-controls',
   'long-tool',

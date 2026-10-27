@@ -1,9 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { History, RotateCcw, Undo2 } from 'lucide-react';
+import * as Menu from '@radix-ui/react-dropdown-menu';
+import { GitFork, History, RotateCcw, Undo2 } from 'lucide-react';
 import type { Checkpoint, Timeline as TimelineData } from '@solline/protocol';
 import { SPRING, project, rubberband, shouldAnimate } from '@solline/ui/motion';
 import { useReducedMotion, useSpring } from '@solline/ui/react';
+import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useSession } from '../../stores/app.ts';
+import { forkGate, forkTargets, forkTurnAtStop } from './fork-model.ts';
 
 /**
  * A linha do tempo da sessão: um ponto antes de cada turno e o "agora" no fim. Arrasta-se a
@@ -35,6 +38,52 @@ export function Timeline({ sessionId }: { sessionId: string }) {
   const state = useSession(sessionId, (s) => s.info.state);
   if (!timeline?.available || timeline.checkpoints.length === 0) return null;
   return <TimelineTrack sessionId={sessionId} timeline={timeline} busy={state !== 'idle'} />;
+}
+
+/** "Bifurcar daqui": uma sessão nova a partir do fim de um turno, sem mexer nesta. */
+function ForkMenu({
+  sessionId,
+  timeline,
+  busy,
+}: {
+  sessionId: string;
+  timeline: TimelineData;
+  busy: boolean;
+}) {
+  const workspace = useSession(sessionId, (s) => s.info.workspace);
+  const overall = forkGate({ timeline, workspace, busy });
+  return (
+    <MenuShell
+      title="Bifurcar daqui"
+      side="top"
+      align="end"
+      trigger={
+        <Menu.Trigger
+          disabled={!overall.enabled}
+          title={overall.reason ?? 'Abrir uma sessão nova a partir de um turno'}
+          data-testid="fork-menu"
+          className="sl-press inline-flex h-7 shrink-0 items-center gap-1 rounded-control px-2 text-[12px] text-muted outline-none hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] disabled:opacity-50 data-[state=open]:bg-surface-hover data-[state=open]:text-fg"
+        >
+          <GitFork size={13} strokeWidth={1.9} aria-hidden /> Bifurcar
+        </Menu.Trigger>
+      }
+    >
+      {forkTargets(timeline.checkpoints).map((target) => {
+        const gate = forkGate({ timeline, workspace, busy, checkpoint: target });
+        return (
+          <ActionItem
+            key={target.turnId}
+            title={`Bifurcar do turno ${target.index}`}
+            description={gate.reason ?? target.title}
+            icon={<GitFork size={14} />}
+            disabled={!gate.enabled}
+            onSelect={() => void actions.forkSession(sessionId, target.turnId)}
+            testId="fork-turn"
+          />
+        );
+      })}
+    </MenuShell>
+  );
 }
 
 function TimelineTrack({
@@ -215,6 +264,10 @@ function TimelineTrack({
     stop >= stops ? 'Agora' : `Antes do turno ${checkpoints[stop]?.index ?? stop + 1}`;
   const max = Math.max(1, ...checkpoints.map(changes));
   const target = picked === null ? undefined : checkpoints[picked];
+  const workspace = useSession(sessionId, (s) => s.info.workspace);
+  // "Antes do turno N" é o fim do turno N-1: é daí que parte a bifurcação.
+  const forkAt = picked === null ? undefined : forkTurnAtStop(checkpoints, picked);
+  const forkAtGate = forkGate({ timeline, workspace, busy, checkpoint: forkAt });
 
   return (
     <div className="mb-2.5" data-testid="timeline" onKeyDown={onEscape}>
@@ -303,6 +356,7 @@ function TimelineTrack({
         <span className="shrink-0 truncate text-[11.5px] text-muted tabular-nums">
           {label(position)}
         </span>
+        <ForkMenu sessionId={sessionId} timeline={timeline} busy={busy} />
       </div>
 
       {timeline.rewoundTo && picked === null ? (
@@ -365,6 +419,20 @@ function TimelineTrack({
             >
               Só conversa
             </button>
+            {forkAt ? (
+              <button
+                type="button"
+                disabled={working || !forkAtGate.enabled}
+                onClick={() => void actions.forkSession(sessionId, forkAt.turnId)}
+                title={
+                  forkAtGate.reason ?? 'Abre uma sessão nova com os ficheiros e a conversa até aqui'
+                }
+                className="sl-press inline-flex h-7 items-center gap-1 rounded-control px-2 text-[12px] text-muted hover:bg-surface-hover hover:text-fg disabled:opacity-60"
+                data-testid="fork-here"
+              >
+                <GitFork size={13} /> Bifurcar daqui
+              </button>
+            ) : null}
             {/* Cancelar também se clica: a tecla é só o atalho. */}
             <button
               type="button"

@@ -131,7 +131,7 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
         }
         icon={<GitMerge size={14} />}
         disabled={busy || stats.files === 0}
-        onSelect={() => void actions.bring(sessionId)}
+        onSelect={() => actions.askBring(sessionId)}
         testId="workspace-bring"
       />
       {port !== undefined ? (

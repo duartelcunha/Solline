@@ -16,6 +16,7 @@ import {
   type CommandResult,
   type Quality,
   type SessionInfo,
+  type Turn,
 } from '@solline/protocol';
 import type { SollineApi, UiRecoveryState, WindowState, Theme } from '@solline/protocol/bridge';
 import {
@@ -34,7 +35,9 @@ import {
   multipleQuestions,
   permission,
   project as initialProject,
+  qualityClean,
   qualityFindings,
+  qualityFolded,
   targetedReview,
   timeline as initialTimeline,
   type Scene,
@@ -106,17 +109,21 @@ export function installBridge(scene: Scene) {
   const quality: Quality =
     scene === 'quality-findings'
       ? structuredClone(qualityFindings)
-      : {
-          available: true,
-          enabled: true,
-          review: {
-            state: scene === 'quality-error' ? 'error' : 'done',
-            turnId: 'user-1',
-            findings: [],
-            error: scene === 'quality-error' ? 'O revisor perdeu a ligação.' : null,
-          },
-          stats: { fixed: 0, dismissed: 0, total: 0 },
-        };
+      : scene === 'quality-folded'
+        ? structuredClone(qualityFolded)
+        : scene === 'quality-clean'
+          ? structuredClone(qualityClean)
+          : {
+              available: true,
+              enabled: true,
+              review: {
+                state: scene === 'quality-error' ? 'error' : 'done',
+                turnId: 'user-1',
+                findings: [],
+                error: scene === 'quality-error' ? 'O revisor perdeu a ligação.' : null,
+              },
+              stats: { fixed: 0, dismissed: 0, total: 0 },
+            };
   const qualities = new Map<string, typeof quality>();
   function snapshot(): EngineSnapshot {
     return EngineSnapshot.parse({
@@ -180,6 +187,123 @@ export function installBridge(scene: Scene) {
         files: FileDiff.array().parse(review.files),
       });
     }
+  }
+  /** Sessões já abertas à partida (para o Mapa e a passagem de testemunho). */
+  function addSession(session: SessionInfo, turns: Turn[] = [], checkpointIndex = 1) {
+    const lineTimeline = {
+      ...structuredClone(initialTimeline),
+      checkpoints: [
+        {
+          ...required(initialTimeline.checkpoints[0], 'checkpoint'),
+          index: checkpointIndex,
+        },
+      ],
+    };
+    sessions.set(session.id, session);
+    canonical.set(session.id, {
+      session,
+      capabilities: structuredClone(capabilities),
+      turns,
+      usage: { costUsd: null, models: [], context: null, tokens: null },
+      queue: { items: [], paused: false },
+      timeline: lineTimeline,
+      quality: structuredClone(quality),
+      checks: null,
+      conflicts: null,
+      interrupted: false,
+      error: null,
+    });
+    qualities.set(session.id, structuredClone(quality));
+    queues.set(session.id, { items: [], paused: false });
+    reviews.set(session.id, { timeline: lineTimeline, files: [structuredClone(diff)] });
+  }
+  const say = (id: string, text: string): Turn[] => [
+    {
+      id: 'user-1',
+      role: 'user',
+      blocks: [{ kind: 'text', id: `${id}-p`, text, parentToolId: null }],
+    },
+    {
+      id: 'answer-1',
+      role: 'assistant',
+      blocks: [{ kind: 'text', id: `${id}-a`, text: 'Feito.', parentToolId: null }],
+    },
+  ];
+  const base = (id: string, title: string, agent = 'claude'): SessionInfo => ({
+    id,
+    projectId: project.id,
+    cwd: project.path,
+    agent,
+    title,
+    state: 'idle',
+    agentSessionId: 'qa-agent',
+    settings: { model: 'sonnet', effort: 'high', mode: 'default' },
+    workspace: { kind: 'project' },
+  });
+  const handoffText = (goal: string) =>
+    `Passagem de testemunho de Claude
+
+## Objetivo
+${goal}
+
+## Próximos passos
+1. Ler o plano e começar.`;
+  if (saved === null && scene === 'handed-off') {
+    addSession(
+      base('ho-a', 'Plano da navegação'),
+      say('ho-a', 'Planeia a navegação entre sessões.'),
+    );
+    const origin = required(sessions.get('ho-a'), 'origem');
+    origin.handedTo = 'ho-b';
+    addSession(
+      {
+        ...base('ho-b', 'Executar a fase 1', 'codex'),
+        origin: { kind: 'handoff', sessionId: 'ho-a' },
+      },
+      say('ho-b', handoffText('executa a fase 1 do plano')),
+    );
+  }
+  if (saved === null && scene === 'lineage') {
+    addSession(
+      base('lin-plan', 'Plano da navegação'),
+      say('lin-plan', 'Planeia a navegação entre sessões.'),
+    );
+    addSession(
+      {
+        ...base('lin-fase1', 'Fase 1 no Codex', 'codex'),
+        origin: { kind: 'handoff', sessionId: 'lin-plan' },
+      },
+      say('lin-fase1', handoffText('executa a fase 1 do plano')),
+    );
+    addSession(
+      {
+        ...base('lin-fase2', 'Fase 2 no Codex', 'codex'),
+        origin: { kind: 'handoff', sessionId: 'lin-plan' },
+      },
+      say('lin-fase2', handoffText('executa a fase 2 do plano')),
+    );
+    addSession({
+      ...base('lin-alt', 'Alternativa sem atalhos'),
+      origin: { kind: 'fork', sessionId: 'lin-plan', turnId: 'user-1' },
+    });
+    addSession({
+      ...base('lin-final', 'Revisão final'),
+      state: 'running',
+      origin: { kind: 'handoff', sessionId: 'lin-fase1' },
+    });
+    addSession({
+      ...base('lin-orfa', 'Contraste do tema escuro'),
+      origin: { kind: 'handoff', sessionId: 'sessao-fechada' },
+    });
+    addSession({
+      ...base('lin-pista-a', 'Pista A: atalhos'),
+      origin: { kind: 'lane', raceId: 'corrida-qa' },
+    });
+    addSession({
+      ...base('lin-pista-b', 'Pista B: atalhos', 'codex'),
+      origin: { kind: 'lane', raceId: 'corrida-qa' },
+    });
+    addSession(base('lin-solta', 'Sessão solta'));
   }
   function recordEvent(event: EngineEvent) {
     if (event.type === 'race.state') {
@@ -735,10 +859,53 @@ export function installBridge(scene: Scene) {
       }
       case 'quality.review': {
         const value = required(qualities.get(id), 'qualidade ausente');
-        if (!value.enabled) throw new Error('QA: revisor desligado');
-        value.review = { ...value.review, state: 'done', error: null };
+        // Sem trigger é o "Repetir" do chip: resolve logo, como sempre.
+        if (payload.trigger === undefined) {
+          if (!value.enabled) throw new Error('QA: revisor desligado');
+          value.review = { ...value.review, state: 'done', error: null };
+          emit({ kind: 'event', type: 'session.quality', sessionId: id, quality: value });
+          return value;
+        }
+        // Segunda opinião a pedido e antes de trazer: passa por "a rever" e acaba 300 ms depois
+        // (o relógio de teste é que decide quando), com o resultado da cena.
+        const trigger = payload.trigger as 'turn' | 'bring' | 'manual';
+        const reviewer = quality.review.reviewer;
+        value.review = {
+          state: 'running',
+          turnId: 'user-1',
+          findings: [],
+          error: null,
+          trigger,
+          ...(reviewer ? { reviewer } : {}),
+        };
         emit({ kind: 'event', type: 'session.quality', sessionId: id, quality: value });
+        setTimeout(() => {
+          const current = qualities.get(id);
+          if (!current) return;
+          current.review = { ...structuredClone(quality.review), trigger };
+          current.stats = {
+            ...current.stats,
+            total: current.stats.total + current.review.findings.length,
+          };
+          emit({ kind: 'event', type: 'session.quality', sessionId: id, quality: current });
+        }, 300);
         return value;
+      }
+      case 'session.bring': {
+        const session = required(sessions.get(id), `sessão ${id}`);
+        if (session.workspace?.kind !== 'worktree')
+          throw new Error('QA: a sessão não tem worktree');
+        session.workspace = {
+          ...session.workspace,
+          stats: { files: 0, additions: 0, deletions: 0 },
+        };
+        emit({
+          kind: 'event',
+          type: 'session.workspace',
+          sessionId: id,
+          workspace: session.workspace,
+        });
+        return { merged: true, conflicts: [], into: 'main' };
       }
       case 'quality.fix': {
         const value = required(qualities.get(id), 'qualidade ausente');

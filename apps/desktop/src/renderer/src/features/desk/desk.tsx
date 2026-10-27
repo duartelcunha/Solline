@@ -215,7 +215,7 @@ function SessionCard({ sessionId }: { sessionId: string }) {
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              void actions.bring(sessionId);
+              actions.askBring(sessionId);
             }}
             className={`${smallButton} ml-auto border border-line text-fg hover:bg-surface-hover`}
             data-testid="card-bring"
