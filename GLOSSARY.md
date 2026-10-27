@@ -16,7 +16,8 @@ Os nomes do domínio da Solline, como o código os usa.
   o que aconteceu.
 - **Queda**: o agente morreu ou o canal fechou sem aviso. Cancela os pedidos e deixa a sessão em
   erro; fechar a sessão de propósito não conta como queda.
-- **Revisor**: o segundo agente que lê o diff de um turno e aponta problemas (bug, risco, ruído).
+- **Revisor**: o agente que lê o diff de um turno e aponta problemas (erro, risco, ruído). Só lê. Na
+  segunda opinião é de outro fabricante quando dá, senão é do mesmo.
 - **Fila**: o que escreves enquanto o agente trabalha. Cada mensagem segue sozinha quando o turno
   acaba, como um turno seu (com checkpoint). Interromper pausa a fila.
 - **Guiar**: mandar uma mensagem a meio do turno ("Agora", Ctrl+Enter), que o agente lê na próxima
@@ -60,3 +61,16 @@ Os nomes do domínio da Solline, como o código os usa.
 - **Parte zero**: a que fixa uma interface antes das outras arrancarem, que partem do resultado dela.
 - **Integração**: juntar as partes numa worktree de integração, uma a uma, com as verificações
   depois de cada junção; num conflito, uma sessão normal resolve e as verificações confirmam.
+- **Segunda opinião**: a revisão de um turno (ou de um pedido) por um revisor de outro fabricante,
+  só de leitura. Corre no fim do turno, a pedido e antes de trazer. Nunca bloqueia.
+- **Achado**: um erro ou risco apontado pelo revisor, com prioridade (P0 a P3) e confiança. À vista
+  no máximo 5 com confiança alta; o resto fica dobrado.
+- **Passagem de testemunho**: passar uma sessão a outro agente com um rascunho editável do que foi
+  feito e do que falta. A sessão antiga fica só para ler.
+- **Rascunho**: o resumo que um redator escreve para a passagem, com secções fixas. Se o redator
+  falhar, sai um rascunho mecânico.
+- **Bifurcação**: uma sessão nova a partir de um turno, numa worktree própria, no estado que tinha
+  nesse turno. Só em projetos git.
+- **Linhagem**: de que sessão nasceu cada uma (passagem, bifurcação, corrida, parte ou tarefa).
+  Guarda só ids.
+- **Mapa**: a vista em árvore da linhagem de um projeto. Opcional; a cor é a do fabricante.

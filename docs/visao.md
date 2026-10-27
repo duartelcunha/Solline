@@ -139,6 +139,13 @@ mostra a linhagem: que sessão nasceu de qual, que checkpoint foi bifurcado.
 
 Inspiração: Bugbot do Cursor, `/review` do Codex, crítico do Jules, handoff e Thread Map do Amp.
 
+Estado (27/10/2026): feito. Segunda opinião de outro fabricante no fim do turno, a pedido e antes de
+trazer, com achados por prioridade e confiança; passagem de testemunho com rascunho editável e
+cadeia de retomas; bifurcação numa worktree própria; Mapa da linhagem. Por fazer, com nome: os
+servidores MCP do Codex arrancam dentro do revisor; o rascunho chega ao revisor na sessão que
+recebeu o testemunho (decidir); dividir `session-manager.ts` e `stores/app.ts`, que cresceram
+demais. A lista completa está em `DECISIONS.md`.
+
 ### M6: um só cérebro para todos os agentes
 
 Regras do projeto escritas uma vez, com âmbito por tipo de ficheiro, traduzidas para `CLAUDE.md`,

@@ -341,8 +341,8 @@
   volta, a mudança mais pequena, nada de enfraquecer testes, correr as verificações antes de dizer
   que está feito, respostas curtas.
 - **Segunda opinião:** no fim de cada turno que mude ficheiros, um Claude Sonnet com contexto limpo
-  lê o diff do turno (só Read, Grep e Glob; sem hooks nem definições do utilizador; as regras do
-  projeto só com confiança) e devolve até 8 achados em JSON com esquema (erro, risco, ruído), em
+  lê o diff do turno (só Read, Grep e Glob; sem hooks nem definições do utilizador; o CLAUDE.md e o
+  AGENTS.md entram como texto, até 8 k, só com confiança; o `settingSources` continua vazio; ver M5) e devolve até 8 achados em JSON com esquema (erro, risco, ruído), em
   pt-PT, presos à linha. Revê qualquer agente: o Codex fica com um revisor de outro fabricante. Um
   turno novo cancela a revisão anterior. Liga e desliga por sessão; "Corrigir" manda os achados
   escolhidos ao agente da sessão. Gasta a subscrição do Claude (cerca de 5 s por turno).
@@ -537,3 +537,49 @@
   depois de integrar.
 - Por fazer: bloquear mensagens à sessão que resolve, prévia de colisões mais leve (um snapshot por
   pista), cancelar o planeador a meio, partes ligadas às tarefas dos Espaços.
+
+## M5: segunda opinião, passagem de testemunho e linhagem (27/10/2026)
+
+- Pesquisa antes do grilling (regra nova): um revisor de outro fabricante apanha mais erros
+  (Greptile, "model inversion": +6 a 12 pontos de recall); um resumo do agente engana o revisor
+  (15 em 17 casos). Por isso o revisor nunca recebe o resumo do agente.
+- **Segunda opinião:** revisor do fabricante oposto (o Codex revê o Claude; o Claude revê o Codex e
+  o ACP), pela subscrição e só de leitura. Sem o outro fabricante, ou num projeto sem confiança (o
+  Codex leria a config do projeto), revê o mesmo fabricante e o cartão diz "mesmo fabricante".
+- Corre no fim do turno se o diff tiver 20 linhas ou mais, ou tocar num ficheiro sensível; também a
+  pedido ("Segunda opinião", no turno ou na sessão) e antes de trazer. É informação: nunca bloqueia.
+  "Trazer" passa a pedir 2 cliques.
+- Entrada: pedido, diff, repositório só de leitura e CLAUDE.md/AGENTS.md (até 8 k), só com confiança.
+- Saída: erros e riscos, com prioridade P0 a P3 e confiança. À vista no máximo 5 com confiança de
+  0,7 ou mais; o resto fica dobrado. "Sem achados" é bom resultado. Um erro do revisor nunca aparece
+  como "tudo limpo". Corrigir e Dispensar, com contador. Os caminhos dos achados ficam dentro do
+  projeto.
+- **Passagem de testemunho ("Passar a…"):** escolhes agente, modelo e objetivo. Um redator só de
+  leitura escreve o rascunho com secções fixas (objetivo, decisões e o que ficou de fora, ficheiros
+  tocados, perguntas em aberto, próximos passos, verificação; "(nada)" quando vazia). Se o redator
+  falhar, sai um rascunho mecânico. Editas antes de enviar.
+- Abre-se uma sessão nova na mesma pasta ou worktree, com aviso visível. A antiga fica "passou o
+  testemunho": lê-se, mas não se escreve, rejeita, desfaz nem traz.
+- "Retomar aqui" devolve a pasta à origem e segue cadeias (A→B→C). Fechar quem recebeu devolve a
+  worktree à origem, sem apagar nada.
+- **Linhagem:** `SessionInfo.origin` (passagem, bifurcação, corrida, parte ou tarefa; só ids) e
+  `handedTo`. "Bifurcar daqui" na linha do tempo cria uma worktree própria no estado do turno (só em
+  projetos git); a conversa segue pelo fork do agente ou por um resumo. O Mapa é opcional por
+  projeto: árvore, clique abre a sessão, cor do fabricante.
+- Limite: o revisor e o redator foram testados só com fakes, não com os binários reais.
+- Por fazer, com nome (da revisão da fase 6):
+  - Média: os servidores MCP do `~/.codex/config.toml` arrancam dentro do revisor Codex, e o sandbox
+    só de leitura não os limita. Correção possível: `config: { mcp_servers: {} }` no `thread/start`,
+    por testar num Codex real.
+  - Média-baixa: na sessão que recebeu o testemunho, o "pedido" que o revisor lê é o rascunho (escrito
+    por um modelo), o que choca com a regra de não dar resumos ao revisor. Decidir.
+  - Baixa: os ids dos achados repetem-se ao rever o mesmo turno; `stats.total` conta em dobro; achados
+    ancorados só por caminho e linha (podem não bater com o âmbito mostrado); a palavra sensível
+    `session` apanha `session-manager.ts`; "Trazer" na origem depois da passagem mostra o chip, mas o
+    motor recusa; uma worktree por confirmar depois de reiniciar escapa ao `assertRecoveryReady`; o
+    revisor da integração das partes ainda é só Claude e não tem `projectFindings`.
+  - Ficheiros grandes: `session-manager.ts` (~2260 linhas) e `stores/app.ts` (~1580). Extrair o bloco
+    de passagem e de bifurcação.
+  - Não verificado: o revisor Codex e o redator contra binários reais; o Mapa com ~100 sessões.
+  - Adiados do plano: verificação por segunda passagem no revisor; aprender com Corrigir e Dispensar;
+    menções entre sessões; sugerir a passagem quando o contexto enche.
