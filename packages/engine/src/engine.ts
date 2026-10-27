@@ -434,7 +434,8 @@ export class Engine {
       'race.begin': (p) => this.races.begin(p),
       'split.begin': async ({ cwd, trusted, checks, setup, ...request }) => {
         // As partes só valem com uma verificação do projeto: as guardadas ou as que se encontram.
-        const specs = checks ?? (await detectChecks(cwd));
+        // Num projeto sem confiança nada se corre: sem verificações, as partes ficam de fora.
+        const specs = trusted ? (checks ?? (await detectChecks(cwd))) : [];
         return this.splits.begin({
           ...request,
           cwd,
@@ -477,6 +478,7 @@ export class Engine {
           ...(setup !== undefined ? { setup } : {}),
         }),
       'split.continue': (p) => this.splits.continueIntegration(p.raceId),
+      'split.stop': (p) => this.splits.stopLaunching(p.raceId),
       'race.closeNow': (p) =>
         this.registry.get(p.raceId).kind === 'split'
           ? this.splits.close(p.raceId, p.keep)

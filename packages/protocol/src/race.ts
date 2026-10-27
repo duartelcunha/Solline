@@ -34,6 +34,25 @@ export const SplitPart = z
   .strict();
 export type SplitPart = z.infer<typeof SplitPart>;
 
+/** Num glob, cada `{` tem de fechar (e nenhum `}` fica solto). */
+function bracesBalanced(entry: string): boolean {
+  let depth = 0;
+  for (const c of entry) {
+    if (c === '{') depth++;
+    else if (c === '}' && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+
+/**
+ * A parte como entrada (para rever ou lançar): igual a `SplitPart`, mas as zonas não podem ter
+ * chavetas por fechar. O que vem do disco ou do planeador não passa por aqui.
+ */
+export const SplitPartInput = SplitPart.refine(
+  (part) => [...part.allowed, ...part.forbidden].every(bracesBalanced),
+  { message: 'Uma zona tem chavetas que não fecham: confere os ficheiros que a parte pode tocar.' },
+);
+
 export const RaceLane = z.object({
   sessionId: z.string(),
   agent: AgentId,
@@ -152,14 +171,17 @@ export type RaceKind = z.infer<typeof RaceKind>;
 
 /**
  * Um aviso de uma repartição, nunca um castigo: a pista mexeu fora do que o contrato permite
- * (`outside`) ou o que ela tem já choca com o de outra pista (`collision`, com a pista `other`).
+ * (`outside`), o que ela tem já choca com o de outra pista (`collision`, com a pista `other`) ou
+ * algo correu mal com uma parte (`problem`, com a frase em `detail`; `sessionId` é vazio se não
+ * é de nenhuma pista). Um problema de uma parte nunca é um erro do motor.
  */
 export const SplitWarning = z
   .object({
     sessionId: z.string(),
-    kind: z.enum(['outside', 'collision']),
+    kind: z.enum(['outside', 'collision', 'problem']),
     path: z.string(),
     other: z.string().optional(),
+    detail: z.string().max(2_000).optional(),
   })
   .strict();
 export type SplitWarning = z.infer<typeof SplitWarning>;

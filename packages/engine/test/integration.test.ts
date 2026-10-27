@@ -78,6 +78,7 @@ async function setup(
     run?: RunCommand;
     reviewer?: Reviewer | undefined;
     costs?: Record<string, number>;
+    specs?: CheckSpec[];
   } = {},
 ) {
   const dirs = await repo();
@@ -131,7 +132,7 @@ async function setup(
     outcome: async () => {
       throw new Error('as repartições não se ordenam');
     },
-    checkContext: () => ({ specs: [SPEC], env: {}, run }),
+    checkContext: () => ({ specs: options.specs ?? [SPEC], env: {}, run }),
     costOf: (id) => costs.get(id) ?? null,
     anchor: (key, wt) => void anchors.set(key, wt),
     unanchor: (key) => void anchors.delete(key),
@@ -153,11 +154,11 @@ async function setup(
     state(sessionId, 'running');
     state(sessionId, 'idle');
   };
-  const begin = (text: string, parts: SplitPart[]) =>
+  const begin = (text: string, parts: SplitPart[], checkRefs = CHECKS) =>
     manager.begin({
       ...project,
       text,
-      checkRefs: CHECKS,
+      checkRefs,
       parts: parts.map((p) => ({ part: p, agent: 'claude' as const })),
     });
   const treeOf = (id: string) => trees.get(id) as Worktree;
@@ -418,7 +419,7 @@ describe('integrar as partes', SLOW, () => {
     expect(second.state).toBe('ready');
   });
 
-  it('recusa integrar se ainda há partes por arrancar ou a trabalhar', async () => {
+  it('recusa integrar enquanto há partes a trabalhar; sem partes que possam arrancar, integra as que arrancaram e avisa das outras', async () => {
     const t = await setup();
     const { race } = await t.begin('Cadeia', [
       part('Dados', ['src/shared/**']),
@@ -430,10 +431,28 @@ describe('integrar as partes', SLOW, () => {
     t.state('s1', 'error');
     await waitFor(() => t.manager.get(race.id).phase === 'done', LONG);
     expect(t.manager.get(race.id).split?.pending).toHaveLength(1);
-    await expect(t.manager.integrate(race.id)).rejects.toThrow(
-      /Ainda há partes por arrancar \(«Vista»\)/,
-    );
-    expect(t.manager.get(race.id).integration ?? null).toBeNull();
+    // Não há como a Vista arrancar: integra-se o que arrancou, com um aviso do que ficou de fora.
+    const integrated = await t.manager.integrate(race.id);
+    expect(integrationOf(integrated).state).toBe('ready');
+    expect(integrationOf(integrated).steps.map((s) => s.title)).toEqual(['Dados']);
+    expect(integrationOf(integrated).warnings.join(' ')).toMatch(/nunca arrancou.*«Vista»/);
+  });
+
+  it('não integra enquanto a repartição se fecha', async () => {
+    const t = await setup();
+    const raceId = await t.three();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const close = t.sessions.close;
+    t.sessions.close = async (...args) => {
+      await gate;
+      return close(...args);
+    };
+    const closing = t.manager.close(raceId);
+    await expect(t.manager.integrate(raceId)).rejects.toThrow(/a fechar/);
+    release();
+    await closing;
+    expect(t.manager.get(raceId).integration ?? null).toBeNull();
   });
 });
 
@@ -578,6 +597,198 @@ describe('conflitos', SLOW, () => {
     expect(opened.session.session.id).toBe('s4');
     expect(t.treeOf('s4').base).toBe(git(integration.tip.path, 'rev-parse', 'HEAD'));
     expect(t.sent.get('s4')?.[0]).toContain('- a.txt');
+  });
+});
+
+describe('conflitos: a resolução só vale se for boa', SLOW, () => {
+  type T = Awaited<ReturnType<typeof setup>>;
+
+  /** A sessão de resolução faz o merge do branch que chocou, escreve `content` e grava. */
+  async function resolveWith(t: T, raceId: string, content: string, id?: string) {
+    const resolver: string =
+      id ?? (await t.manager.resolve(raceId, t.project).then((r) => r.session.session.id));
+    t.state(resolver, 'running');
+    t.state(resolver, 'idle');
+    const wt = t.treeOf(resolver);
+    const branch = integrationOf(t.manager.get(raceId)).conflict?.branch as string;
+    try {
+      git(wt.path, 'merge', '--no-commit', branch);
+    } catch {
+      // Conflito esperado.
+    }
+    await writeFile(path.join(wt.cwd, 'a.txt'), content);
+    git(wt.path, 'add', '-A');
+    git(wt.path, 'commit', '--quiet', '--no-edit');
+    return resolver;
+  }
+
+  async function conflicting(options: Parameters<typeof setup>[0] = {}) {
+    const t = await setup(options);
+    const raceId = await t.three({ s1: 'versão um\n', s2: 'versão dois\n' });
+    const integration = integrationOf(await t.manager.integrate(raceId));
+    expect(integration.state).toBe('conflict');
+    return { t, raceId, integration };
+  }
+
+  it('uma resolução que larga o que já estava juntado (reset ao branch da parte) não substitui a ponta', async () => {
+    const { t, raceId, integration } = await conflicting();
+    const tipHead = git(integration.tip.path, 'rev-parse', 'HEAD');
+    const opened = await t.manager.resolve(raceId, t.project);
+    const resolver = opened.session.session.id;
+    t.state(resolver, 'running');
+    t.state(resolver, 'idle');
+    // Um reset duro ao branch da parte: contém o branch que chocou, mas perde a parte Um.
+    git(t.treeOf(resolver).path, 'reset', '--quiet', '--hard', t.treeOf('s2').branch);
+
+    await expect(t.manager.continueIntegration(raceId)).rejects.toThrow(
+      /não inclui o que já estava juntado/,
+    );
+    const race = t.manager.get(raceId);
+    const after = integrationOf(race);
+    // Tudo como estava: conflito, sessão de resolução, e a ponta antiga ainda lá, intacta.
+    expect(race.phase).toBe('done');
+    expect(after.state).toBe('conflict');
+    expect(after.conflict?.resolver).toBe(resolver);
+    expect(after.tip.path).toBe(integration.tip.path);
+    expect(await exists(integration.tip.path)).toBe(true);
+    expect(git(integration.tip.path, 'rev-parse', 'HEAD')).toBe(tipHead);
+    expect(t.closed.map(([id]) => id)).not.toContain(resolver);
+
+    // Refeita a partir da ponta, a resolução serve.
+    git(t.treeOf(resolver).path, 'reset', '--quiet', '--hard', tipHead);
+    await resolveWith(t, raceId, 'resolvido\n', resolver);
+    const finished = await t.manager.continueIntegration(raceId);
+    expect(integrationOf(finished).state).toBe('ready');
+    expect(await exists(path.join(integrationOf(finished).tip.path, 'tres', 'f3.txt'))).toBe(true);
+  });
+
+  it('uma resolução cuja verificação falha volta ao conflito e diz qual falhou', async () => {
+    const run: RunCommand = async (_command, { cwd }) => ({
+      state: (await readFile(path.join(cwd, 'a.txt'), 'utf8')) === 'mau\n' ? 'failed' : 'passed',
+      tail: null,
+      durationMs: 1,
+    });
+    const { t, raceId, integration } = await conflicting({ run });
+    const resolver = await resolveWith(t, raceId, 'mau\n');
+
+    await expect(t.manager.continueIntegration(raceId)).rejects.toThrow(
+      /verificação «Testes» falhou depois da resolução/,
+    );
+    const race = t.manager.get(raceId);
+    const after = integrationOf(race);
+    expect(race.phase).toBe('done');
+    expect(after.state).toBe('conflict');
+    expect(after.conflict?.resolver).toBe(resolver);
+    expect(after.tip.path).toBe(integration.tip.path);
+    expect(after.steps.map((s) => [s.title, s.merged])).toEqual([
+      ['Um', true],
+      ['Dois', false],
+    ]);
+    expect(after.warnings.join(' ')).toContain('«Testes»');
+    expect(await exists(integration.tip.path)).toBe(true);
+    expect(t.closed.map(([id]) => id)).not.toContain(resolver);
+
+    // A sessão corrige, grava, e a segunda tentativa passa.
+    await writeFile(path.join(t.treeOf(resolver).cwd, 'a.txt'), 'bom\n');
+    git(t.treeOf(resolver).path, 'commit', '--quiet', '-am', 'corrigir');
+    const finished = await t.manager.continueIntegration(raceId);
+    expect(integrationOf(finished).state).toBe('ready');
+    expect(integrationOf(finished).steps[1]?.failures).toBe(0);
+  });
+
+  it('depois da resolução as verificações contam face à base original, não à da sessão de resolução', async () => {
+    const LINT: CheckSpec = { id: 'lint', label: 'Lint', command: 'run lint', enabled: true };
+    // Os testes falham assim que a parte Um escreve o ficheiro dela; a verificação da parte Dois
+    // (o lint) passa sempre.
+    const run: RunCommand = async (command, { cwd }) => ({
+      state:
+        command === 'run test' && (await exists(path.join(cwd, 'um', 'f1.txt')))
+          ? 'failed'
+          : 'passed',
+      tail: null,
+      durationMs: 1,
+    });
+    const t = await setup({ specs: [SPEC, LINT], run });
+    const { race } = await t.begin(
+      'Três coisas',
+      [
+        part('Um', ['um/**']),
+        part('Dois', ['dois/**'], { check: 'lint' }),
+        part('Três', ['tres/**']),
+      ],
+      [...CHECKS, { id: 'lint', label: 'Lint' }],
+    );
+    await write(t.treeOf('s1'), 'um/f1.txt', 'um\n');
+    await write(t.treeOf('s1'), 'a.txt', 'versão um\n');
+    await write(t.treeOf('s2'), 'dois/f2.txt', 'dois\n');
+    await write(t.treeOf('s2'), 'a.txt', 'versão dois\n');
+    await write(t.treeOf('s3'), 'tres/f3.txt', 'tres\n');
+    for (const id of ['s1', 's2', 's3']) t.turn(id);
+    await t.done(race.id);
+    expect(integrationOf(await t.manager.integrate(race.id)).state).toBe('conflict');
+
+    await resolveWith(t, race.id, 'resolvido\n');
+    const after = integrationOf(await t.manager.continueIntegration(race.id));
+    expect(after.state).toBe('ready');
+    // Um e Três falham por culpa do resultado (a base original não tem o ficheiro da parte Um).
+    expect(after.steps.map((s) => [s.title, s.failures])).toEqual([
+      ['Um', 1],
+      ['Dois', 0],
+      ['Três', 1],
+    ]);
+    expect(after.steps[2]?.checks).toEqual([
+      { label: 'Testes', state: 'failed', preexisting: false },
+    ]);
+    expect(after.final?.failures).toBe(1);
+    expect(after.metrics.failures).toBe(1);
+  });
+
+  it('um erro a meio depois da resolução devolve tudo ao conflito, com aviso, e dá para repetir', async () => {
+    const { t, raceId, integration } = await conflicting();
+    const oldTip = integration.tip.path;
+    const resolver = await resolveWith(t, raceId, 'resolvido\n');
+    // A pista Três desapareceu (fechada fora da repartição): juntar as que faltam falha.
+    const lane = t.treeOf('s3');
+    t.trees.delete('s3');
+
+    await expect(t.manager.continueIntegration(raceId)).rejects.toThrow(/Três/);
+    const race = t.manager.get(raceId);
+    const stuck = integrationOf(race);
+    expect(race.phase).toBe('done');
+    expect(stuck.state).toBe('conflict');
+    expect(stuck.conflict?.resolver).toBe(resolver);
+    expect(stuck.tip.path).toBe(oldTip);
+    expect(stuck.steps.map((s) => [s.title, s.merged])).toEqual([
+      ['Um', true],
+      ['Dois', false],
+    ]);
+    expect(stuck.warnings.join(' ')).toContain('Três');
+    expect(await exists(oldTip)).toBe(true);
+    const last = t.events.filter((e) => e.type === 'race.state').at(-1);
+    expect(last).toMatchObject({ race: { phase: 'done', integration: { state: 'conflict' } } });
+
+    // Reposta a pista, volta a poder continuar.
+    t.trees.set('s3', lane);
+    const finished = await t.manager.continueIntegration(raceId);
+    expect(integrationOf(finished).state).toBe('ready');
+    expect(finished.phase).toBe('assembled');
+    expect(await exists(oldTip)).toBe(false);
+  });
+
+  it('uma sessão de resolução fechada fora da integração deixa abrir outra, e continuar diz o que fazer', async () => {
+    const { t, raceId } = await conflicting();
+    const first = (await t.manager.resolve(raceId, t.project)).session.session.id;
+    // A sessão foi fechada na barra lateral.
+    t.trees.delete(first);
+    const second = (await t.manager.resolve(raceId, t.project)).session.session.id;
+    expect(second).not.toBe(first);
+    expect(integrationOf(t.manager.get(raceId)).conflict?.resolver).toBe(second);
+
+    t.trees.delete(second);
+    await expect(t.manager.continueIntegration(raceId)).rejects.toThrow(/já não existe/);
+    expect(integrationOf(t.manager.get(raceId)).conflict?.resolver).toBeNull();
+    const third = (await t.manager.resolve(raceId, t.project)).session.session.id;
+    expect(integrationOf(t.manager.get(raceId)).conflict?.resolver).toBe(third);
   });
 });
 

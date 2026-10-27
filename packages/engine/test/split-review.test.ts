@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { SplitPlan, SplitReviewPayload, type SplitPart } from '@solline/protocol';
+import { SplitPartSpec, SplitPlan, SplitReviewPayload, type SplitPart } from '@solline/protocol';
 import { reviewPlan } from '../src/races/split-review.ts';
+import { globToRegExp, outOfScope, zoneOf } from '../src/races/zones.ts';
 
 const part = (title: string, allowed: string[], over: Partial<SplitPart> = {}): SplitPart => ({
   title,
@@ -216,5 +217,77 @@ describe('o contrato do plano', () => {
       }).success,
     ).toBe(false);
     expect(SplitReviewPayload.safeParse({ parts: [ok, zero], checkIds: [] }).success).toBe(false);
+  });
+});
+
+describe('zonas: globs malformados e a árvore toda', () => {
+  it('um glob nunca faz falhar: chavetas sem par são texto e o resto segue', () => {
+    for (const glob of ['src/{a', 'src/a}', '{{a,b}', '}{', 'a{,b', '**/{', 'x[', '[', '{a,b}}']) {
+      expect(() => globToRegExp(glob)).not.toThrow();
+      expect(() => reviewPlan([part('a', [glob]), part('b', ['b'])], ids)).not.toThrow();
+      expect(() => outOfScope({ allowed: [glob], forbidden: [glob] }, ['src/a'])).not.toThrow();
+    }
+    // A chaveta solta conta como texto; as que têm par continuam a ser alternativas.
+    expect(globToRegExp('src/{a').test('src/{a')).toBe(true);
+    expect(globToRegExp('src/{a').test('src/a')).toBe(false);
+    expect(globToRegExp('src/{a,b}.ts').test('src/b.ts')).toBe(true);
+    expect(globToRegExp('{{a,b}').test('{a')).toBe(true);
+    expect(globToRegExp('{{a,b}').test('{b')).toBe(true);
+    expect(globToRegExp('a,b').test('a,b')).toBe(true);
+  });
+
+  it('"[" é só um carácter, no glob e na zona (rotas como app/[id].tsx)', () => {
+    expect(globToRegExp('app/[id].tsx').test('app/[id].tsx')).toBe(true);
+    expect(globToRegExp('app/[id].tsx').test('app/i.tsx')).toBe(false);
+    expect(zoneOf('app/[id].tsx')).toEqual({
+      segments: ['app', '[id].tsx'],
+      partial: null,
+      glob: false,
+    });
+    expect(
+      reviewPlan([part('a', ['app/[id].tsx']), part('b', ['app/[slug].tsx'])], ids).sequential,
+    ).toEqual([[0], [1]]);
+  });
+
+  it('".", "./", "*" e "**" querem dizer a árvore toda, para tocar e para o âmbito', () => {
+    for (const whole of ['.', './', '*', '**', '/', ' ']) {
+      expect(reviewPlan([part('a', [whole]), part('b', ['src/b.ts'])], ids).sequential).toEqual([
+        [0, 1],
+      ]);
+      expect(
+        outOfScope({ allowed: [whole], forbidden: [] }, ['qualquer/coisa.ts', 'a.txt']),
+      ).toEqual([]);
+      // Continua a valer o proibido.
+      expect(
+        outOfScope({ allowed: [whole], forbidden: ['src/x'] }, ['src/x/a.ts', 'b.ts']),
+      ).toEqual(['src/x/a.ts']);
+    }
+  });
+
+  it('uma parte sem zonas pode tocar em tudo: corre em fila com as outras (na dúvida, toca)', () => {
+    const review = reviewPlan([part('a', []), part('b', ['src/b/**']), part('c', ['docs'])], ids);
+    expect(review.sequential).toEqual([[0, 1, 2]]);
+    expect(review.warnings.join(' ')).toContain('«a» não diz que ficheiros pode tocar');
+    // No âmbito, sem zonas só conta o proibido.
+    expect(outOfScope({ allowed: [], forbidden: ['x'] }, ['x/a.ts', 'y.ts'])).toEqual(['x/a.ts']);
+  });
+
+  it('os pontos de encontro partilhados escrevem-se "A, B e C"', () => {
+    const review = reviewPlan(
+      [part('a', ['package.json']), part('b', ['package.json']), part('c', ['package.json'])],
+      ids,
+    );
+    expect(review.warnings.join(' ')).toContain('«a», «b» e «c» podem mexer em package.json');
+  });
+
+  it('globs com chavetas por fechar são recusados à entrada (rever ou lançar)', () => {
+    const bad = part('a', ['src/{a,b']);
+    const good = part('b', ['src/{a,b}']);
+    expect(SplitReviewPayload.safeParse({ parts: [bad], checkIds: [] }).success).toBe(false);
+    expect(SplitReviewPayload.safeParse({ parts: [good], checkIds: [] }).success).toBe(true);
+    const spec = SplitPartSpec.safeParse({ part: { ...good, forbidden: ['x}'] }, agent: 'claude' });
+    expect(spec.success).toBe(false);
+    if (!spec.success) expect(spec.error.issues[0]?.message).toMatch(/chavetas/);
+    expect(SplitPartSpec.safeParse({ part: good, agent: 'claude' }).success).toBe(true);
   });
 });

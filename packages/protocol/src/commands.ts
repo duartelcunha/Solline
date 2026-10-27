@@ -337,6 +337,14 @@ export const commandSchemas = {
     payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
     result: Race,
   },
+  /**
+   * Pára uma repartição que ainda arranca partes: as que faltam arrancar nunca arrancam e as que
+   * já arrancaram ficam como estão.
+   */
+  'split.stop': {
+    payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
+    result: Race,
+  },
   /** Volta a preparar a worktree da sessão (depois de uma falha). */
   'setup.retry': { payload: SessionRef, result: Empty },
   ...reviewCommandSchemas,

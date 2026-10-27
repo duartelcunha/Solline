@@ -13,15 +13,24 @@ export interface Zone {
   glob: boolean;
 }
 
-const GLOB_CHAR = /[*?[{]/;
+/** `[` não conta: é um carácter como outro qualquer (`app/[id].tsx`), aqui e no glob. */
+const GLOB_CHAR = /[*?{]/;
 
+/** A árvore toda: a zona de uma parte que não diz onde mexe (na dúvida, toca em tudo). */
+export const WHOLE_TREE: Zone = { segments: [], partial: '', glob: true };
+
+/**
+ * O caminho em minúsculas e com `/`. `.`, `./`, `*`, `**`, `/` e o vazio querem todos dizer a
+ * árvore toda e ficam como texto vazio.
+ */
 export function normalize(entry: string): string {
-  return entry
+  const path = entry
     .trim()
     .replace(/\\/g, '/')
     .replace(/^(\.\/)+/, '')
     .replace(/^\/+/, '')
     .toLowerCase();
+  return path === '.' || path === '*' || path === '**' || path === '**/*' ? '' : path;
 }
 
 /** Parte o caminho no prefixo literal (com a direção das pastas) e no resto, que é glob. */
@@ -58,9 +67,35 @@ export function zonesOverlap(a: Zone, b: Zone): boolean {
   return next.startsWith(shorter.partial ?? '');
 }
 
-/** O glob como expressão regular (sem distinguir maiúsculas): `**` atravessa pastas, `*` não. */
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** As posições das chavetas que têm par; as outras contam como texto. */
+function pairedBraces(glob: string): Set<number> {
+  const open: number[] = [];
+  const paired = new Set<number>();
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob.charAt(i);
+    if (c === '{') open.push(i);
+    else if (c === '}') {
+      const start = open.pop();
+      if (start !== undefined) {
+        paired.add(start);
+        paired.add(i);
+      }
+    }
+  }
+  return paired;
+}
+
+/**
+ * O glob como expressão regular (sem distinguir maiúsculas): `**` atravessa pastas, `*` não. Nunca
+ * falha: uma chaveta sem par é texto e, se mesmo assim a expressão não compilar, o glob vale como
+ * caminho literal.
+ */
 export function globToRegExp(glob: string): RegExp {
+  const paired = pairedBraces(glob);
   let out = '';
+  let depth = 0;
   for (let i = 0; i < glob.length; i++) {
     const c = glob.charAt(i);
     if (c === '*') {
@@ -72,17 +107,20 @@ export function globToRegExp(glob: string): RegExp {
         } else out += '.*';
       } else out += '[^/]*';
     } else if (c === '?') out += '[^/]';
-    else if (c === '{') out += '(?:';
-    else if (c === '}') out += ')';
-    else if (c === ',' && depthOpen(glob, i)) out += '|';
-    else out += c.replace(/[.+^$()|\\\][]/g, '\\$&');
+    else if (c === '{' && paired.has(i)) {
+      depth++;
+      out += '(?:';
+    } else if (c === '}' && paired.has(i)) {
+      depth--;
+      out += ')';
+    } else if (c === ',' && depth > 0) out += '|';
+    else out += escapeRegExp(c);
   }
-  return new RegExp(`^${out}$`, 'i');
-}
-
-/** A vírgula só separa alternativas dentro de chavetas. */
-function depthOpen(glob: string, at: number): boolean {
-  return glob.lastIndexOf('{', at) > glob.lastIndexOf('}', at);
+  try {
+    return new RegExp(`^${out}$`, 'i');
+  } catch {
+    return new RegExp(`^${escapeRegExp(glob)}$`, 'i');
+  }
 }
 
 /**
@@ -90,10 +128,10 @@ function depthOpen(glob: string, at: number): boolean {
  * está lá dentro) ou um glob; um glob também apanha o ficheiro se apanhar uma das pastas dele.
  */
 export function zoneMatcher(entries: readonly string[]): (file: string) => boolean {
-  const patterns = entries
-    .map((entry) => normalize(entry).replace(/\/+$/, ''))
-    .filter(Boolean)
-    .map(globToRegExp);
+  const normalized = entries.map((entry) => normalize(entry).replace(/\/+$/, ''));
+  // "." e `*` querem dizer a árvore toda: apanham qualquer ficheiro.
+  if (normalized.some((entry) => entry === '')) return () => true;
+  const patterns = normalized.map(globToRegExp);
   return (file) => {
     const segments = normalize(file).split('/').filter(Boolean);
     const prefixes = segments.map((_, i) => segments.slice(0, i + 1).join('/'));
@@ -103,7 +141,8 @@ export function zoneMatcher(entries: readonly string[]): (file: string) => boole
 
 /**
  * Os ficheiros fora do que o contrato da parte permite: fora de `allowed` ou dentro de
- * `forbidden`. Sem `allowed` (o contrato não diz onde mexer) só conta o `forbidden`.
+ * `forbidden`. Sem `allowed` (o contrato não diz onde mexer) só conta o `forbidden`; com "." ou
+ * `*` a parte pode mexer em tudo.
  */
 export function outOfScope(
   part: Pick<SplitPart, 'allowed' | 'forbidden'>,

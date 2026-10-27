@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AgentId } from './conversation.ts';
-import { SplitPart } from './race.ts';
+import { SplitPart, SplitPartInput } from './race.ts';
 
 /**
  * A repartição: um pedido grande cortado em 2 a 4 partes diferentes, cada uma numa pista
@@ -81,7 +81,7 @@ export const SplitPlanResult = z
 /** Uma parte a lançar: o contrato e quem a faz. */
 export const SplitPartSpec = z
   .object({
-    part: SplitPart,
+    part: SplitPartInput,
     agent: AgentId,
     model: z.string().min(1).max(200).optional(),
   })
@@ -105,7 +105,7 @@ export const SplitStartPayload = z
 
 export const SplitReviewPayload = z
   .object({
-    parts: z.array(SplitPart).min(1).max(4).refine(zeroFirst),
+    parts: z.array(SplitPartInput).min(1).max(4).refine(zeroFirst),
     checkIds: z.array(z.string().min(1).max(64)).max(6),
   })
   .strict();

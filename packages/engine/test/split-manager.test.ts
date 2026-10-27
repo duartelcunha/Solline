@@ -73,7 +73,14 @@ async function write(wt: Worktree, file: string, content: string) {
 }
 
 /** Sessões de mentira, mas com worktrees de verdade (o que o SessionManager faz ao criar). */
-async function setup(options: { replies?: Record<string, string>; brokenGit?: boolean } = {}) {
+async function setup(
+  options: {
+    replies?: Record<string, string>;
+    brokenGit?: boolean;
+    /** A n-ésima abertura de sessão falha. */
+    failCreateAt?: number;
+  } = {},
+) {
   const dirs = await repo();
   const worktrees = new WorktreeManager({ root: path.join(dirs.data, 'worktrees') });
   const trees = new Map<string, Worktree>();
@@ -85,6 +92,10 @@ async function setup(options: { replies?: Record<string, string>; brokenGit?: bo
   let n = 0;
   const sessions: SplitSessions & RaceSessions = {
     create: async (payload) => {
+      if (options.failCreateAt === n + 1) {
+        n++;
+        throw new Error('o agente não abriu');
+      }
       const wt = payload.startAfter
         ? await worktrees.createAfter(trees.get(payload.startAfter) as Worktree)
         : await worktrees.create(payload.cwd, payload.projectId);
@@ -133,6 +144,14 @@ async function setup(options: { replies?: Record<string, string>; brokenGit?: bo
     races.observe(event);
     manager.observe(event);
   };
+  /** Como acabou o turno de uma pista (chega antes de ela ficar parada). */
+  const end = (sessionId: string, outcome: 'done' | 'interrupted' | 'error') =>
+    manager.observe({
+      kind: 'event',
+      type: 'session.event',
+      sessionId,
+      delta: { type: 'turn.end', turnId: 't', outcome },
+    } as never);
   /** Um turno completo: começa a trabalhar e para. */
   const turn = (sessionId: string) => {
     state(sessionId, 'running');
@@ -160,9 +179,11 @@ async function setup(options: { replies?: Record<string, string>; brokenGit?: bo
     events,
     state,
     turn,
+    end,
     begin,
     messages,
     treeOf,
+    sessions,
   };
 }
 
@@ -315,6 +336,8 @@ describe('lançar por fases', SLOW, () => {
     );
     expect(git(t.treeOf('s1').path, 'log', '--format=%s', '-1')).toBe('Solline: parte concluída');
 
+    // A Docs ainda trabalha: o resumo dos Dados chega-lhe pela fila, antes de ela parar.
+    await waitFor(() => t.messages('s2').length === 2, LONG);
     t.turn('s2');
     t.turn('s3');
     await waitFor(() => t.manager.get(race.id).phase === 'done', LONG);
@@ -489,6 +512,106 @@ describe('resumos, âmbito e colisões', SLOW, () => {
   });
 });
 
+describe('falhas, interrupções e paragens', SLOW, () => {
+  const chain = (t: Awaited<ReturnType<typeof setup>>) =>
+    t.begin('Cadeia', [
+      part('Dados', ['src/shared/**']),
+      part('Vista', ['src/shared/ui/**']),
+      part('Docs', ['docs/**']),
+    ]);
+  const problems = (t: Awaited<ReturnType<typeof setup>>, raceId: string) =>
+    (t.manager.get(raceId).split?.warnings ?? []).filter((w) => w.kind === 'problem');
+
+  it('uma parte que não abre é um aviso da repartição, nunca um erro do motor sem sessão', async () => {
+    // A 3.ª sessão (a Vista, depois dos Dados) não abre.
+    const t = await setup({ failCreateAt: 3 });
+    const { race } = await chain(t);
+    t.turn('s1');
+    await waitFor(() => problems(t, race.id).length === 1, LONG);
+    expect(problems(t, race.id)[0]).toMatchObject({
+      sessionId: '',
+      kind: 'problem',
+      detail: expect.stringContaining('Não consegui abrir «Vista»: o agente não abriu'),
+    });
+    t.turn('s2');
+    await waitFor(() => t.manager.get(race.id).phase === 'done', LONG);
+    expect(t.manager.get(race.id).split?.pending.map((p) => p.part.title)).toEqual(['Vista']);
+    // Um erro do motor sem sessão abriria a janela de recuperação.
+    expect(t.events.filter((e) => e.type === 'engine.error')).toEqual([]);
+  });
+
+  it('uma falha ao rever não deixa a repartição presa a "a trabalhar"', async () => {
+    const t = await setup();
+    const { race } = await t.begin('Pedido', [part('A', ['src/a/**']), part('B', ['src/b/**'])]);
+    // Ver a pista B falha (o gestor pergunta pela worktree dela sem proteção).
+    const find = t.sessions.worktreeOf;
+    t.sessions.worktreeOf = (id) => {
+      if (id === 's2') throw new Error('a worktree desapareceu');
+      return find(id);
+    };
+    t.turn('s1');
+    t.turn('s2');
+    await waitFor(() => t.manager.get(race.id).phase === 'done', LONG);
+    expect(problems(t, race.id).map((w) => w.detail)).toContain('a worktree desapareceu');
+    expect(t.events.filter((e) => e.type === 'engine.error')).toEqual([]);
+  });
+
+  it('uma parte interrompida (ou que acabou com erro) não arranca quem espera por ela', async () => {
+    const t = await setup();
+    const { race } = await chain(t);
+    t.state('s1', 'running');
+    t.end('s1', 'interrupted');
+    t.state('s1', 'idle');
+    t.turn('s2');
+    await waitFor(() => t.manager.get(race.id).phase === 'done', LONG);
+    expect(t.created).toHaveLength(2);
+    expect(t.manager.get(race.id).split?.pending.map((p) => p.part.title)).toEqual(['Vista']);
+
+    // Acabar um turno bem (sem registo de interrupção) arranca-a como sempre.
+    const ok = await setup();
+    const second = await chain(ok);
+    ok.state('s1', 'running');
+    ok.end('s1', 'done');
+    ok.state('s1', 'idle');
+    await waitFor(() => ok.manager.get(second.race.id).lanes.length === 3, LONG);
+    expect(ok.created).toHaveLength(3);
+    ok.turn('s2');
+    ok.turn('s3');
+    await waitFor(() => ok.manager.get(second.race.id).phase === 'done', LONG);
+  });
+
+  it('parar a repartição: as partes por arrancar nunca arrancam, as pistas que já correm ficam', async () => {
+    const t = await setup();
+    const { race } = await chain(t);
+    await expect(t.manager.stopLaunching('inexistente')).rejects.toThrow(/desconhecida/);
+    const stopped = await t.manager.stopLaunching(race.id);
+    expect(stopped.split?.pending).toEqual([]);
+    expect(stopped.split?.warnings).toEqual([
+      { sessionId: '', kind: 'problem', path: '', detail: expect.stringContaining('«Vista»') },
+    ]);
+    // As pistas que já arrancaram seguem a trabalhar e a Vista não arranca quando a Dados acaba.
+    expect(stopped.phase).toBe('running');
+    expect(stopped.lanes.map((l) => l.part?.title)).toEqual(['Dados', 'Docs']);
+    t.turn('s1');
+    t.turn('s2');
+    await waitFor(() => t.manager.get(race.id).phase === 'done', LONG);
+    expect(t.created).toHaveLength(2);
+    await expect(t.manager.stopLaunching(race.id)).rejects.toThrow(/Não há partes por arrancar/);
+  });
+
+  it('o resumo não vai para uma pista que já parou (abriria outro turno inteiro)', async () => {
+    const t = await setup({ replies: { s1: 'Feito.' } });
+    const { race } = await t.begin('Pedido', [part('A', ['src/a/**']), part('B', ['src/b/**'])]);
+    // A B já parou o turno quando o fim do turno da A é tratado.
+    t.state('s2', 'idle');
+    await write(t.treeOf('s1'), 'src/a/x.ts', 'um\n');
+    t.turn('s1');
+    t.turn('s2');
+    await waitFor(() => t.manager.get(race.id).phase === 'done', LONG);
+    expect(t.messages('s2')).toHaveLength(1);
+  });
+});
+
 describe('recuperação', SLOW, () => {
   it('repõe repartições sem lançar nada: pistas em erro, feita, partes por arrancar listadas', () => {
     const refused = async (): Promise<never> => {
@@ -657,5 +780,41 @@ describe('recuperação', SLOW, () => {
     expect(closed.closed).toBe(true);
     expect(closed.race).toMatchObject({ phase: 'closed', split: { pending: [] } });
     await second.engine.dispose();
+  });
+
+  it('num projeto sem confiança o motor não conta com verificações: as partes ficam de fora', async () => {
+    const dirs = await repo();
+    const engine = new Engine({
+      registry: registryOf([]),
+      dataDir: dirs.data,
+      recoveryKey: Buffer.alloc(32, 7),
+      isolated: true,
+      checkpoints: false,
+      checks: false,
+      reviewer: false,
+      worktrees: new WorktreeManager({ root: path.join(dirs.data, 'worktrees') }),
+      emit: () => undefined,
+    });
+    const begin = (trusted: boolean) =>
+      engine.handle({
+        kind: 'request',
+        id: `sem-confianca-${trusted}`,
+        command: 'split.begin',
+        payload: {
+          projectId: 'p',
+          cwd: dirs.project,
+          trusted,
+          checks: [{ id: 'test', label: 'Testes', command: 'pnpm test', enabled: true }],
+          text: 'Pedido grande',
+          parts: [
+            { part: part('A', ['src/a/**']), agent: 'scripted' },
+            { part: part('B', ['src/b/**']), agent: 'scripted' },
+          ],
+        },
+      });
+    const refused = await begin(false);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error.message).toMatch(/verificação válida/);
+    await engine.dispose();
   });
 });

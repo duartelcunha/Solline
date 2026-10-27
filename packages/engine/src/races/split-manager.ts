@@ -34,7 +34,10 @@ import { outOfScope } from './zones.ts';
  * outra, cada uma a partir do resultado da anterior; as outras correm juntas. Os agentes não
  * falam entre si: cada um recebe um contrato escrito no início e, quando uma parte acaba um turno,
  * os outros recebem um resumo curto do que mudou (só num sentido, pela fila). Mexer fora do
- * contrato ou chocar com outra parte gera um aviso, nunca mata o agente. Nada arranca sozinho
+ * contrato ou chocar com outra parte gera um aviso, nunca mata o agente; um problema de uma parte
+ * (não abriu, a revisão falhou) é também um aviso da repartição, nunca um erro do motor. Uma parte só
+ * arranca quando a anterior acabou o turno bem (interrompida ou com erro, não arranca) e dá para
+ * parar o que falta arrancar (`stopLaunching`). Nada arranca sozinho
  * depois de um reinício: as partes por arrancar ficam só listadas. Quando todas acabam, integram-se
  * (`Integration`): uma a uma, com verificação depois de cada uma, e trazem-se para o projeto.
  */
@@ -60,6 +63,9 @@ export type SplitBegin = LaneProject & {
 const MAX_FILES = 12;
 const MAX_NOTE = 300;
 const MAX_REQUEST = 200;
+const MAX_PROBLEM = 500;
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Texto numa só linha, com um limite (reticências se cortar). */
 function oneLine(text: string, max: number): string {
@@ -143,6 +149,8 @@ interface Run {
   digests: Map<string, string>;
   /** Partes que não conseguiram abrir: ficam por arrancar e nunca se tentam outra vez. */
   failed: Set<number>;
+  /** Como acabou o último turno de cada pista (sem registo, conta como acabado bem). */
+  outcomes: Map<string, 'done' | 'interrupted' | 'error'>;
   /** O trabalho que segue a cada fim de turno, um de cada vez. */
   queue: Promise<void>;
   closing: boolean;
@@ -152,7 +160,6 @@ export class SplitManager {
   readonly #sessions: SplitSessions;
   readonly #worktrees: SplitWorktrees | undefined;
   readonly #registry: RaceRegistry;
-  readonly #emit: (event: EngineEvent) => void;
   readonly #core: Lanes;
   readonly #integration: Integration | undefined;
   readonly #runs = new Map<string, Run>();
@@ -175,7 +182,6 @@ export class SplitManager {
   }) {
     this.#sessions = options.sessions;
     this.#worktrees = options.worktrees;
-    this.#emit = options.emit;
     this.#registry = options.registry ?? new RaceRegistry(options.emit);
     this.#core = new Lanes(options.sessions);
     this.#integration = options.integration
@@ -241,6 +247,7 @@ export class SplitManager {
       finished: new Set(),
       digests: new Map(),
       failed: new Set(),
+      outcomes: new Map(),
       queue: Promise.resolve(),
       closing: false,
     };
@@ -281,7 +288,13 @@ export class SplitManager {
 
   /** O que as sessões fazem chega aqui: o estado de cada pista e o que se segue a um fim de turno. */
   observe(event: EngineEvent): void {
-    if (this.#stopping || event.type !== 'session.state') return;
+    if (this.#stopping) return;
+    // O fim de um turno chega antes de a pista ficar parada: é o que decide se a seguinte arranca.
+    if (event.type === 'session.event') {
+      if (event.delta.type === 'turn.end') this.#outcome(event.sessionId, event.delta.outcome);
+      return;
+    }
+    if (event.type !== 'session.state') return;
     this.#integration?.observe(event);
     for (const race of this.#registry.all()) {
       if (race.kind !== 'split' || race.phase === 'closed') continue;
@@ -290,6 +303,8 @@ export class SplitManager {
       const started = this.#core.hasStarted(lane.sessionId);
       if (!this.#core.observe(race.lanes, event)) continue;
       const run = this.#runs.get(race.id);
+      // Um turno novo apaga como acabou o anterior.
+      if (event.state === 'running') run?.outcomes.delete(lane.sessionId);
       // Parar sem ter começado não conta, a não ser em erro (aí já não vai começar).
       const ended = STOPPED.has(event.state) && (started || event.state === 'error');
       const timing = race.split?.lanes?.find((l) => l.sessionId === lane.sessionId);
@@ -299,8 +314,15 @@ export class SplitManager {
       }
       this.#changed(race);
       if (run && ended)
-        this.#enqueue(run, () => this.#settled(race, run, lane.sessionId, event.state));
+        this.#enqueue(race, run, lane.sessionId, () =>
+          this.#settled(race, run, lane.sessionId, event.state),
+        );
     }
+  }
+
+  #outcome(sessionId: string, outcome: 'done' | 'interrupted' | 'error'): void {
+    for (const run of this.#runs.values())
+      if ([...run.sessionOf.values()].includes(sessionId)) run.outcomes.set(sessionId, outcome);
   }
 
   /** Fecha a repartição (o main já confirmou): deita fora as pistas, guardando o branch de uma. */
@@ -318,11 +340,17 @@ export class SplitManager {
       run.closing = true;
       await run.queue;
     }
-    await this.#core.close(
-      race.lanes.map((l) => l.sessionId),
-      keep,
-    );
-    await this.#integration?.close(race);
+    try {
+      await this.#core.close(
+        race.lanes.map((l) => l.sessionId),
+        keep,
+      );
+      await this.#integration?.close(race);
+    } catch (error) {
+      // Um fecho que falha não deixa a repartição presa a "a fechar".
+      if (run) run.closing = false;
+      throw error;
+    }
     if (race.split) race.split.pending = [];
     race.phase = 'closed';
     this.#runs.delete(raceId);
@@ -335,7 +363,31 @@ export class SplitManager {
    * do resultado. Pára num conflito, com a ponta limpa.
    */
   async integrate(raceId: string): Promise<Race> {
-    return this.#requireIntegration().integrate(this.#splitOf(raceId));
+    return this.#requireIntegration().integrate(this.#open(raceId));
+  }
+
+  /**
+   * Pára a repartição: as partes por arrancar nunca arrancam (ficam num aviso) e as pistas que já
+   * arrancaram seguem como estão. Corre na mesma fila dos fins de turno, por isso não corta a
+   * abertura de pistas a meio.
+   */
+  async stopLaunching(raceId: string): Promise<Race> {
+    const race = this.#open(raceId);
+    const run = this.#runs.get(raceId);
+    if (race.phase !== 'running' || !run || (race.split?.pending.length ?? 0) === 0)
+      throw new Error('Não há partes por arrancar para parar.');
+    const done = run.queue.then(() => {
+      const split = race.split;
+      if (!split || split.pending.length === 0 || run.closing) return;
+      const titles = split.pending.map((p) => `«${p.part.title}»`).join(', ');
+      split.pending = [];
+      this.#problem(race, `A repartição foi parada: ${titles} não vai arrancar.`);
+      this.#maybeDone(race, run);
+      this.#changed(race);
+    });
+    run.queue = done.catch(() => undefined);
+    await done;
+    return race;
   }
 
   /** Abre a sessão que resolve o conflito em que a integração parou. */
@@ -343,7 +395,7 @@ export class SplitManager {
     raceId: string,
     project: LaneProject,
   ): Promise<{ race: Race; session: SessionCreateResult }> {
-    const race = this.#splitOf(raceId);
+    const race = this.#open(raceId);
     if (project.projectId !== race.projectId)
       throw new Error('Este projeto não é o da repartição.');
     const run = this.#runs.get(raceId);
@@ -352,14 +404,14 @@ export class SplitManager {
 
   /** Retoma a integração depois de o conflito estar resolvido e gravado. */
   async continueIntegration(raceId: string): Promise<Race> {
-    return this.#requireIntegration().continue(this.#splitOf(raceId));
+    return this.#requireIntegration().continue(this.#open(raceId));
   }
 
   /** Traz a integração para o branch atual do projeto. Com conflitos, nada muda no projeto. */
   async bring(
     raceId: string,
   ): Promise<{ race: Race; merged: boolean; conflicts: string[]; into: string }> {
-    return this.#requireIntegration().bring(this.#splitOf(raceId));
+    return this.#requireIntegration().bring(this.#open(raceId));
   }
 
   /** As worktrees das integrações que ainda existem (não são órfãs). */
@@ -381,6 +433,14 @@ export class SplitManager {
   #splitOf(raceId: string): Race {
     const race = this.#registry.get(raceId);
     if (race.kind !== 'split') throw new Error('Isto é uma corrida, não uma repartição.');
+    return race;
+  }
+
+  /** A repartição, desde que não esteja a fechar: o que se está a deitar fora não se integra. */
+  #open(raceId: string): Race {
+    const race = this.#splitOf(raceId);
+    if (this.#runs.get(raceId)?.closing)
+      throw new Error('A repartição está a fechar: já não há nada para juntar.');
     return race;
   }
 
@@ -427,16 +487,28 @@ export class SplitManager {
     if (race.split) race.split.pending = race.split.pending.filter((p) => !batch.includes(p));
   }
 
-  #enqueue(run: Run, job: () => Promise<void>): void {
-    run.queue = run.queue.then(job).catch((error: unknown) => this.#report(error));
+  #enqueue(race: Race, run: Run, sessionId: string, job: () => Promise<void>): void {
+    run.queue = run.queue
+      .then(job)
+      .catch((error: unknown) => this.#problem(race, errorText(error), sessionId));
   }
 
-  #report(error: unknown): void {
-    this.#emit({
-      kind: 'event',
-      type: 'engine.error',
-      message: error instanceof Error ? error.message : String(error),
-    });
+  /**
+   * Um problema de uma parte: um aviso da própria repartição (na vista dela), nunca um erro do
+   * motor sem sessão, que abriria a janela de recuperação como se o motor tivesse caído.
+   */
+  #problem(race: Race, message: string, sessionId = ''): void {
+    const split = race.split;
+    if (!split) return;
+    const warning: SplitWarning = {
+      sessionId,
+      kind: 'problem',
+      path: '',
+      detail: oneLine(message, MAX_PROBLEM),
+    };
+    if (hasWarning(split.warnings, warning)) return;
+    split.warnings.push(warning);
+    this.#changed(race);
   }
 
   /** A parte pode arrancar: não espera por ninguém ou a anterior acabou bem. */
@@ -445,7 +517,11 @@ export class SplitManager {
     if (pending.after === null) return true;
     const before = run.sessionOf.get(pending.after);
     const lane = race.lanes.find((l) => l.sessionId === before);
-    return Boolean(before && lane && run.finished.has(before) && lane.state === 'idle');
+    // Uma parte interrompida, ou que acabou o turno com erro, não entrega nada em que partir.
+    const outcome = before ? (run.outcomes.get(before) ?? 'done') : 'done';
+    return Boolean(
+      before && lane && run.finished.has(before) && lane.state === 'idle' && outcome === 'done',
+    );
   }
 
   /**
@@ -458,11 +534,15 @@ export class SplitManager {
     run.finished.add(sessionId);
     // Quem recebe o resumo: as pistas de agora, não as que este fim de turno vai abrir.
     const others = race.lanes.filter((l) => l.sessionId !== sessionId).map((l) => l.sessionId);
-    if (race.phase === 'running') await this.#advance(race, run);
-    const lane = race.lanes.find((l) => l.sessionId === sessionId);
-    if (state !== 'error' && lane?.part && this.#worktrees)
-      await this.#review(race, run, lane, others);
-    this.#maybeDone(race, run);
+    try {
+      if (race.phase === 'running') await this.#advance(race, run);
+      const lane = race.lanes.find((l) => l.sessionId === sessionId);
+      if (state !== 'error' && lane?.part && this.#worktrees)
+        await this.#review(race, run, lane, others);
+    } finally {
+      // Uma falha na revisão não pode deixar a repartição presa a "a trabalhar" para sempre.
+      this.#maybeDone(race, run);
+    }
   }
 
   /** Abre as partes que já podem arrancar (todas de uma vez, uma pista a seguir à outra). */
@@ -481,16 +561,16 @@ export class SplitManager {
       // Fica por arrancar e não volta a tentar-se: nada começa por conta própria depois de falhar.
       for (const p of ready) run.failed.add(p.index);
       const titles = ready.map((p) => `«${p.part.title}»`).join(', ');
-      this.#report(
-        new Error(
-          `Não consegui abrir ${titles}: ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      );
+      this.#problem(race, `Não consegui abrir ${titles}: ${errorText(error)}`);
       return;
     }
     this.#attach(race, run, ready, opened.sessions);
     this.#changed(race);
-    await opened.send().catch((error: unknown) => this.#report(error));
+    await opened
+      .send()
+      .catch((error: unknown) =>
+        this.#problem(race, `Não consegui enviar o contrato às partes novas: ${errorText(error)}`),
+      );
   }
 
   async #review(race: Race, run: Run, lane: RaceLane, others: readonly string[]): Promise<void> {
@@ -542,9 +622,11 @@ export class SplitManager {
     }
     if (changed) this.#changed(race);
 
+    // Só a quem ainda trabalha, pela fila (sem interromper): a uma pista parada o resumo abriria
+    // um segundo turno inteiro, com o custo que isso tem.
     const recipients = others.filter((id) => {
       const state = race.lanes.find((l) => l.sessionId === id)?.state;
-      return state !== undefined && state !== 'error' && !run.finished.has(id);
+      return state !== undefined && !STOPPED.has(state) && !run.finished.has(id);
     });
     if (files.length === 0 || recipients.length === 0) return;
     const note = lastSentence(this.#sessions.laneDigest(lane.sessionId));
@@ -578,7 +660,11 @@ export class SplitManager {
 
 function hasWarning(list: readonly SplitWarning[], warning: SplitWarning): boolean {
   return list.some(
-    (w) => w.kind === warning.kind && w.sessionId === warning.sessionId && w.path === warning.path,
+    (w) =>
+      w.kind === warning.kind &&
+      w.sessionId === warning.sessionId &&
+      w.path === warning.path &&
+      w.detail === warning.detail,
   );
 }
 

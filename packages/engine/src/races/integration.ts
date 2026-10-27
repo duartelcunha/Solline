@@ -19,9 +19,12 @@ import { STOPPED, type LaneProject, type LaneSessions, type SessionCreateResult 
  * A integração de uma repartição: as partes juntam-se uma a uma numa worktree própria (a ponta),
  * pela ordem de quem produz primeiro, e depois de cada uma correm as verificações dessa parte. Quem
  * decide são as verificações, não um modelo. Um conflito pára tudo com a ponta limpa; um modelo só
- * propõe a resolução (numa sessão normal que o Duarte vê) e a ponta só avança se o branch ficar
- * juntado e a verificação passar. No fim, as verificações todas e o revisor, com contexto limpo, lê
- * o diff integrado contra o pedido original. Nada arranca sozinho depois de um reinício.
+ * propõe a resolução (numa sessão normal que o Duarte vê) e a ponta só avança se a resolução
+ * contiver a ponta anterior e o branch juntado e a verificação do passo passar; senão tudo volta ao
+ * conflito, como estava. Um erro a meio nunca deixa a integração presa a "a juntar".
+ * As verificações contam sempre face à base original das pistas. No fim, as verificações todas e o
+ * revisor, com contexto limpo, lê o diff integrado contra o pedido original. Nada arranca sozinho
+ * depois de um reinício.
  */
 
 /** O que a integração precisa do SessionManager, além do que as pistas já usam. */
@@ -74,6 +77,9 @@ interface Live {
   owners: Map<string, string>;
   abort: AbortController;
 }
+
+/** Uma recusa com mensagem calma (a resolução não serve), à parte dos erros inesperados. */
+class Refused extends Error {}
 
 const MAX_BRIEF = 240;
 
@@ -213,13 +219,10 @@ export class Integration {
             : 'Esta repartição já está integrada.',
         );
       }
-      const pending = race.split?.pending ?? [];
-      if (pending.length > 0) {
-        const titles = pending.map((p) => `«${p.part.title}»`).join(', ');
-        throw new Error(
-          `Ainda há partes por arrancar (${titles}): lança-as ou fecha a repartição.`,
-        );
-      }
+      // Com a repartição acabada (nada a correr) uma parte por arrancar já não arranca: a
+      // anterior parou, deu erro ou foi interrompida, ou a repartição foi parada. Integra-se o
+      // que arrancou e fica um aviso com o que ficou de fora.
+      const skipped = (race.split?.pending ?? []).map((p) => `«${p.part.title}»`);
       if (race.lanes.length === 0) throw new Error('Não há nenhuma parte para integrar.');
       if (race.lanes.some((l) => !STOPPED.has(l.state)))
         throw new Error('Há partes ainda a trabalhar: espera que acabem.');
@@ -250,7 +253,12 @@ export class Integration {
           conflict: null,
           final: null,
           review: null,
-          warnings: [],
+          warnings:
+            skipped.length > 0
+              ? [
+                  `${skipped.length === 1 ? 'Ficou de fora uma parte que nunca arrancou' : 'Ficaram de fora partes que nunca arrancaram'}: ${skipped.join(', ')}.`,
+                ]
+              : [],
           metrics: integrationMetrics(race, { steps: [], final: null }, this.#cost(race, null)),
           brought: null,
         };
@@ -283,9 +291,13 @@ export class Integration {
       if (!integration || integration.state !== 'conflict' || !integration.conflict)
         throw new Error('Não há nenhum conflito para resolver.');
       const conflict = integration.conflict;
-      if (conflict.resolver)
-        throw new Error('Já há uma sessão a resolver este conflito: fala com ela.');
       const live = await this.#liveOf(race);
+      if (conflict.resolver) {
+        if (this.#sessions.worktreeOf(conflict.resolver))
+          throw new Error('Já há uma sessão a resolver este conflito: fala com ela.');
+        // A sessão foi fechada (ou deitada fora) fora da integração: deixa abrir outra.
+        this.#forgetResolver(conflict, live);
+      }
       const lanes = this.#ordered(race);
       const clashing = lanes.find((l) => l.sessionId === conflict.sessionId);
       const mergedIds = new Set(integration.steps.filter((s) => s.merged).map((s) => s.sessionId));
@@ -329,9 +341,10 @@ export class Integration {
   }
 
   /**
-   * Retoma depois de a sessão de resolução acabar: o merge tem de estar gravado (worktree limpa e
-   * branch juntado). A ponta passa a ser a worktree dela, corre a verificação do passo e segue
-   * com as partes que faltam.
+   * Retoma depois de a sessão de resolução acabar: o merge tem de estar gravado (worktree limpa,
+   * branch juntado) e a resolução tem de conter a ponta anterior (senão perdia-se o que já estava
+   * juntado). A ponta passa a ser a worktree dela, corre a verificação do passo e segue com as
+   * partes que faltam. Uma verificação que falha, ou um erro a meio, devolve tudo ao conflito.
    */
   async continue(race: Race): Promise<Race> {
     return this.#guard(race, async () => {
@@ -344,11 +357,20 @@ export class Integration {
         throw new Error(
           'Ainda ninguém está a resolver o conflito: abre primeiro a sessão de resolução.',
         );
+      const own = this.#sessions.worktreeOf(resolver);
+      if (!own) {
+        // Fechada fora da integração: sem sessão, o conflito volta a poder abrir uma nova.
+        const known = this.#live.get(race.id);
+        if (known) this.#forgetResolver(conflict, known);
+        else conflict.resolver = null;
+        this.#changed(race);
+        throw new Error(
+          'A sessão de resolução já não existe: abre outra para resolver o conflito.',
+        );
+      }
       const seen = this.#states.get(resolver);
       if (!seen?.started || !STOPPED.has(seen.state))
         throw new Error('A sessão de resolução ainda está a trabalhar: espera que acabe.');
-      const own = this.#sessions.worktreeOf(resolver);
-      if (!own) throw new Error('A sessão de resolução já não está aberta.');
       if (!(await this.#worktrees.isClean(own)))
         throw new Error(
           'A sessão de resolução ainda tem mudanças por gravar: pede-lhe que grave o merge num commit.',
@@ -358,37 +380,65 @@ export class Integration {
           `O branch «${conflict.branch}» ainda não foi juntado: pede à sessão de resolução que faça o merge e o grave.`,
         );
       const live = await this.#liveOf(race);
+      // Quem refaz o branch (um reset, por exemplo) pode largar partes já juntadas: nunca se
+      // retira uma ponta com trabalho que a nova não tenha.
+      const previous = this.#current(live);
+      if (!(await this.#worktrees.contains(own, previous.branch)))
+        throw new Error(
+          `A resolução não inclui o que já estava juntado («${previous.branch}»): pede à sessão que parta do estado atual da ponta e volte a gravar.`,
+        );
       const lane = this.#ordered(race).find((l) => l.sessionId === conflict.sessionId);
+      const old = live.tip;
       const before = { integration: structuredClone(integration), phase: race.phase };
       race.phase = 'assembling';
       integration.state = 'merging';
       this.#changed(race);
       live.abort = new AbortController();
-      let verdicts: CheckVerdict[];
-      try {
-        verdicts = lane ? await this.#verifyStep(lane, own, live.abort.signal) : [];
-      } catch (error) {
-        // Nada se perde: volta ao conflito como estava, com a sessão de resolução ainda lá.
+      const signal = live.abort.signal;
+      /** Nada se perde: volta ao conflito como estava, com a sessão de resolução ainda lá. */
+      const back = (message: string): Error => {
         race.integration = before.integration;
         race.phase = before.phase;
+        live.tip = old;
+        if (!before.integration.warnings.includes(message))
+          before.integration.warnings.push(message);
         this.#changed(race);
-        throw error;
+        return new Error(message);
+      };
+      try {
+        const verdicts = lane ? await this.#verifyStep(lane, own, live.base, signal) : [];
+        if (signal.aborted) return race;
+        const failed = verdicts.filter((v) => v.state !== 'passed' && !v.preexisting);
+        if (failed.length > 0) {
+          const names = failed.map((v) => `«${v.label}»`).join(', ');
+          throw new Refused(
+            `A verificação ${names} falhou depois da resolução: pede à sessão de resolução que a corrija, grave, e volta a continuar.`,
+          );
+        }
+        live.tip = own;
+        live.owners.set(own.path, resolver);
+        integration.tip = { ...integration.tip, branch: own.branch, path: own.path, top: own.top };
+        const title = lane?.title ?? conflict.sessionId;
+        const recorded = stepOf(title, conflict.sessionId, true, conflict.files, verdicts);
+        const step = integration.steps.find((s) => s.sessionId === conflict.sessionId);
+        if (step) Object.assign(step, recorded);
+        else integration.steps.push(recorded);
+        integration.conflict = null;
+        this.#changed(race);
+        await this.#run(race, live);
+        // A ponta anterior só sai quando a nova a substituiu de vez (pronta ou noutro conflito).
+        if (!signal.aborted && race.integration?.state !== 'merging') await this.#retire(live, old);
+        return race;
+      } catch (error) {
+        if (error instanceof Refused) throw back(error.message);
+        const reason = (error instanceof Error ? error.message : String(error)).replace(
+          /[.\s]+$/,
+          '',
+        );
+        throw back(
+          `A integração parou por um erro: ${reason}. O conflito ficou como estava; tenta continuar outra vez.`,
+        );
       }
-      if (live.abort.signal.aborted) return race;
-      const old = live.tip;
-      live.tip = own;
-      live.owners.set(own.path, resolver);
-      integration.tip = { ...integration.tip, branch: own.branch, path: own.path, top: own.top };
-      const title = lane?.title ?? conflict.sessionId;
-      const recorded = stepOf(title, conflict.sessionId, true, conflict.files, verdicts);
-      const step = integration.steps.find((s) => s.sessionId === conflict.sessionId);
-      if (step) Object.assign(step, recorded);
-      else integration.steps.push(recorded);
-      integration.conflict = null;
-      this.#changed(race);
-      await this.#retire(live, old);
-      await this.#run(race, live);
-      return race;
     });
   }
 
@@ -501,6 +551,15 @@ export class Integration {
     return (owner ? this.#sessions.worktreeOf(owner) : undefined) ?? live.tip;
   }
 
+  /** A sessão de resolução já não existe: esquece-a para o conflito poder abrir outra. */
+  #forgetResolver(conflict: { resolver: string | null }, live: Live): void {
+    const id = conflict.resolver;
+    if (!id) return;
+    live.resolvers = live.resolvers.filter((r) => r !== id);
+    for (const [dir, owner] of live.owners) if (owner === id) live.owners.delete(dir);
+    conflict.resolver = null;
+  }
+
   /** A ponta anterior já está toda na nova: sai a sessão dona dela ou a worktree da integração. */
   async #retire(live: Live, old: Worktree): Promise<void> {
     const owner = live.owners.get(old.path);
@@ -525,8 +584,16 @@ export class Integration {
     return checks.find((c) => c.id === id)?.label ?? id;
   }
 
-  /** Verifica a ponta com a verificação própria da parte (só essa), a base ao lado. */
-  async #verifyStep(lane: MergeLane, tip: Worktree, signal: AbortSignal): Promise<CheckVerdict[]> {
+  /**
+   * Verifica a ponta com a verificação própria da parte (só essa), a base ao lado. A base é sempre
+   * a original das pistas: o que as partes anteriores partiram não conta como já partido.
+   */
+  async #verifyStep(
+    lane: MergeLane,
+    tip: Worktree,
+    base: string,
+    signal: AbortSignal,
+  ): Promise<CheckVerdict[]> {
     const id = lane.part?.check;
     if (!id) return [];
     const context = this.#sessions.checkContext(lane.sessionId);
@@ -534,7 +601,7 @@ export class Integration {
     if (specs.length === 0) return [];
     return verify(tip.cwd, {
       specs,
-      baseline: () => this.#worktrees.baseline(tip),
+      baseline: () => this.#worktrees.baseline({ ...tip, base }),
       env: context.env,
       ...(context.run ? { run: context.run } : {}),
       signal,
@@ -582,7 +649,7 @@ export class Integration {
         this.#changed(race);
         return;
       }
-      const verdicts = await this.#verifyStep(lane, tip, signal);
+      const verdicts = await this.#verifyStep(lane, tip, live.base, signal);
       if (signal.aborted) return;
       integration.steps.push(stepOf(lane.title, lane.sessionId, true, [], verdicts));
       this.#changed(race);
@@ -601,7 +668,7 @@ export class Integration {
       context && context.specs.length > 0
         ? await verify(tip.cwd, {
             specs: context.specs,
-            baseline: () => this.#worktrees.baseline(tip),
+            baseline: () => this.#worktrees.baseline({ ...tip, base: live.base }),
             env: context.env,
             ...(context.run ? { run: context.run } : {}),
             signal,

@@ -1,5 +1,5 @@
 import type { SplitPart, SplitReview } from '@solline/protocol';
-import { globToRegExp, normalize, zoneOf, zonesOverlap, type Zone } from './zones.ts';
+import { WHOLE_TREE, globToRegExp, normalize, zoneOf, zonesOverlap, type Zone } from './zones.ts';
 
 /**
  * A revisão de um plano de repartição, antes de lançar nada e sem gastar nada: que partes se
@@ -76,6 +76,13 @@ function groups(indexes: readonly number[], zones: ReadonlyMap<number, Zone[]>):
   return result.sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0));
 }
 
+/** "A, B e C": vírgulas e só o último com "e". */
+function joinNames(names: readonly string[]): string {
+  return names.length < 2
+    ? names.join('')
+    : `${names.slice(0, -1).join(', ')} e ${names.at(-1) as string}`;
+}
+
 export function reviewPlan(parts: readonly SplitPart[], checkIds: readonly string[]): SplitReview {
   const known = new Set(checkIds);
   const dropped: SplitReview['dropped'] = [];
@@ -86,8 +93,12 @@ export function reviewPlan(parts: readonly SplitPart[], checkIds: readonly strin
     else running.push(index);
   });
 
+  // Uma parte que não diz onde mexe pode tocar em tudo: na dúvida, toca (corre em fila).
   const zones = new Map<number, Zone[]>(
-    parts.map((part, index) => [index, part.allowed.map(zoneOf)] as const),
+    parts.map(
+      (part, index) =>
+        [index, part.allowed.length > 0 ? part.allowed.map(zoneOf) : [WHOLE_TREE]] as const,
+    ),
   );
   // A parte zero corre sempre sozinha e primeiro; as outras agrupam-se pelo que tocam.
   const zero = running.filter((i) => parts[i]?.zero);
@@ -122,7 +133,7 @@ export function reviewPlan(parts: readonly SplitPart[], checkIds: readonly strin
     );
   for (const hub of hubs)
     warnings.push(
-      `${hub.parts.map(title).join(' e ')} podem mexer em ${hub.path}, um ficheiro partilhado: espera conflitos.`,
+      `${joinNames(hub.parts.map(title))} podem mexer em ${hub.path}, um ficheiro partilhado: espera conflitos.`,
     );
   for (const index of running)
     if ((parts[index]?.allowed.length ?? 0) === 0)
