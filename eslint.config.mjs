@@ -35,6 +35,11 @@ export default tseslint.config(
     },
   },
   {
+    // O shim MCP da Solline é um ficheiro CommonJS sem dependências, que corre com o Node do sistema.
+    files: ['**/*.cjs'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
     // Nos testes, um ! depois de uma asserção é mais claro do que outro if.
     files: ['**/test/**/*.ts', '**/e2e/**/*.ts'],
     rules: { '@typescript-eslint/no-non-null-assertion': 'off' },

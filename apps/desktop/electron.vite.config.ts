@@ -3,9 +3,15 @@ import { defineConfig } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { IPC } from '../../packages/protocol/src/bridge.ts';
+import { brainShimPlugin } from './vite-brain-shim.ts';
 
 export default defineConfig({
   main: {
+    plugins: [
+      brainShimPlugin(
+        resolve(__dirname, '../../packages/engine/src/brain/shim/solline-brain-shim.cjs'),
+      ),
+    ],
     build: {
       // As dependências de runtime (SDK, zod) ficam fora do bundle e vão para node_modules.
       // Os pacotes do workspace entram no bundle.

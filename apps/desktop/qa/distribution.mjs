@@ -9,6 +9,12 @@ assert.deepEqual(config.files, [
   'out/renderer/**',
   'package.json',
 ]);
+// O shim MCP da Solline corre com o Node do sistema: tem de existir no build e sair do asar.
+assert(config.asarUnpack.includes('out/main/brain-shim.cjs'), 'Brain shim is not unpacked');
+assert(
+  (await readFile('out/main/brain-shim.cjs', 'utf8')).includes('SOLLINE_BRAIN_PIPE'),
+  'Brain shim missing from the production build',
+);
 assert.equal(config.electronFuses.runAsNode, false);
 assert.equal(config.electronFuses.enableNodeCliInspectArguments, false);
 assert.equal(config.electronFuses.enableNodeOptionsEnvironmentVariable, false);
@@ -69,6 +75,13 @@ if (process.argv[2]) {
   assert(
     !entries.some((entry) => /^out\/(?:qa|qa-electron)(?:\/|$)/.test(entry)),
     'QA build packaged',
+  );
+  assert.equal(
+    (
+      await readFile(join(packaged, 'resources/app.asar.unpacked/out/main/brain-shim.cjs'))
+    ).toString(),
+    await readFile('out/main/brain-shim.cjs', 'utf8'),
+    'Unpacked brain shim differs from the build',
   );
   const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
   const nativeAgent = 'node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe';

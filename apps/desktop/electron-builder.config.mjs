@@ -13,7 +13,8 @@ export default {
   // Test builds share out/, but only these production entry points may ship.
   files: ['out/main/**', 'out/preload/**', 'out/renderer/**', 'package.json'],
   // O claude.exe não corre de dentro do asar; fica ao lado, em app.asar.unpacked.
-  asarUnpack: ['**/node_modules/@anthropic-ai/**'],
+  // O shim MCP da Solline corre com o Node do sistema, que não lê de dentro do asar.
+  asarUnpack: ['**/node_modules/@anthropic-ai/**', 'out/main/brain-shim.cjs'],
   extraMetadata: {
     name: APP_NAME.toLowerCase(),
   },
