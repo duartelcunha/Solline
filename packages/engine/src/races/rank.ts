@@ -1,4 +1,4 @@
-import type { RaceLaneVerdict, RaceVerdict } from '@solline/protocol';
+import type { Hunk, RaceLaneVerdict, RaceVerdict } from '@solline/protocol';
 import type { RawFile } from '../checkpoints/unified-diff.ts';
 import type { Verdict } from '../verify/judge.ts';
 import { failures, type CheckVerdict } from '../verify/verify.ts';
@@ -15,18 +15,18 @@ export interface LaneOutcome {
   checks: readonly CheckVerdict[];
 }
 
+/** As linhas que mudam num hunk, sem espaços nas pontas nem linhas vazias (o contexto não conta). */
+export function changedLines(hunk: Hunk): string[] {
+  return hunk.lines
+    .filter((l) => l.kind !== 'context' && l.text.trim() !== '')
+    .map((l) => `${l.kind === 'add' ? '+' : '-'}${l.text.trim()}`);
+}
+
 /** O patch sem o que não muda o comportamento (espaços nas pontas, linhas vazias, ordem dos ficheiros). */
 export function patchKey(files: readonly RawFile[]): string {
   return [...files]
     .sort((a, b) => a.diff.path.localeCompare(b.diff.path))
-    .map((f) => {
-      const lines = f.diff.hunks.flatMap((h) =>
-        h.lines
-          .filter((l) => l.kind !== 'context' && l.text.trim() !== '')
-          .map((l) => `${l.kind === 'add' ? '+' : '-'}${l.text.trim()}`),
-      );
-      return `${f.diff.path}\n${lines.join('\n')}`;
-    })
+    .map((f) => `${f.diff.path}\n${f.diff.hunks.flatMap(changedLines).join('\n')}`)
     .join('\n\n');
 }
 

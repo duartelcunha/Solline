@@ -136,6 +136,8 @@ describe('RaceManager.rank', () => {
       send: async () => undefined,
       close: async () => undefined,
       outcome: async (id) => ({ cwd: '/wt', ...(outcomes[id] ?? lane(id, [])) }),
+      worktreeOf: () => undefined,
+      checkContext: () => ({ specs: [], env: {}, run: undefined }),
     };
     const manager = new RaceManager({
       sessions,

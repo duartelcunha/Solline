@@ -11,7 +11,7 @@ import {
   WorktreeStats,
 } from './conversation.ts';
 import { qualityCommandSchemas } from './quality.ts';
-import { Race, RaceStartPayload } from './race.ts';
+import { Race, RaceProposal, RaceStartPayload } from './race.ts';
 import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
@@ -253,6 +253,44 @@ export const commandSchemas = {
     payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
     result: Race,
   },
+  /** O que se pode montar com as pistas: zonas, candidatos e a escolha de partida de cada zona. */
+  'race.proposal': {
+    payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
+    result: RaceProposal,
+  },
+  /**
+   * Monta o resultado: uma worktree nova com os candidatos escolhidos (um por zona) e as
+   * verificações do projeto corridas nela.
+   */
+  'race.assemble': {
+    payload: z
+      .object({
+        raceId: z.string().min(1).max(64),
+        picks: z.array(z.string().min(1).max(600)).max(2000),
+      })
+      .strict(),
+    result: Race,
+  },
+  /** Traz a montagem para o branch atual do projeto (merge, como "Trazer" numa sessão). */
+  'race.bring': {
+    payload: z.object({ raceId: z.string().min(1).max(64) }).strict(),
+    result: z.object({
+      race: Race,
+      merged: z.boolean(),
+      conflicts: z.array(z.string()),
+      into: z.string(),
+    }),
+  },
+  /**
+   * Fecha a corrida (main): confirma fora da interface, deita fora as pistas (guardando o branch
+   * de uma, se pedido) e a montagem já trazida.
+   */
+  'race.close': {
+    payload: z
+      .object({ raceId: z.string().min(1).max(64), keep: z.string().min(1).max(128).optional() })
+      .strict(),
+    result: z.object({ closed: z.boolean(), race: Race.optional() }),
+  },
   /** Volta a preparar a worktree da sessão (depois de uma falha). */
   'setup.retry': { payload: SessionRef, result: Empty },
   ...reviewCommandSchemas,
@@ -274,6 +312,7 @@ export const MAIN_COMMANDS = [
   'projects.setChecks',
   'projects.setSetup',
   'race.start',
+  'race.close',
   'session.create',
   'session.close',
   'worktrees.discard',
@@ -336,6 +375,13 @@ export const internalCommandSchemas = {
       setup: SetupSpec.nullable().optional(),
     }).strict(),
     result: z.object({ race: Race, sessions: z.array(SessionCreateResult) }),
+  },
+  /** Fecha a corrida (o main já confirmou). */
+  'race.closeNow': {
+    payload: z
+      .object({ raceId: z.string().min(1).max(64), keep: z.string().min(1).max(128).optional() })
+      .strict(),
+    result: z.object({ closed: z.boolean(), race: Race.optional() }),
   },
   /** Fecha a sessão (o main já confirmou se é para deitar fora). */
   'session.closeNow': {

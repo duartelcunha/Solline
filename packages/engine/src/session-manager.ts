@@ -1091,23 +1091,45 @@ export class SessionManager {
     signal?: AbortSignal,
   ): Promise<{ cwd: string; files: RawFile[]; checks: CheckVerdict[] }> {
     const { info } = this.#get(sessionId);
-    const worktree = this.#memoryOf(sessionId).worktree;
+    const worktree = this.worktreeOf(sessionId);
     const worktrees = this.#worktrees;
     if (!worktree || !worktrees) throw new Error('Esta sessão não tem worktree');
     const files = await worktrees.diff(worktree);
-    const state = this.#checks.get(info.cwd)?.state;
-    const specs = state?.trusted ? state.specs.filter((s) => s.enabled) : [];
+    const { specs, env, run } = this.checkContext(sessionId);
     const checks =
       files.length === 0 || specs.length === 0
         ? []
         : await verify(info.cwd, {
             specs,
             baseline: () => worktrees.baseline(worktree),
-            ...(info.port !== undefined ? { env: PortAllocator.env(info.port) } : {}),
-            ...(this.#checksOptions?.run ? { run: this.#checksOptions.run } : {}),
+            env,
+            ...(run ? { run } : {}),
             ...(signal ? { signal } : {}),
           });
     return { cwd: info.cwd, files, checks };
+  }
+
+  /** A worktree da sessão, se tiver uma. */
+  worktreeOf(sessionId: string): Worktree | undefined {
+    return this.#memory.get(sessionId)?.worktree;
+  }
+
+  /**
+   * O que correr para verificar o trabalho desta sessão: as verificações ligadas do projeto (só
+   * em projetos de confiança), as suas portas e o executor.
+   */
+  checkContext(sessionId: string): {
+    specs: CheckSpec[];
+    env: Record<string, string>;
+    run: RunCommand | undefined;
+  } {
+    const { info } = this.#get(sessionId);
+    const state = this.#checks.get(info.cwd)?.state;
+    return {
+      specs: state?.trusted ? state.specs.filter((s) => s.enabled) : [],
+      env: info.port !== undefined ? PortAllocator.env(info.port) : {},
+      run: this.#checksOptions?.run,
+    };
   }
 
   /** Traz o trabalho da worktree para o branch atual do projeto. */

@@ -237,7 +237,14 @@ describe('durable engine recovery', () => {
     };
     const events: EngineEvent[] = [];
     const races = new RaceManager({
-      sessions: { create: refused, send: refused, close: refused, outcome: refused },
+      sessions: {
+        create: refused,
+        send: refused,
+        close: refused,
+        outcome: refused,
+        worktreeOf: () => undefined,
+        checkContext: () => ({ specs: [], env: {}, run: undefined }),
+      },
       emit: (event) => events.push(event),
       judge: refused,
     });

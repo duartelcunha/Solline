@@ -134,6 +134,20 @@ export class WorktreeManager {
     const top = await this.repoOf(projectPath);
     if (!top) return null;
     const base = (await this.#run(top, ['rev-parse', 'HEAD'])).out.trim();
+    return this.#add(top, path.relative(top, path.resolve(projectPath)), base, projectId);
+  }
+
+  /** Uma worktree irmã de outra: o mesmo projeto, a mesma pasta e o mesmo commit de partida. */
+  async createFrom(sibling: Worktree): Promise<Worktree> {
+    return this.#add(
+      sibling.top,
+      path.relative(sibling.path, sibling.cwd),
+      sibling.base,
+      sibling.projectId,
+    );
+  }
+
+  async #add(top: string, rel: string, base: string, projectId: string): Promise<Worktree> {
     const suffix = randomBytes(3)
       .toString('base64url')
       .replace(/[^a-z0-9]/gi, 'x')
@@ -143,7 +157,6 @@ export class WorktreeManager {
     const dir = path.join(this.#root, projectId, suffix);
     await mkdir(path.dirname(dir), { recursive: true });
     await this.#run(top, ['worktree', 'add', '--quiet', '-b', branch, dir, base]);
-    const rel = path.relative(top, path.resolve(projectPath));
     const wt: Worktree = {
       path: dir,
       cwd: path.join(dir, rel),
@@ -318,15 +331,7 @@ export class WorktreeManager {
     await this.#run(wt.top, ['worktree', 'add', '--quiet', '--detach', dir, wt.base]);
     const rel = path.relative(wt.path, wt.cwd);
     const cwd = path.join(dir, rel);
-    const deps = path.join(wt.cwd, 'node_modules');
-    if (
-      await stat(deps).then(
-        () => true,
-        () => false,
-      )
-    ) {
-      await symlink(deps, path.join(cwd, 'node_modules'), 'junction').catch(() => undefined);
-    }
+    await this.#linkDependencies(wt.cwd, cwd);
     return {
       cwd,
       dispose: async () => {
@@ -335,6 +340,43 @@ export class WorktreeManager {
         await this.#run(wt.top, ['worktree', 'prune'], true);
       },
     };
+  }
+
+  /** O node_modules de uma worktree ligado noutra pasta (junção no Windows), se existir. */
+  async linkDependencies(from: Worktree, to: Worktree): Promise<void> {
+    await this.#linkDependencies(from.cwd, to.cwd);
+  }
+
+  async #linkDependencies(fromCwd: string, toCwd: string): Promise<void> {
+    const deps = path.join(fromCwd, 'node_modules');
+    const exists = await stat(deps).then(
+      () => true,
+      () => false,
+    );
+    if (exists)
+      await symlink(deps, path.join(toCwd, 'node_modules'), 'junction').catch(() => undefined);
+  }
+
+  /**
+   * Aplica patches (um por pedaço, em bytes) à worktree, no índice e nos ficheiros. Cada um tem
+   * de encaixar tal como saiu do diff; se um não encaixar, para e diz qual.
+   */
+  async apply(wt: Worktree, patches: readonly { label: string; patch: Buffer }[]): Promise<void> {
+    const file = `${wt.path}.${randomBytes(4).toString('hex')}.patch`;
+    try {
+      for (const { label, patch } of patches) {
+        await writeFile(file, patch);
+        await this.#run(wt.path, ['apply', '--index', '--whitespace=nowarn', file]).catch(
+          (error: unknown) => {
+            throw new Error(
+              `O pedaço de ${label} não encaixa: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        );
+      }
+    } finally {
+      await rm(file, { force: true }).catch(() => undefined);
+    }
   }
 
   /** Destes nomes (relativos a `dir`), os que o .gitignore do projeto ignora. */

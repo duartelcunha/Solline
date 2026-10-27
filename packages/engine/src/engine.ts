@@ -25,6 +25,7 @@ import { SECRET_NAME } from './env.ts';
 import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
 import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
 import { SessionManager, type ChecksOptions } from './session-manager.ts';
+import { Assembler } from './races/assembler.ts';
 import { RaceManager } from './races/race-manager.ts';
 import { claudeJudge } from './verify/judge.ts';
 import { detectChecks } from './checks/detect.ts';
@@ -155,6 +156,14 @@ export class Engine {
       box.races?.observe(event);
       this.spaces?.observe(event);
     };
+    // Nos testes isolados não se correm comandos do repositório da própria Solline.
+    const worktrees =
+      options.worktrees === false
+        ? undefined
+        : (options.worktrees ??
+          (options.dataDir
+            ? new WorktreeManager({ root: path.join(options.dataDir, 'worktrees') })
+            : undefined));
     this.sessions = new SessionManager({
       beforeEffect: (command, sessionId, text) =>
         this.#prepare(command, { sessionId, ...(text ? { text } : {}) }),
@@ -171,14 +180,7 @@ export class Engine {
             (options.isolated
               ? undefined
               : claudeReviewer({ claudeExecutable: options.claudeExecutable }))),
-      // Nos testes isolados não se correm comandos do repositório da própria Solline.
-      worktrees:
-        options.worktrees === false
-          ? undefined
-          : (options.worktrees ??
-            (options.dataDir
-              ? new WorktreeManager({ root: path.join(options.dataDir, 'worktrees') })
-              : undefined)),
+      worktrees,
       checks:
         options.checks === false
           ? undefined
@@ -188,6 +190,7 @@ export class Engine {
       beforeEffect: (command, raceId) => this.#prepare(command, { raceId }),
       sessions: this.sessions,
       emit: emitAll,
+      ...(worktrees ? { assembler: new Assembler({ worktrees }) } : {}),
       // O juiz só desempata; nos testes isolados não se gasta a subscrição com ele.
       ...(options.isolated || options.reviewer === false
         ? {}
@@ -381,6 +384,10 @@ export class Engine {
       'session.bring': (p) => s.bring(p.sessionId),
       'race.begin': (p) => this.races.begin(p),
       'race.get': async (p) => this.races.get(p.raceId),
+      'race.proposal': (p) => this.races.proposal(p.raceId),
+      'race.assemble': (p) => this.races.assemble(p.raceId, p.picks),
+      'race.bring': (p) => this.races.bring(p.raceId),
+      'race.closeNow': (p) => this.races.close(p.raceId, p.keep),
       'worktrees.list': async () => ({ orphans: await s.orphans() }),
       'worktrees.bring': (p) => s.bringOrphan(p.id),
       'worktrees.discardNow': async (p) => (await s.discardOrphan(p.id), ok),
@@ -581,6 +588,7 @@ const READ_ONLY = new Set<EngineCommandName>([
   'mcp.list',
   'worktrees.list',
   'race.get',
+  'race.proposal',
   'projects.detectChecks',
   'projects.detectSetup',
   'review.timeline',
