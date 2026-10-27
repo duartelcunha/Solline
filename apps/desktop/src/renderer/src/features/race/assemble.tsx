@@ -1,11 +1,12 @@
 ﻿import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Check } from 'lucide-react';
 import type { Race, RaceCandidate, RaceProposal, RaceSlot } from '@solline/protocol';
-import { scrollIntoViewSmooth } from '@solline/ui/scroll';
 import { actions } from '../../stores/app.ts';
 import { SessionMark } from '../agents/bots.tsx';
 import { Mark } from '../quality/checks.tsx';
+import { RaceCloseFooter, panelButton } from './close-footer.tsx';
 import { laneName } from './lane-name.ts';
+import { useReveal } from './use-reveal.ts';
 
 /**
  * Montar o resultado: por zona de cada ficheiro, escolhes de que pista vem o pedaço (ou nenhum).
@@ -13,8 +14,9 @@ import { laneName } from './lane-name.ts';
  * monta-se numa worktree própria, vê-se o resultado das verificações, traz-se e fecham-se as pistas.
  */
 
-const button =
-  'sl-press h-8 rounded-control px-3 text-[12.5px] disabled:cursor-default disabled:opacity-50';
+const button = panelButton;
+
+const revealPhase = (phase: string) => phase === 'ranked' || phase === 'assembled';
 
 const preferredOf = (proposal: RaceProposal): Set<string> =>
   new Set(
@@ -151,7 +153,6 @@ export function AssemblyPanel({
   const [proposal, setProposal] = useState<RaceProposal | null>(null);
   const [picks, setPicks] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [keep, setKeep] = useState('');
   const active =
     race.phase === 'ranked' || race.phase === 'assembling' || race.phase === 'assembled';
   const brought = race.assembly?.brought ?? null;
@@ -172,18 +173,7 @@ export function AssemblyPanel({
   }, [active, brought, race.id]);
 
   // Só desliza quando vê a corrida mudar de fase (abrir uma já ordenada não mexe).
-  const last = useRef(race.phase);
-  useEffect(() => {
-    const before = last.current;
-    last.current = race.phase;
-    if (before === race.phase) return;
-    if (race.phase !== 'ranked' && race.phase !== 'assembled') return;
-    const frame = requestAnimationFrame(() => {
-      if (area.current && panel.current)
-        scrollIntoViewSmooth(area.current, panel.current, 'nearest');
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [race.phase, area]);
+  useReveal(area, panel, race.phase, revealPhase);
 
   if (!active) return null;
 
@@ -325,34 +315,7 @@ export function AssemblyPanel({
         </>
       ) : null}
 
-      <footer className="flex flex-wrap items-center gap-2 border-t border-line pt-3 text-[12px] text-muted">
-        <label className="flex items-center gap-2">
-          Guardar o branch de
-          <select
-            value={keep}
-            onChange={(event) => setKeep(event.target.value)}
-            className="h-7 rounded-control border border-line bg-surface px-2 text-[12px] text-fg"
-            data-testid="race-keep"
-          >
-            <option value="">nenhuma pista</option>
-            {race.lanes.map((lane) => (
-              <option key={lane.sessionId} value={lane.sessionId}>
-                {laneName(lane)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="flex-1" />
-        <button
-          type="button"
-          disabled={busy || race.phase === 'assembling'}
-          onClick={() => void run(() => actions.closeRace(race.id, keep || undefined))}
-          className={`${button} border border-line text-fg hover:bg-surface-hover`}
-          data-testid="race-close"
-        >
-          Fechar a corrida
-        </button>
-      </footer>
+      <RaceCloseFooter race={race} disabled={busy || race.phase === 'assembling'} />
     </section>
   );
 }

@@ -166,6 +166,42 @@ function FindingTitle({
   );
 }
 
+/** Um achado só para ler (sem caixa de escolha): a mesma marca e o mesmo título que no rever. */
+export function FindingLine({ finding }: { finding: Finding }) {
+  const [open, setOpen] = useState(false);
+  const tone = SEVERITY[finding.severity];
+  return (
+    <li
+      className="flex items-start gap-2 text-[12.5px]"
+      data-testid="finding-line"
+      data-severity={finding.severity}
+    >
+      <span className="mt-[5px]">
+        <SeverityMark severity={finding.severity} />
+      </span>
+      {finding.detail ? (
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="min-w-0 flex-1 text-left"
+        >
+          <FindingTitle finding={finding} label={tone.label} open={open} />
+          {open ? (
+            <span className="mt-0.5 block leading-snug text-muted select-text">
+              {finding.detail}
+            </span>
+          ) : null}
+        </button>
+      ) : (
+        <span className="min-w-0 flex-1">
+          <FindingTitle finding={finding} label={tone.label} open />
+        </span>
+      )}
+    </li>
+  );
+}
+
 /** Um achado por baixo da linha a que se refere, com a caixa para o escolher. */
 export function FindingRow({
   finding,

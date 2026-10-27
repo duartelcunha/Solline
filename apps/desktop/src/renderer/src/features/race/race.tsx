@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowUpRight, GitBranch, Minus, Plus } from 'lucide-react';
 import type { AskBlock, Race, RaceLane, RaceLaneVerdict } from '@solline/protocol';
+import { useDragScroll } from '@solline/ui/scroll';
 import { actions, sessionStore, useApp, useSession } from '../../stores/app.ts';
 import { SessionMark } from '../agents/bots.tsx';
 import { ContextMeter, money } from '../composer/composer.tsx';
@@ -8,7 +9,9 @@ import { lastAction, pendingAsk } from '../desk/desk-order.ts';
 import { Mark } from '../quality/checks.tsx';
 
 import { AssemblyPanel } from './assemble.tsx';
-import { LABELS, laneName } from './lane-name.ts';
+import { IntegrationPanel } from './integration.tsx';
+import { LABELS, laneName, laneTitle } from './lane-name.ts';
+import { AgentChip, PendingLane, WarningChips, partLetter } from './split-lane.tsx';
 
 const PHASE: Record<Race['phase'], string> = {
   running: 'A correr',
@@ -19,6 +22,20 @@ const PHASE: Record<Race['phase'], string> = {
   assembled: 'Montada',
   closed: 'Fechada',
 };
+
+/** Numa repartição ninguém ganha: as fases dizem só o que se está a fazer. */
+const SPLIT_PHASE: Record<Race['phase'], string> = {
+  running: 'A trabalhar',
+  done: 'Acabaram todas',
+  ranking: 'Acabaram todas',
+  ranked: 'Acabaram todas',
+  assembling: 'A integrar',
+  assembled: 'Integrada',
+  closed: 'Fechada',
+};
+
+const phaseLabel = (race: Pick<Race, 'kind' | 'phase'>) =>
+  (race.kind === 'split' ? SPLIT_PHASE : PHASE)[race.phase];
 
 /** "1.º", "2.º": a posição como se escreve em português. */
 const ordinal = (rank: number) => `${rank}.º`;
@@ -42,11 +59,13 @@ function VerdictChecks({ checks }: { checks: RaceLaneVerdict['checks'] }) {
  * ordenada, a posição, o melhor e o pior (do juiz, quando foi chamado).
  */
 function Lane({
+  race,
   lane,
   verdict,
   celebrate,
   tied,
 }: {
+  race: Race;
   lane: RaceLane;
   verdict: RaceLaneVerdict | undefined;
   celebrate: boolean;
@@ -70,7 +89,24 @@ function Lane({
     >
       <header className="flex items-center gap-2.5">
         <SessionMark sessionId={id} size={18} />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{laneName(lane)}</span>
+        {lane.part ? (
+          <>
+            <span
+              className="min-w-0 flex-1 truncate text-[13px] font-semibold"
+              title={lane.part.title}
+            >
+              {partLetter(race, id) ? (
+                <span className="mr-1.5 text-subtle">{partLetter(race, id)}</span>
+              ) : null}
+              {lane.part.title}
+            </span>
+            <AgentChip lane={lane} />
+          </>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+            {laneName(lane)}
+          </span>
+        )}
         {verdict ? (
           <span
             className={`rounded-full px-2 py-0.5 text-[11.5px] font-semibold tabular-nums ${winner ? `bg-accent text-on-accent ${celebrate ? 'sl-reward' : ''}` : 'bg-surface-hover text-muted'}`}
@@ -104,6 +140,12 @@ function Lane({
                     ? 'A pensar…'
                     : 'Concluída'))}
       </p>
+      {lane.part ? (
+        <WarningChips
+          warnings={(race.split?.warnings ?? []).filter((w) => w.sessionId === id)}
+          race={race}
+        />
+      ) : null}
       {verdict?.best || verdict?.worst ? (
         <ul className="flex flex-col gap-1 text-[12px] leading-snug">
           {verdict.best ? (
@@ -207,7 +249,7 @@ function AskBar({ race }: { race: Race }) {
       className="sl-enter mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent bg-surface px-4 py-2.5 text-[13px]"
       data-testid="race-ask"
     >
-      <span className="text-[12px] text-accent-text">{lane ? laneName(lane) : ''}</span>
+      <span className="text-[12px] text-accent-text">{lane ? laneTitle(lane) : ''}</span>
       <span className="min-w-0 flex-1 truncate">
         {title ?? (first.ask.kind === 'plan' ? 'Um plano para aprovares' : 'Uma pergunta para ti')}
       </span>
@@ -293,17 +335,20 @@ function TieNote({ race }: { race: Race }) {
   );
 }
 
-/** A corrida: o pedido, os pedidos das pistas no topo e as pistas lado a lado. */
+/** A corrida ou repartição: o pedido, os pedidos das pistas no topo e as pistas lado a lado. */
 export function RaceView({ raceId }: { raceId: string }) {
   const race = useApp((s) => s.races[raceId]);
   const celebrate = useCelebrate(race?.phase);
   const area = useRef<HTMLElement>(null);
+  useDragScroll(area);
   if (!race) return null;
+  const split = race.kind === 'split';
   return (
     <section
       ref={area}
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-2 pb-8"
+      className="scroll-fade-y flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-2 pb-8"
       data-testid="race"
+      data-kind={race.kind}
     >
       <p className="mb-3 line-clamp-2 text-[13.5px] text-muted" data-testid="race-text">
         {race.text}
@@ -314,33 +359,47 @@ export function RaceView({ raceId }: { raceId: string }) {
         {race.lanes.map((lane) => (
           <Lane
             key={lane.sessionId}
+            race={race}
             lane={lane}
-            verdict={race.verdict?.lanes.find((v) => v.sessionId === lane.sessionId)}
-            celebrate={celebrate}
-            tied={race.verdict?.tie?.includes(lane.sessionId) ?? false}
+            verdict={
+              split ? undefined : race.verdict?.lanes.find((v) => v.sessionId === lane.sessionId)
+            }
+            celebrate={celebrate && !split}
+            tied={!split && (race.verdict?.tie?.includes(lane.sessionId) ?? false)}
           />
         ))}
+        {split
+          ? (race.split?.pending ?? []).map((pending) => (
+              <PendingLane key={`pending-${pending.index}`} race={race} pending={pending} />
+            ))
+          : null}
       </div>
-      <AssemblyPanel race={race} area={area} />
+      {split ? (
+        <IntegrationPanel race={race} area={area} />
+      ) : (
+        <AssemblyPanel race={race} area={area} />
+      )}
     </section>
   );
 }
 
 export function RaceTitle({ raceId }: { raceId: string }) {
-  const phase = useApp((s) => s.races[raceId]?.phase);
+  const race = useApp((s) => s.races[raceId]);
   return (
     <div className="flex min-w-0 items-baseline gap-2.5">
-      <h1 className="text-[15px] font-semibold tracking-[-0.015em]">Corrida</h1>
-      {phase ? (
-        <span className="text-[12px] text-muted" data-testid="race-phase" data-phase={phase}>
-          {PHASE[phase]}
+      <h1 className="text-[15px] font-semibold tracking-[-0.015em]">
+        {race?.kind === 'split' ? 'Repartição' : 'Corrida'}
+      </h1>
+      {race ? (
+        <span className="text-[12px] text-muted" data-testid="race-phase" data-phase={race.phase}>
+          {phaseLabel(race)}
         </span>
       ) : null}
     </div>
   );
 }
 
-/** A corrida na mesa: um cartão com as pistas em miniatura. */
+/** A corrida (ou repartição) na mesa: um cartão com as pistas em miniatura. */
 export function RaceCard({ race }: { race: Race }) {
   return (
     <div
@@ -358,18 +417,30 @@ export function RaceCard({ race }: { race: Race }) {
       className="sl-enter sl-press flex cursor-pointer flex-col gap-3 rounded-xl border border-line bg-surface p-4 outline-none hover:border-line-strong focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)]"
     >
       <div className="flex items-baseline gap-2">
-        <span className="text-[13px] font-semibold">Corrida</span>
-        <span className="text-[11.5px] text-subtle">{PHASE[race.phase]}</span>
+        <span className="text-[13px] font-semibold">
+          {race.kind === 'split' ? 'Repartição' : 'Corrida'}
+        </span>
+        <span className="text-[11.5px] text-subtle">{phaseLabel(race)}</span>
       </div>
       <p className="truncate text-[12px] text-muted">{race.text}</p>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {race.lanes.map((lane) => (
           <span
             key={lane.sessionId}
-            className="inline-flex items-center gap-1 text-[11.5px] text-muted"
+            className="inline-flex min-w-0 items-center gap-1 text-[11.5px] text-muted"
           >
             <SessionMark sessionId={lane.sessionId} />
-            {LABELS[lane.agent] ?? lane.agent}
+            <span className="max-w-[9rem] truncate">
+              {lane.part?.title ?? LABELS[lane.agent] ?? lane.agent}
+            </span>
+          </span>
+        ))}
+        {(race.split?.pending ?? []).map((pending) => (
+          <span
+            key={`pending-${pending.index}`}
+            className="inline-flex min-w-0 items-center text-[11.5px] text-subtle"
+          >
+            <span className="max-w-[9rem] truncate">{pending.part.title}</span>
           </span>
         ))}
       </div>

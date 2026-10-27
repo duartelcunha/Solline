@@ -8,3 +8,7 @@ export const shortModel = (model: string) =>
 
 export const laneName = (lane: RaceLane) =>
   `${LABELS[lane.agent] ?? lane.agent}${lane.model ? ` · ${shortModel(lane.model)}` : ''}`;
+
+/** Numa repartição a pista chama-se pela parte que faz; numa corrida, pelo agente e modelo. */
+export const laneTitle = (lane: RaceLane) =>
+  lane.part ? `${lane.part.title} · ${laneName(lane)}` : laneName(lane);

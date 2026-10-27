@@ -725,6 +725,103 @@ test('uma corrida: o mesmo pedido em duas pistas, lado a lado (SDK real)', async
   await expect(page.getByTestId('race-card')).toHaveCount(0);
 });
 
+test('uma repartição: duas partes à mão, integrar, trazer e fechar (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'depende das sessões reais dos testes anteriores');
+  test.setTimeout(480_000);
+  const page = await app.firstWindow();
+  await page.getByTestId('session-row').first().click();
+  await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 60_000 });
+  await page
+    .getByTestId('composer-input')
+    .fill(
+      'Create two files: part-a.txt containing exactly the word alpha, and part-b.txt containing exactly the word beta. Reply with one word.',
+    );
+
+  // Partir: o planeador lê o projeto. Se disser que não vale a pena, parte-se à mão; se propuser
+  // partes, o teste reescreve-as, para o caminho ser sempre o mesmo.
+  await page.getByTestId('pill-split').click();
+  await expect(page.getByTestId('split-keep').or(page.getByTestId('split-plan'))).toBeVisible({
+    timeout: 180_000,
+  });
+  if (await page.getByTestId('split-keep').isVisible()) {
+    await page.getByTestId('split-by-hand').click();
+  }
+  const plan = page.getByTestId('split-plan');
+  await expect(plan).toBeVisible();
+  const parts = plan.getByTestId('split-part');
+  while ((await parts.count()) > 2) await parts.last().getByTestId('split-part-remove').click();
+  await expect(parts).toHaveCount(2);
+
+  // Duas partes sem ficheiros em comum: correm ao mesmo tempo, cada uma com a verificação "typecheck".
+  const files = ['part-a.txt', 'part-b.txt'] as const;
+  const words = ['alpha', 'beta'] as const;
+  for (const i of [0, 1] as const) {
+    const part = parts.nth(i);
+    await part.getByTestId('split-part-title').fill(`Ficheiro ${files[i]}`);
+    if (!(await part.getByTestId('split-part-goal').isVisible())) {
+      await part.getByTestId('split-contract-toggle').click();
+    }
+    await part
+      .getByTestId('split-part-goal')
+      .fill(
+        `Create the file ${files[i]} containing exactly the word ${words[i]}. Touch nothing else.`,
+      );
+    await part.getByTestId('split-part-allowed').fill(files[i]);
+    await part.getByTestId('split-part-forbidden').fill(files[1 - i] as string);
+    await part.getByTestId('split-part-check').selectOption({ value: 'typecheck' });
+  }
+  const zero = parts.first().getByTestId('split-zero');
+  if (await zero.isChecked()) await zero.uncheck();
+  await expect(page.getByTestId('split-launch')).toHaveText('Lançar 2 partes', { timeout: 30_000 });
+  await expect(page.getByTestId('split-cost')).toContainText('2×');
+  await shot(page, 'split-plan');
+  await page.getByTestId('split-launch').click();
+
+  await expect(page.getByTestId('race')).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByTestId('race')).toHaveAttribute('data-kind', 'split');
+  await expect(page.getByTestId('race-lane')).toHaveCount(2);
+  await shot(page, 'split');
+
+  // As partes pedem permissão no mesmo sítio; responde-se até acabarem todas.
+  const phase = page.getByTestId('race-phase');
+  await expect
+    .poll(
+      async () => {
+        if (await page.getByTestId('race-allow-all').isVisible()) {
+          await page.getByTestId('race-allow-all').click();
+        } else if (await page.getByTestId('race-allow').isVisible()) {
+          await page.getByTestId('race-allow').click();
+        }
+        return phase.getAttribute('data-phase');
+      },
+      { timeout: 300_000, intervals: [1_000] },
+    )
+    .toBe('done');
+  await expect(page.getByTestId('race-rank')).toHaveCount(0);
+
+  // Integrar: uma parte de cada vez, com a verificação depois de cada uma.
+  await page.getByTestId('split-integrate').click();
+  await expect(phase).toHaveAttribute('data-phase', 'assembled', { timeout: 240_000 });
+  await expect(page.getByTestId('split-step')).toHaveCount(2);
+  await expect(page.getByTestId('split-metrics')).toBeVisible();
+  await shot(page, 'split-integrated');
+
+  // Trazer faz o merge no projeto.
+  await page.getByTestId('race-bring').click();
+  await expect(page.getByTestId('split-brought')).toBeVisible({ timeout: 60_000 });
+  for (const i of [0, 1] as const) {
+    await expect
+      .poll(() => readFile(join(project, files[i]), 'utf8').catch(() => ''), { timeout: 30_000 })
+      .toContain(words[i]);
+  }
+
+  // Fechar pede uma confirmação nativa e deita fora as pistas.
+  confirmations['Fechar a corrida'] = { button: 'Deitar fora', choice: 'accept' };
+  await page.getByTestId('race-close').click();
+  await expect(page.getByTestId('desk')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('race-card')).toHaveCount(0);
+});
+
 test('Codex por clique: sessão, resposta e tokens (Codex real)', async () => {
   test.skip(
     process.env.SOLLINE_E2E_CODEX !== '1',
