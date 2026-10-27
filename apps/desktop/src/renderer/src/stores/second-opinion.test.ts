@@ -76,11 +76,30 @@ it('"Trazer" abre a confirmação e pede já a revisão de toda a sessão, antes
   expect(useApp.getState().bringFor).toBeNull();
 });
 
-it('com o revisor desligado, indisponível ou já a rever, confirma sem pedir outra revisão', () => {
+it('com uma revisão de turno a correr, pede na mesma a da sessão toda (substitui-a)', () => {
+  open(
+    quality({
+      review: { state: 'running', turnId: 't1', findings: [], error: null, trigger: 'turn' },
+    }),
+  );
+  const request = vi.fn(async () => quality());
+  vi.stubGlobal('window', { solline: { request } });
+  actions.askBring('a');
+  expect(request).toHaveBeenCalledWith('quality.review', {
+    sessionId: 'a',
+    trigger: 'bring',
+    scope: 'session',
+  });
+  actions.closeBring();
+});
+
+it('com o revisor desligado, indisponível ou já a rever para trazer, confirma sem pedir outra', () => {
   for (const q of [
     quality({ enabled: false }),
     quality({ available: false }),
-    quality({ review: { state: 'running', turnId: 't1', findings: [], error: null } }),
+    quality({
+      review: { state: 'running', turnId: 't1', findings: [], error: null, trigger: 'bring' },
+    }),
     null,
   ]) {
     open(q);

@@ -998,7 +998,10 @@ export const actions = {
   askBring(sessionId: string): void {
     useApp.setState({ bringFor: sessionId });
     const quality = sessionStores.get(sessionId)?.getState().quality;
-    if (quality?.available && quality.enabled && quality.review.state !== 'running') {
+    // Uma revisão de turno a correr não é a de antes de trazer: a da sessão toda substitui-a
+    // (o motor cancela a anterior). Só uma de "trazer" já a correr dispensa outra.
+    const bringing = quality?.review.state === 'running' && quality.review.trigger === 'bring';
+    if (quality?.available && quality.enabled && !bringing) {
       void request('quality.review', { sessionId, trigger: 'bring', scope: 'session' }).catch(
         () => undefined,
       );

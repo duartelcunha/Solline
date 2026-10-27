@@ -27,8 +27,8 @@ function BringBody({ sessionId }: { sessionId: string }) {
 
   const phase = reviewPhase(quality);
   const review = quality?.review;
-  // Só vale a revisão pedida por este "Trazer" (ou a que ainda corre): uma antiga não é "antes de trazer".
-  const mine = review?.trigger === 'bring' || review?.state === 'running';
+  // Só vale a revisão pedida por um "Trazer": uma de turno (antiga ou a correr) não é "antes de trazer".
+  const mine = review?.trigger === 'bring';
   const { shown, folded } = review ? groupFindings(review.findings) : { shown: [], folded: [] };
   const byline = review ? reviewByline(review, agents) : null;
 
