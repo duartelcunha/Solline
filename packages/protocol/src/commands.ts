@@ -26,7 +26,7 @@ import {
 import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
-import { DelegateTask, spacesCommandSchemas } from './spaces.ts';
+import { DelegateTask, memoryCommandSchemas, spacesCommandSchemas } from './spaces.ts';
 import { rulesCommandSchemas, rulesInternalSchemas } from './rules.ts';
 
 /**
@@ -114,6 +114,7 @@ export const SessionCreateResult = z.object({
 
 export const commandSchemas = {
   ...spacesCommandSchemas,
+  ...memoryCommandSchemas,
   ...rulesCommandSchemas,
   'engine.snapshot': { payload: Empty, result: EngineSnapshot },
   'engine.flush': { payload: Empty, result: Empty },

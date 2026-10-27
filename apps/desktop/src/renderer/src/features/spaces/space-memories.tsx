@@ -123,7 +123,9 @@ export function SpaceMemories({ projectId }: { projectId: string | null }) {
                     ? 'Por aprovar'
                     : m.state === 'disabled'
                       ? 'Desativada'
-                      : 'Ativa'}
+                      : m.state === 'toConfirm'
+                        ? 'A confirmar'
+                        : 'Ativa'}
                 </p>
               </div>
               <button
@@ -159,7 +161,13 @@ export function SpaceMemories({ projectId }: { projectId: string | null }) {
                 }
               >
                 <Check size={13} />
-                {m.state === 'pending' ? 'Aprovar' : m.state === 'active' ? 'Desativar' : 'Ativar'}
+                {m.state === 'pending'
+                  ? 'Aprovar'
+                  : m.state === 'active'
+                    ? 'Desativar'
+                    : m.state === 'toConfirm'
+                      ? 'Confirmar'
+                      : 'Ativar'}
               </button>
               {projectId !== null ? (
                 <button

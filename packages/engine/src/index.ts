@@ -131,6 +131,33 @@ export {
 export { contextTool } from './brain/tools/context.ts';
 export { RulesManager } from './rules/manager.ts';
 export { rulesTools } from './rules/tools.ts';
+export {
+  MemoryService,
+  PENDING_PER_PROJECT,
+  PROPOSALS_PER_SESSION,
+  PROPOSALS_PER_TURN,
+  type MemoryCaller,
+  type MemoryStore,
+} from './memory/manager.ts';
+export { memoryTools } from './memory/tools.ts';
+export { currentTurn, toolIsExternal, usedExternalSources } from './memory/external.ts';
+export {
+  INDEX_MAX_CHARS,
+  INDEX_MAX_ENTRIES,
+  indexable,
+  renderIndex,
+  renderRead,
+  renderSelected,
+} from './memory/render.ts';
+export { searchMemories, scoreMemory, terms } from './memory/search.ts';
+export { STALE_AFTER_MS, lastActivity, staleReason } from './memory/staleness.ts';
+export {
+  hashCited,
+  normalizeCitedPath,
+  type ProjectFiles,
+  type ReadResult,
+} from './memory/evidence.ts';
+export { memoryKey, describeCitation } from './memory/keys.ts';
 export { exportRules, nativeCoverage, readNativeFiles, withMarker } from './rules/files.ts';
 export { globToRegExp, matchesAny, matchesGlob } from './rules/glob.ts';
 export {

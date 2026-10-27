@@ -533,7 +533,8 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
     return { ok: false, error: { message: 'O fecho é coordenado pela janela' } };
   const payload = (raw as { payload?: unknown }).payload ?? {};
   try {
-    if (command.startsWith('spaces.')) {
+    // A memória precisa de saber as pastas dos projetos (a prova das memórias está lá).
+    if (command.startsWith('spaces.') || command.startsWith('memory.')) {
       await mkdir(generalCwd, { recursive: true });
       await engine.request('spaces.syncProjects', { projects: await projects.list(), generalCwd });
     }

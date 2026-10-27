@@ -41,7 +41,8 @@ export async function reconcilePolicy(
 ): Promise<void> {
   const input = commandSchemas[command].payload.parse(payload ?? {});
   // These commands resolve their project/task scope in the engine after a main-owned sync.
-  if (command.startsWith('spaces.')) return;
+  // As memórias, como os espaços, resolvem o âmbito no motor depois de o main sincronizar os projetos.
+  if (command.startsWith('spaces.') || command.startsWith('memory.')) return;
   if (INSPECTION.has(command) || GLOBAL.has(command)) return;
 
   const projectIds = new Set<string>();

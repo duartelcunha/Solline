@@ -144,6 +144,14 @@ describe('recovered project policy', () => {
       );
     }
   });
+  it('memory commands resolve their scope in the engine, like spaces commands', async () => {
+    const f = fixture();
+    f.projects.get.mockResolvedValue(undefined);
+    await reconcilePolicy(f.engine, f.projects, 'memory.approve', { ids: ['m'], scope: 'global' });
+    await reconcilePolicy(f.engine, f.projects, 'memory.toRule', { id: 'm' });
+    expect(f.calls).toEqual([]);
+    expect(f.projects.get).not.toHaveBeenCalled();
+  });
   it('resolves orphan scope from the engine rather than interpreting its id as a path', async () => {
     const f = fixture();
     await reconcilePolicy(f.engine, f.projects, 'worktrees.bring', { id: 'orphan' });

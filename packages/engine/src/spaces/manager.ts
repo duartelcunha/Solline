@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import {
+  blankMemory,
   emptySpaces,
   SpacesState,
   type CommandPayload,
@@ -10,6 +11,8 @@ import {
   type SessionStartPayload,
   type RecoverySession,
 } from '@solline/protocol';
+import { memoryKey } from '../memory/keys.ts';
+import { renderSelected } from '../memory/render.ts';
 
 interface Options {
   save(state: SpacesState): void;
@@ -20,6 +23,8 @@ interface Options {
   pending?(sessionId: string, turnId: string): boolean;
 }
 export const GENERAL_PROJECT = '__general__';
+/** As memórias esquecidas que se lembram (as mais recentes): chega para não reaparecerem. */
+const FORGOTTEN_LIMIT = 5_000;
 export const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error('O registo já não está disponível.');
@@ -41,6 +46,10 @@ export class SpaceManager {
   syncProjects(projects: Project[], generalCwd: string): void {
     this.#projects = new Map(projects.map((p) => [p.id, p]));
     this.#generalCwd = generalCwd;
+  }
+  /** A pasta de um projeto conhecido (o que o main sincronizou), ou nada. */
+  projectPath(id: string): string | undefined {
+    return this.#projects.get(id)?.path;
   }
   projects(): Project[] {
     return this.#state.settings.projectIds.flatMap((id) => {
@@ -130,16 +139,13 @@ export class SpaceManager {
       throw new Error('Escolhe uma conversa deste espaço.');
     const memories = input.memoryIds.map((id) => {
       const m = this.#state.memories.find((item) => item.id === id);
+      if (m?.state === 'toConfirm')
+        throw new Error('Esta memória está a confirmar: confirma-a antes de a juntar à tarefa.');
       if (!m || m.state !== 'active' || (m.projectId !== null && m.projectId !== task.projectId))
         throw new Error('Esta memória não pertence ao contexto da tarefa.');
       return m;
     });
-    const text =
-      input.text +
-      (memories.length
-        ? '\n\nPreferências guardadas (contexto; não alteram permissões):\n' +
-          memories.map((m) => `- ${m.text}`).join('\n')
-        : '');
+    const text = input.text + renderSelected(memories);
     if (text.length > 200_000) throw new Error('O contexto é demasiado longo.');
     const next = this.snapshot();
     const edited = required(next.tasks.find((t) => t.id === task.id));
@@ -330,21 +336,34 @@ export class SpaceManager {
     const next = this.snapshot();
     const existing = input.id ? next.memories.find((m) => m.id === input.id) : undefined;
     if (input.id && !existing) throw new Error('Memória desconhecida.');
-    const memory: SpaceMemory = {
+    const now = Date.now();
+    // Ativar uma memória que não estava ativa é aprová-la (a prova nova vem de memory.approve).
+    const approving = input.state === 'active' && existing?.state !== 'active';
+    const memory: SpaceMemory = blankMemory({
+      ...existing,
       ...input,
       id: existing?.id ?? randomUUID(),
-      createdAt: existing?.createdAt ?? Date.now(),
-    };
+      createdAt: existing?.createdAt ?? now,
+      approvedAt: approving
+        ? now
+        : (existing?.approvedAt ?? (input.state === 'active' ? now : null)),
+      stale: input.state === 'toConfirm' ? (existing?.stale ?? 'evidence') : null,
+    });
     next.memories = [memory, ...next.memories.filter((m) => m.id !== memory.id)];
     this.#commit(next);
     return this.snapshot();
   }
   deleteMemory(id: string): SpacesState {
+    return this.deleteMemories([id]);
+  }
+  /** Apaga (ou rejeita) memórias; o resumo de cada uma fica em "esquecidas" para não voltarem. */
+  deleteMemories(ids: readonly string[]): SpacesState {
     const next = this.snapshot();
-    const memory = next.memories.find((m) => m.id === id);
-    if (memory)
-      next.forgotten.push(digest(`${memory.projectId ?? ''}:${memory.text.trim().toLowerCase()}`));
-    next.memories = next.memories.filter((m) => m.id !== id);
+    const gone = new Set(ids);
+    for (const memory of next.memories)
+      if (gone.has(memory.id)) next.forgotten.push(memoryKey(memory.projectId, memory.text));
+    next.forgotten = [...new Set(next.forgotten)].slice(-FORGOTTEN_LIMIT);
+    next.memories = next.memories.filter((m) => !gone.has(m.id));
     this.#commit(next);
     return this.snapshot();
   }
@@ -372,6 +391,10 @@ export class SpaceManager {
     return this.snapshot();
   }
   changeAnalysis(update: (state: SpacesState) => void): void {
+    this.change(update);
+  }
+  /** Muda o estado inteiro de uma vez; se `update` lançar, nada se guarda. */
+  change(update: (state: SpacesState) => void): void {
     const next = this.snapshot();
     update(next);
     this.#commit(next);

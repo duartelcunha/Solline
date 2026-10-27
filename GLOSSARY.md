@@ -45,8 +45,17 @@ Os nomes do domínio da Solline, como o código os usa.
 - **Tentativa**: uma delegação concreta de uma tarefa a uma sessão, com o resultado e as mudanças.
 - **Delegação**: passar uma tarefa a uma sessão existente ou nova. É sempre um gesto teu: nada
   arranca agentes sozinho, nem ao navegar nem ao retomar.
-- **Memória**: algo que a Solline aprendeu e pode dar aos agentes. Fica `pending` até a aprovares
-  (modo de aprendizagem "aprovação") e podes desligá-la (`disabled`).
+- **Memória**: algo que os agentes (ou a análise da Solline) propõem e só chega aos agentes depois de
+  a aprovares. Estados: `pending` (proposta), `active`, `disabled` e `toConfirm` ("a confirmar").
+  Um agente propõe sempre com uma prova (citações) e um motivo; só tu a tornas geral.
+- **Prova**: as citações de uma memória (`{path, line?, endLine?}` dentro do projeto, ou um commit) e o
+  hash do que diziam quando aprovaste. Se mudou, a memória passa a "a confirmar".
+- **A confirmar** (`toConfirm`): memória aprovada cuja prova mudou, ou que um agente propôs e ficou 28
+  dias sem uso. Não entra no índice; `read_memory` ainda a devolve, com o aviso. Confirmar renova tudo.
+- **Índice da memória**: as linhas "id · texto curto" (até 30, ~3k caracteres) que seguem no arranque,
+  ao lado das regras. O texto inteiro vai por `read_memory`; `search_memory` procura por termos.
+- **Origem externa** (`external`): a proposta saiu de um turno que leu a web ou usou servidores MCP de
+  terceiros. Aparece ao aprovar; nunca se aprova sozinha.
 - **Sugestão**: uma proposta da análise (`suggested`, `accepted`, `dismissed`), com as fontes.
 - **Retoma**: abrir a Solline onde estavas (projeto, tarefa, painel, sessão ou corrida). Também podes
   escolher abrir nas Tarefas do Geral ou na Mesa. Guarda só identificadores, nunca conteúdo.

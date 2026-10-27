@@ -535,6 +535,21 @@ function defaultAgent(): AgentId {
   return useApp.getState().agents.find((a) => a.status === 'ready')?.id ?? 'claude';
 }
 
+/** Um comando de memória que devolve os Espaços: o estado novo entra na interface. */
+async function memoryRequest<C extends 'memory.approve' | 'memory.reject' | 'memory.confirm'>(
+  command: C,
+  input: CommandPayload<C>,
+  doing: string,
+): Promise<boolean> {
+  try {
+    receiveSpaces(await request(command, input));
+    return true;
+  } catch (error) {
+    useApp.setState({ notice: `Não consegui ${doing}. ${message(error)}` });
+    return false;
+  }
+}
+
 export const actions = {
   openSpace(projectId: string | null): void {
     useSpaces.setState({ panel: 'tasks' });
@@ -591,6 +606,44 @@ export const actions = {
       return await request('rules.export', { projectId });
     } catch (error) {
       useApp.setState({ notice: `Não consegui exportar as regras. ${message(error)}` });
+      return null;
+    }
+  },
+
+  /**
+   * Aprova propostas de memória (ou re-aprova); `scope: 'global'` e as edições são do utilizador.
+   * Devolve se resultou (o estado novo chega por spaces.changed).
+   */
+  async approveMemories(
+    ids: string[],
+    options: Pick<CommandPayload<'memory.approve'>, 'scope' | 'edits'> = {},
+  ): Promise<boolean> {
+    return memoryRequest('memory.approve', { ids, ...options }, 'aprovar as memórias');
+  },
+
+  /** Rejeita propostas: apagam-se e não voltam a ser propostas. */
+  async rejectMemories(ids: string[]): Promise<boolean> {
+    return memoryRequest('memory.reject', { ids }, 'rejeitar as memórias');
+  },
+
+  /** Re-aprova memórias "a confirmar" (renova a prova e o relógio). */
+  async confirmMemories(ids: string[]): Promise<boolean> {
+    return memoryRequest('memory.confirm', { ids }, 'confirmar as memórias');
+  },
+
+  /** "Exportar para regras": a memória passa a regra do projeto. null se falhou. */
+  async memoryToRule(
+    id: string,
+    projectId?: string,
+  ): Promise<CommandResult<'memory.toRule'> | null> {
+    try {
+      const view = await request('memory.toRule', { id, ...(projectId ? { projectId } : {}) });
+      receiveSpaces(await request('spaces.snapshot', {}));
+      return view;
+    } catch (error) {
+      useApp.setState({
+        notice: `Não consegui passar a memória para as regras. ${message(error)}`,
+      });
       return null;
     }
   },

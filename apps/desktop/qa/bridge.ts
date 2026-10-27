@@ -1,7 +1,7 @@
 import {
   emptySpaces,
   type SpaceTask,
-  type SpaceMemory,
+  SpaceMemory,
   commandSchemas,
   defaultNavigation,
   NavigationPreferences,
@@ -604,11 +604,11 @@ ${goal}
         return spaces;
       case 'spaces.memorySave': {
         const input = commandSchemas['spaces.memorySave'].payload.parse(payload);
-        const memory: SpaceMemory = {
+        const memory: SpaceMemory = SpaceMemory.parse({
           ...input,
           id: input.id ?? crypto.randomUUID(),
           createdAt: Date.now(),
-        };
+        });
         spaces.memories = [memory, ...spaces.memories.filter((m) => m.id !== memory.id)];
         spaces.revision++;
         emit({ kind: 'event', type: 'spaces.changed', spaces });

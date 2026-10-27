@@ -46,6 +46,8 @@ import { contextTool } from './brain/tools/context.ts';
 import { exportRules, readNativeFiles } from './rules/files.ts';
 import { RulesManager } from './rules/manager.ts';
 import { rulesTools } from './rules/tools.ts';
+import { MemoryService } from './memory/manager.ts';
+import { memoryTools } from './memory/tools.ts';
 import { SpaceManager } from './spaces/manager.ts';
 import { SpaceAnalysis, type AnalysisRunner } from './spaces/analysis.ts';
 import { claudeAnalysis } from './spaces/claude-analysis.ts';
@@ -138,6 +140,7 @@ export class Engine {
   readonly spaces: SpaceManager;
   /** As regras do projeto escritas na Solline (iguais para todos os agentes). */
   readonly rules: RulesManager;
+  readonly memory: MemoryService;
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
   readonly races: RaceManager;
@@ -241,10 +244,23 @@ export class Engine {
     this.rules = new RulesManager({
       save: (rules) => emitAll({ kind: 'event', type: 'rules.changed', rules }),
     });
+    // A memória vive no estado dos Espaços (criado mais abaixo): ligam-se na hora de usar.
+    this.memory = new MemoryService({
+      store: {
+        snapshot: () => this.spaces.snapshot(),
+        change: (update) => this.spaces.change(update),
+        root: (projectId) => this.spaces.projectPath(projectId),
+      },
+      rules: this.rules,
+    });
     this.#brain = options.brain
       ? new Brain({
           ...options.brain,
-          tools: options.brain.tools ?? [contextTool, ...rulesTools(this.rules)],
+          tools: options.brain.tools ?? [
+            contextTool,
+            ...rulesTools(this.rules),
+            ...memoryTools(this.memory),
+          ],
           shim: options.brain.shim ?? sourceShimPath(),
         })
       : undefined;
@@ -256,6 +272,7 @@ export class Engine {
       mcp,
       brain: this.#brain,
       rules: this.rules,
+      memories: this.memory,
       checkpoints: this.#checkpoints,
       keysFor: (agent) => settings.keys(agent),
       // Nos testes isolados não se gasta a subscrição a rever turnos falsos.
@@ -415,7 +432,11 @@ export class Engine {
         if (before !== JSON.stringify(this.spaces.projects())) this.analysis.cancel();
         return {};
       },
-      'spaces.snapshot': async () => this.spaces.snapshot(),
+      'spaces.snapshot': async () => {
+        // Quem abre a memória vê já o que passou a "a confirmar".
+        await this.memory.sweepIfDue();
+        return this.spaces.snapshot();
+      },
       'spaces.taskCreate': async (p) => this.spaces.createTask(p),
       'spaces.taskUpdate': async (p) => this.spaces.updateTask(p),
       'spaces.dispatch': (p) => this.spaces.delegate(p, p.start),
@@ -423,8 +444,22 @@ export class Engine {
         this.analysis.cancel();
         return this.spaces.configure(p);
       },
-      'spaces.memorySave': async (p) => this.spaces.saveMemory(p),
+      'spaces.memorySave': async (p) => {
+        const before = p.id
+          ? this.spaces.snapshot().memories.find((m) => m.id === p.id)
+          : undefined;
+        // Ativar uma proposta (ou uma memória a confirmar) é aprová-la: renova a prova e o relógio.
+        if (p.id && before && before.state !== 'active' && p.state === 'active') {
+          this.spaces.saveMemory({ ...p, state: before.state });
+          return this.memory.approve({ ids: [p.id] });
+        }
+        return this.spaces.saveMemory(p);
+      },
       'spaces.memoryDelete': async (p) => this.spaces.deleteMemory(p.id),
+      'memory.approve': async (p) => this.memory.approve(p),
+      'memory.reject': async (p) => this.spaces.deleteMemories(p.ids),
+      'memory.confirm': async (p) => this.memory.confirm(p.ids),
+      'memory.toRule': async (p) => this.memory.toRule(p),
       'spaces.insightDecision': async (p) => this.spaces.decideInsight(p.id, p.decision),
       'spaces.analyze': () => this.analysis.analyze(false),
       'spaces.tick': () => this.analysis.analyze(true),

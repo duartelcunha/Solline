@@ -14,7 +14,7 @@ export interface ClaudeSdkMcp {
 export interface ClaudeBrain {
   /** O servidor para o mapa mcpServers do SDK. */
   server: McpSdkServerConfigWithInstance;
-  /** Os nomes (mcp__<servidor>__<ferramenta>) das só de leitura: correm sem pedir. As outras pedem. */
+  /** Os nomes (mcp__<servidor>__<ferramenta>) das que correm sem pedir (só de leitura ou inofensivas). As outras pedem. */
   allowedTools: string[];
 }
 
@@ -38,7 +38,7 @@ export function claudeBrain(sdk: ClaudeSdkMcp, binding: BrainBinding): ClaudeBra
   return {
     server: sdk.createSdkMcpServer({ name: binding.serverName, version: '0.1.0', tools }),
     allowedTools: binding.tools
-      .filter((info) => info.readOnly)
+      .filter((info) => info.autoApprove)
       .map((info) => `mcp__${binding.serverName}__${info.name}`),
   };
 }

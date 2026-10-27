@@ -18,6 +18,7 @@ import {
   type BrainResult,
   type BrainShape,
   type BrainTool,
+  type TurnInfo,
 } from './tool.ts';
 import { contextTool } from './tools/context.ts';
 
@@ -29,7 +30,9 @@ export interface BrainSession {
   id: string;
   projectId: string;
   agent: AgentId;
-  describe(): { title: string; folder: string };
+  describe(): { title: string; folder: string; cwd?: string | undefined };
+  /** O turno em curso (só o gestor de sessões o sabe). Sem isto, os turnos contam como externos. */
+  turn?(): TurnInfo;
 }
 
 export interface BrainToolInfo {
@@ -37,6 +40,8 @@ export interface BrainToolInfo {
   description: string;
   input: BrainShape;
   readOnly: boolean;
+  /** Corre sem pedir autorização (as só de leitura e as inofensivas). */
+  autoApprove: boolean;
 }
 
 /** As ferramentas da Solline atadas a uma sessão, até fecharem ou arrancarem de novo. */
@@ -113,12 +118,18 @@ export class Brain {
     return this.#tools.filter((t) => t.readOnly).map((t) => t.name);
   }
 
+  /** Os nomes das ferramentas que correm sem pedir: as só de leitura e as inofensivas. */
+  get autoApprovedTools(): readonly string[] {
+    return this.#tools.filter((t) => t.autoApprove).map((t) => t.name);
+  }
+
   async bind(session: BrainSession, transport: BrainTransport): Promise<BrainBinding> {
     const context: BrainContext = {
       sessionId: session.id,
       projectId: session.projectId,
       agent: session.agent,
       session: () => session.describe(),
+      turn: () => session.turn?.() ?? { id: undefined, external: true },
     };
     let revoked = false;
     const call = async (name: string, args: unknown): Promise<BrainResult> => {
@@ -132,6 +143,7 @@ export class Brain {
       description: t.description,
       input: t.input,
       readOnly: t.readOnly,
+      autoApprove: t.autoApprove,
     }));
     let issued: { token: string; revoke: () => void } | undefined;
     let launch: McpServerLaunch | null = null;
@@ -149,7 +161,7 @@ export class Brain {
           args: [resolved.shim],
           env: { [BRAIN_PIPE_ENV]: resolved.address, [BRAIN_TOKEN_ENV]: issued.token },
           executesCode: false,
-          autoApprove: this.readOnlyTools,
+          autoApprove: this.autoApprovedTools,
         };
       }
     }

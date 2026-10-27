@@ -2,6 +2,7 @@ import { mkdtemp, writeFile, mkdir, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
+import { SpaceSettings } from '@solline/protocol';
 import { collectProject, redact } from '../src/spaces/context.ts';
 import { SpaceAnalysis } from '../src/spaces/analysis.ts';
 import { SpaceManager } from '../src/spaces/manager.ts';
@@ -171,7 +172,7 @@ it('faz análises incrementais, respeita o dia e não repete sugestões dispensa
 });
 
 for (const mode of ['approval', 'automatic'] as const)
-  it(`memórias em ${mode} mantêm âmbito, fonte e eliminação`, async () => {
+  it(`memórias com o modo ${mode} guardado ficam por aprovar e mantêm âmbito, fonte e eliminação`, async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'solline-learning-'));
     roots.push(root);
     const code = path.join(root, 'main.ts');
@@ -183,13 +184,17 @@ for (const mode of ['approval', 'automatic'] as const)
       projectOf: () => 'p',
     });
     manager.syncProjects([{ id: 'p', path: root, name: 'P', trusted: true, addedAt: 0 }], root);
-    manager.configure({
-      analysisMode: 'manual',
-      learningMode: mode,
-      projectIds: ['p'],
-      agent: 'claude',
-      model: '',
-    });
+    // O modo "automatic" já não existe: um estado guardado com ele migra para "approval".
+    manager.configure(
+      SpaceSettings.parse({
+        analysisMode: 'manual',
+        learningMode: mode,
+        projectIds: ['p'],
+        agent: 'claude',
+        model: '',
+      }),
+    );
+    expect(manager.snapshot().settings.learningMode).toBe('approval');
     const analysis = new SpaceAnalysis({
       manager,
       idle: () => true,
@@ -214,7 +219,7 @@ for (const mode of ['approval', 'automatic'] as const)
     expect(manager.snapshot().insights).toEqual([]);
     const memories = manager.snapshot().memories;
     expect(memories).toHaveLength(1);
-    expect(memories[0]?.state).toBe(mode === 'approval' ? 'pending' : 'active');
+    expect(memories[0]?.state).toBe('pending');
     if (!memories[0]) throw new Error('Sem memória');
     manager.deleteMemory(memories[0].id);
     await writeFile(code, 'export const n = 2;');

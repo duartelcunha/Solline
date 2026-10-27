@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { SpacesState } from '@solline/protocol';
+import { blankMemory, type SpacesState } from '@solline/protocol';
+import { memoryKey } from '../memory/keys.ts';
 import { type SpaceManager, digest } from './manager.ts';
 import { collectProject, redact, type ContextSource } from './context.ts';
 
@@ -203,12 +204,10 @@ export class SpaceAnalysis {
         }
         for (const lesson of output.memories) {
           if (!valid(lesson.projectId, lesson.sources)) continue;
-          const key = digest(`${lesson.projectId ?? ''}:${lesson.text.trim().toLowerCase()}`);
+          const key = memoryKey(lesson.projectId, lesson.text);
           if (
             s.forgotten.includes(key) ||
-            s.memories.some(
-              (m) => digest(`${m.projectId ?? ''}:${m.text.trim().toLowerCase()}`) === key,
-            )
+            s.memories.some((m) => memoryKey(m.projectId, m.text) === key)
           )
             continue;
           // Project evidence cannot silently become a global rule.
@@ -217,15 +216,18 @@ export class SpaceAnalysis {
             lesson.sources.some((id) => sourceMap.get(id)?.projectId !== null)
           )
             continue;
-          s.memories.unshift({
-            id: randomUUID(),
-            projectId: lesson.projectId,
-            text: lesson.text,
-            source: lesson.sources.join(', '),
-            sourceId: lesson.sources[0] ?? null,
-            state: settings.learningMode === 'automatic' ? 'active' : 'pending',
-            createdAt: now,
-          });
+          // Nada chega aos agentes sem aprovação: a análise também só propõe.
+          s.memories.unshift(
+            blankMemory({
+              id: randomUUID(),
+              projectId: lesson.projectId,
+              text: lesson.text,
+              source: lesson.sources.join(', '),
+              sourceId: lesson.sources[0] ?? null,
+              state: 'pending',
+              createdAt: now,
+            }),
+          );
         }
         const reviewed = Object.fromEntries(
           Object.entries(state.analysis.files).filter(([id, hash]) => files[id] === hash),

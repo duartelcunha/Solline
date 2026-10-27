@@ -104,13 +104,6 @@ export function SpaceSettingsPanel() {
               >
                 Aprovar memórias
               </button>
-              <button
-                type="button"
-                aria-pressed={draft.learningMode === 'automatic'}
-                onClick={() => setDraft({ ...draft, learningMode: 'automatic' })}
-              >
-                Guardar automaticamente
-              </button>
             </div>
           </fieldset>
           <div>

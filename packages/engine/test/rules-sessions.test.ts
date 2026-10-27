@@ -551,7 +551,7 @@ describe('ferramentas das regras: a identidade vem do motor', () => {
     expect(JSON.parse((await (await bind('vazio')).call('list_rules', {})).text)).toEqual([]);
   });
 
-  it('o motor regista as duas ferramentas ao lado da de prova, no servidor do Claude', async () => {
+  it('o motor regista as ferramentas das regras e da memória ao lado da de prova, no servidor do Claude', async () => {
     const { Engine } = await import('../src/engine.ts');
     const fake = fakeQuery(loadFixture('plain-answer'));
     const engine = new Engine({
@@ -579,6 +579,13 @@ describe('ferramentas das regras: a identidade vem do motor', () => {
     const tools = (
       servers.solline!.instance as unknown as { _registeredTools: Record<string, unknown> }
     )._registeredTools;
-    expect(Object.keys(tools).sort()).toEqual(['list_rules', 'read_rule', 'solline_context']);
+    expect(Object.keys(tools).sort()).toEqual([
+      'list_rules',
+      'propose_memory',
+      'read_memory',
+      'read_rule',
+      'search_memory',
+      'solline_context',
+    ]);
   });
 });

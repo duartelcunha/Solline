@@ -58,6 +58,8 @@ import type { Brain, BrainBinding } from './brain/brain.ts';
 import { nativeCoverage } from './rules/files.ts';
 import { matchesAny } from './rules/glob.ts';
 import type { RulesManager } from './rules/manager.ts';
+import type { MemoryService } from './memory/manager.ts';
+import { currentTurn } from './memory/external.ts';
 import { renderStart, renderTouched } from './rules/render.ts';
 
 /** Com um servidor MCP que corre programas ligado, nada de modos sem perguntas. */
@@ -173,6 +175,7 @@ export class SessionManager {
   readonly #mcp: McpCatalog | undefined;
   readonly #brain: Brain | undefined;
   readonly #rules: RulesManager | undefined;
+  readonly #memories: Pick<MemoryService, 'startBlock'> | undefined;
   readonly #checkCwd: (cwd: string) => Promise<void>;
   readonly #store: CheckpointStore | undefined;
   readonly #keysFor: (agent: string) => Promise<readonly string[]>;
@@ -206,6 +209,8 @@ export class SessionManager {
     brain?: Brain | undefined;
     /** As regras do projeto escritas na Solline; sem isto, nenhuma sessão as recebe. */
     rules?: RulesManager | undefined;
+    /** A memória partilhada: o índice das aprovadas segue no arranque, ao lado das regras. */
+    memories?: Pick<MemoryService, 'startBlock'> | undefined;
     /** Para testes: troca a verificação da pasta. */
     checkCwd?: (cwd: string) => Promise<void>;
     /** Checkpoints escondidos por turno; sem isto, rever e rebobinar ficheiros ficam desligados. */
@@ -227,6 +232,7 @@ export class SessionManager {
     this.#mcp = options.mcp;
     this.#brain = options.brain;
     this.#rules = options.rules;
+    this.#memories = options.memories;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
     this.#store = options.checkpoints;
     this.#keysFor = options.keysFor ?? (async () => []);
@@ -2103,7 +2109,9 @@ export class SessionManager {
         id: info.id,
         projectId: info.projectId,
         agent: info.agent,
-        describe: () => ({ title: info.title, folder: basename(info.cwd) }),
+        describe: () => ({ title: info.title, folder: basename(info.cwd), cwd: info.cwd }),
+        // O que o turno leu fora da pasta (web, servidores de terceiros) vê-se na conversa guardada.
+        turn: () => currentTurn(this.#memory.get(info.id)?.turns ?? []),
       },
       definition.brain,
     );
@@ -2132,6 +2140,25 @@ export class SessionManager {
       if (coverage && native.every((name) => coverage[name] === 'current')) return undefined;
     }
     const text = renderStart(rules, { target: channel.via, readTool });
+    if (!text) return undefined;
+    return channel.via === 'instructions' ? { instructions: text } : { intro: text };
+  }
+
+  /**
+   * O índice da memória partilhada no formato do agente (no arranque ou com a primeira mensagem),
+   * ao lado das regras. Só nos agentes que têm canal para isso.
+   */
+  async #memoryBlock(
+    info: SessionInfo,
+    definition: AgentDefinition,
+    readTool: boolean,
+  ): Promise<{ instructions?: string; intro?: string } | undefined> {
+    const channel = definition.rules;
+    if (!this.#memories || !channel) return undefined;
+    const text = await this.#memories.startBlock(info.projectId, {
+      target: channel.via,
+      readTool,
+    });
     if (!text) return undefined;
     return channel.via === 'instructions' ? { instructions: text } : { intro: text };
   }
@@ -2209,7 +2236,12 @@ export class SessionManager {
     // Retomar ou rebobinar arranca outro agente: o acesso do anterior fecha antes de abrir o novo.
     this.#sessions.get(info.id)?.brain?.revoke();
     const brain = await this.#bindBrain(info, definition);
-    const rules = await this.#ruleBlock(info, definition, trusted, Boolean(brain));
+    const ruleBlock = await this.#ruleBlock(info, definition, trusted, Boolean(brain));
+    const memoryBlock = await this.#memoryBlock(info, definition, Boolean(brain));
+    // As regras e o índice da memória seguem pelo mesmo canal, regras primeiro.
+    const joined = (key: 'instructions' | 'intro') =>
+      [ruleBlock?.[key], memoryBlock?.[key]].filter(Boolean).join('\n\n') || undefined;
+    const rules = { instructions: joined('instructions'), intro: joined('intro') };
     const servers = [
       ...mcp.map((s) => withoutSecrets(s, env)),
       // O shim vai como mais um servidor MCP; o limite de 8 é dos do catálogo e este não conta.

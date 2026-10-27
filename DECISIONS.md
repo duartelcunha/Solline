@@ -665,3 +665,59 @@
   `path.matchesGlob` ainda é experimental.
 - **Por verificar:** um agente real a seguir o bloco e a chamar `read_rule` num turno com modelo; a
   interface (fase 6).
+
+## M6, fase 3: memória partilhada com prova e aprovação (27/10/2026)
+
+- **Modelo (como o Copilot, não como o Cursor):** os agentes só **propõem** memórias, por
+  `propose_memory {text, reason, citations}`; cada proposta tem de citar a prova (ficheiros dentro do
+  projeto, com linhas, ou um commit) e dizer porque importa. Ficam `pending` numa caixa que o
+  utilizador aprova, edita ou rejeita em lote, sem interromper a sessão. **Nada chega a um agente sem
+  aprovação**, nem as que a análise da Solline propõe. O modo de aprendizagem `automatic` foi removido
+  (um estado guardado com ele migra para `approval`).
+- **Âmbito:** projeto por omissão; o nível geral (`projectId: null`) é só uma decisão do utilizador ao
+  aprovar (`scope: 'global'`). O agente não tem argumento para isso (um argumento a mais é recusado) e
+  o espaço Geral não propõe (não tem projeto). Cada proposta guarda a pasta de origem
+  (`origin.projectId`) para a prova continuar a ser verificada depois de passar a geral.
+- **Prova verificada ao propor:** o caminho tem de ser relativo e ficar dentro da pasta da sessão
+  (sem `..`, nem absolutos, nem ligações que saiam; ficheiro de texto até 1 MiB), o intervalo tem de
+  existir e o commit tem de existir no repositório. O que a citação mostra fica como hash (SHA-256
+  das linhas, CRLF = LF; o ficheiro todo se não houver linha). Ao aprovar, o hash refaz-se contra a
+  pasta do projeto (ou fica o do momento da proposta se o ficheiro só existe numa worktree).
+- **Entrega:** um índice curto (≤ 30 linhas, ≤ 3000 caracteres, as mais recentes primeiro,
+  "id · texto curto", uma só linha, sem títulos) pelos mesmos três caminhos das regras (prompt de
+  sistema do Claude, `developerInstructions` do Codex, primeira mensagem do ACP), depois do bloco das
+  regras. `search_memory {query}` pontua por termos (texto 3, motivo 2, caminhos 1; sem acentos nem
+  maiúsculas, sem embeddings) e `read_memory {id}` devolve texto, motivo, prova e origem. Só estas
+  duas contam como uso (`lastUsedAt`): listar no índice não. Sem cérebro, o índice tem linhas mais
+  compridas e não promete ferramentas.
+- **"A confirmar":** ao montar o índice, ao ler, ao procurar e (no máximo a cada 30 s) ao abrir os
+  Espaços, uma memória ativa passa a `toConfirm` se um intervalo citado mudou (ou o ficheiro
+  desapareceu) ou se uma memória **proposta por um agente** ficou 28 dias sem aprovação ou uso. As
+  escritas pelo utilizador ou pela análise não caducam por idade (não têm dono a quem perguntar).
+  Um erro de leitura passageiro não conta como mudança. Fica fora do índice mas `read_memory` ainda a
+  devolve, com o aviso. `memory.confirm` renova o hash e o relógio.
+- **Injeção:** cada memória guarda `origin {agent, sessionId, turnId, projectId}` e `external`. O motor
+  calcula `external` a partir dos blocos do turno em curso (desde o último pedido do utilizador):
+  WebFetch/WebSearch ou qualquer ferramenta de categoria `fetch`, servidores MCP que não sejam o da
+  Solline, comandos com curl/wget/URLs e tudo o que não consegue classificar (na dúvida, externo). Sem
+  turno conhecido, também externo. O texto proposto é limpo (uma linha, sem controlo nem invisíveis;
+  500 caracteres de texto, 300 de motivo, até 5 citações) e o índice só mostra texto curto, nunca a
+  prova nem o motivo. Limites: 5 propostas por turno, 20 por sessão (contador por proposta, não por
+  pendente: rejeitar não devolve a quota) e 100 pendentes por projeto. Duplicados contra as memórias
+  existentes, as geradas pela análise e as `forgotten` (rejeitar regista o resumo).
+- **Ferramenta que muda estado mas corre sem pedir:** `propose_memory` é `readOnly: false` com
+  `autoApprove: true` (só deixa uma proposta à espera); correm sem pedir as só de leitura e as
+  inofensivas. Para não interromper a sessão com um pedido de autorização por proposta.
+- **Comandos:** `memory.approve {ids, scope?, edits?}` (tudo ou nada), `memory.reject {ids}`,
+  `memory.confirm {ids}` e `memory.toRule {id, projectId?}` ("exportar para regras": cria a regra com
+  `rules.save`, só um gesto do utilizador, e desliga a memória). `spaces.memorySave/Delete` continuam:
+  ativar uma proposta ou uma memória a confirmar por `memorySave` passa pela aprovação. O main trata
+  `memory.*` como `spaces.*`: sincroniza os projetos antes e o âmbito resolve-se no motor.
+- **Compatibilidade:** os campos novos têm valores por omissão (um estado antigo carrega); a
+  delegação de tarefas usa o mesmo desenho (`renderSelected`) e recusa memórias a confirmar.
+  Sem interface nova (fase 6): só o estado "A confirmar" e o botão "Confirmar" na lista que já existe,
+  e fora o botão "Guardar automaticamente".
+- **Por verificar:** um agente real a propor e a ler memórias num turno com modelo; a deteção de
+  `external` em agentes ACP reais (os nomes das ferramentas variam; na dúvida conta como externo); a
+  interface da caixa de aprovação (fase 6). A origem externa só vale para o turno que propõe, não
+  para turnos anteriores da mesma sessão.

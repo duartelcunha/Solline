@@ -18,7 +18,17 @@ export interface BrainContext {
   readonly projectId: string;
   readonly agent: AgentId;
   /** O que da sessão pode mudar entre chamadas (o título nasce da primeira mensagem). */
-  session(): { title: string; folder: string };
+  session(): { title: string; folder: string; cwd?: string | undefined };
+  /**
+   * O turno em curso, visto pelo motor: o id do pedido do utilizador e se o turno já foi a fontes
+   * externas (web, servidores de terceiros). Sem esta informação, assume-se externo.
+   */
+  turn(): TurnInfo;
+}
+
+export interface TurnInfo {
+  id: string | undefined;
+  external: boolean;
 }
 
 /** O que uma ferramenta devolve ao agente. */
@@ -40,6 +50,11 @@ export interface BrainToolSpec<S extends BrainShape> {
   input: S;
   /** Só lê: pode correr sem pedir autorização. Qualquer coisa que mude estado pede sempre. */
   readOnly: boolean;
+  /**
+   * Muda estado mas é inofensiva (só deixa uma proposta à espera do utilizador): corre sem pedir,
+   * para não interromper a sessão. Nunca mude isto para ferramentas com efeitos reais.
+   */
+  autoApprove?: boolean;
   handler(ctx: BrainContext, args: z.infer<z.ZodObject<S>>): Promise<unknown> | unknown;
 }
 
@@ -49,6 +64,7 @@ export interface BrainTool {
   readonly description: string;
   readonly input: BrainShape;
   readonly readOnly: boolean;
+  readonly autoApprove: boolean;
   run(ctx: BrainContext, args: unknown): Promise<BrainResult>;
 }
 
@@ -75,6 +91,7 @@ export function defineBrainTool<S extends BrainShape>(spec: BrainToolSpec<S>): B
     description: spec.description,
     input: spec.input,
     readOnly: spec.readOnly,
+    autoApprove: spec.readOnly || spec.autoApprove === true,
     run: async (ctx, args) => {
       const parsed = schema.safeParse(args ?? {});
       if (!parsed.success) {
