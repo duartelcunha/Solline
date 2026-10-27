@@ -24,6 +24,7 @@ export function partTitleAt(race: Race, index: number): string | null {
 
 /** O que cada aviso diz, em palavras; `other` é a pista com quem choca. */
 export function warningText(warning: SplitWarning, race: Race): string {
+  if (warning.kind === 'problem') return warning.detail ?? 'algo correu mal com esta parte';
   if (warning.kind === 'outside') return `fora do âmbito: ${warning.path}`;
   const other = race.lanes.find((l) => l.sessionId === warning.other)?.part?.title;
   return `pode chocar com «${other ?? 'outra parte'}» em ${warning.path}`;
@@ -57,7 +58,7 @@ export function WarningChips({
     <ul className="flex flex-wrap gap-1.5" data-testid="split-warnings">
       {shown.map((warning, i) => (
         <li
-          key={`${warning.kind}:${warning.path}:${warning.other ?? ''}:${i}`}
+          key={`${warning.kind}:${warning.path}:${warning.other ?? ''}:${warning.detail ?? ''}:${i}`}
           className="max-w-full truncate rounded-full border border-line px-2 text-[11px] leading-[20px] text-muted"
           title={warningText(warning, race)}
           data-testid="split-warning"
@@ -71,6 +72,7 @@ export function WarningChips({
           <button
             type="button"
             onClick={() => setAll(true)}
+            aria-label={more === 1 ? 'Mostrar mais um aviso' : `Mostrar mais ${more} avisos`}
             className="sl-press rounded-full border border-line px-2 text-[11px] leading-[20px] text-muted hover:bg-surface-hover hover:text-fg"
             data-testid="split-warnings-more"
           >

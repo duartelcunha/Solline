@@ -12,9 +12,11 @@ import {
   addDraft,
   launchCount,
   patchDraft,
+  planEdited,
   removeDraft,
   toReviewPayload,
   toStartParts,
+  zoneProblem,
   type PartDraft,
 } from './plan-model.ts';
 import { ReviewStrip } from './review-strip.tsx';
@@ -24,7 +26,8 @@ const button =
 
 /**
  * O plano de uma repartição, para rever e editar antes de lançar: um cartão por parte, a
- * conferência ao vivo por baixo e o custo à vista. Fechar descarta; nada arranca sozinho.
+ * conferência ao vivo por baixo e o custo à vista. Fechar descarta (com um plano editado, depois de
+ * perguntar); nada arranca sozinho.
  */
 export function PlanDialog({
   sessionId,
@@ -69,14 +72,20 @@ export function PlanDialog({
   );
 
   const [drafts, setDrafts] = useState<PartDraft[]>(initial);
-  const [review, setReview] = useState<SplitReview | null>(null);
+  const edited = useMemo(() => planEdited(initial, drafts), [initial, drafts]);
+  const problem = useMemo(() => zoneProblem(drafts), [drafts]);
+  const [reviewed, setReview] = useState<SplitReview | null>(null);
+  // Com chavetas por fechar o motor recusava a conferência: não vale a anterior, e diz-se porquê.
+  const review = problem ? null : reviewed;
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   useDragScroll(body);
 
   // A conferência acompanha as edições, com um pequeno atraso para não correr a cada letra.
   useEffect(() => {
     let current = true;
+    if (problem) return;
     const timer = setTimeout(() => {
       const payload = toReviewPayload(drafts, checkKey ? checkKey.split(',') : []);
       void actions.reviewSplit(payload.parts, payload.checkIds).then((result) => {
@@ -87,7 +96,7 @@ export function PlanDialog({
       current = false;
       clearTimeout(timer);
     };
-  }, [drafts, checkKey]);
+  }, [drafts, checkKey, problem]);
 
   const base = { agent, model: settings.model };
   const firstCheck = checks[0]?.id ?? null;
@@ -108,8 +117,16 @@ export function PlanDialog({
     }
   };
 
+  // Esc, o clique fora e o X passam todos por aqui: um plano editado pede confirmação antes de se
+  // perder; um plano como veio fecha logo.
+  const askClose = (open: boolean) => {
+    if (open) return;
+    if (edited) setConfirming(true);
+    else onClose();
+  };
+
   return (
-    <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
+    <Dialog.Root open onOpenChange={askClose}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]" />
         <Dialog.Content
@@ -133,6 +150,32 @@ export function PlanDialog({
               <X size={14} />
             </Dialog.Close>
           </header>
+
+          {confirming ? (
+            <div
+              role="alert"
+              className="sl-enter flex flex-wrap items-center gap-2 rounded-lg border border-accent bg-surface-sunken px-3 py-2 text-[12.5px]"
+              data-testid="split-discard"
+            >
+              <span className="min-w-0 flex-1 font-medium">Descartar as alterações?</span>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className={`${button} border border-line hover:bg-surface-hover`}
+                data-testid="split-discard-keep"
+              >
+                Continuar a editar
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className={`${button} bg-fg text-bg`}
+                data-testid="split-discard-confirm"
+              >
+                Descartar
+              </button>
+            </div>
+          ) : null}
 
           <div
             ref={body}
@@ -171,16 +214,23 @@ export function PlanDialog({
                 <Plus size={13} /> Parte
               </button>
             ) : null}
+            {problem ? (
+              <p className="text-[12.5px] text-muted" data-testid="split-zone-problem">
+                {problem}
+              </p>
+            ) : null}
             <ReviewStrip review={review} zeroFirst={drafts[0]?.zero === true} />
           </div>
 
           <footer className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line pt-3">
             <span className="min-w-0 flex-1 text-[12.5px] text-muted" data-testid="split-cost">
-              {review
-                ? count > 0
-                  ? `Custa cerca de ${count}× os tokens de um agente só.`
-                  : 'Nenhuma parte se lança.'
-                : 'A conferir…'}
+              {problem
+                ? 'Corrige a zona para poder lançar.'
+                : review
+                  ? count > 0
+                    ? `Custa cerca de ${count}× os tokens de um agente só.`
+                    : 'Nenhuma parte se lança.'
+                  : 'A conferir…'}
             </span>
             <button
               type="button"
@@ -193,7 +243,7 @@ export function PlanDialog({
             </button>
             <button
               type="button"
-              disabled={busy || count === 0}
+              disabled={busy || count === 0 || problem !== null}
               onClick={() => void launch()}
               className={`${button} bg-fg text-bg`}
               data-testid="split-launch"

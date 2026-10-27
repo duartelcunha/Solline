@@ -300,3 +300,30 @@ it('integrar e continuar guardam a repartição devolvida; um erro vira aviso', 
   expect(await actions.continueSplit('split')).toBe(false);
   expect(await actions.resolveSplit('split')).toBeNull();
 });
+
+it('stopSplit guarda a repartição devolvida; um erro vira aviso', async () => {
+  const stopped = race([lane('zero', 'Base', true)], {
+    split: {
+      pending: [],
+      warnings: [{ sessionId: '', kind: 'problem', path: '', detail: 'Parada' }],
+    },
+  });
+  const request = vi.fn(async (command: string, payload: unknown) => {
+    expect(command).toBe('split.stop');
+    expect(payload).toEqual({ raceId: 'split' });
+    return stopped;
+  });
+  vi.stubGlobal('window', { solline: { request } });
+  expect(await actions.stopSplit('split')).toBe(true);
+  expect(useApp.getState().races.split?.split?.warnings[0]?.kind).toBe('problem');
+
+  vi.stubGlobal('window', {
+    solline: {
+      request: async () => {
+        throw new Error('Não há partes por arrancar para parar.');
+      },
+    },
+  });
+  expect(await actions.stopSplit('split')).toBe(false);
+  expect(useApp.getState().notice).toContain('Não há partes por arrancar');
+});

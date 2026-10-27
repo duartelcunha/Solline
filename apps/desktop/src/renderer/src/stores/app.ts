@@ -832,6 +832,18 @@ export const actions = {
     }
   },
 
+  /** Pára de arrancar as partes que faltam; as pistas que já correm seguem até acabar. */
+  async stopSplit(raceId: string): Promise<boolean> {
+    try {
+      const race = await request('split.stop', { raceId });
+      useApp.setState((s) => ({ races: { ...s.races, [raceId]: race } }));
+      return true;
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui parar a repartição. ${message(error)}` });
+      return false;
+    }
+  },
+
   /** Junta as partes, uma a uma, com a verificação de cada uma. O estado chega por evento. */
   async integrateSplit(raceId: string): Promise<boolean> {
     try {

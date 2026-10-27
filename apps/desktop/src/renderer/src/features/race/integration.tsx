@@ -203,12 +203,16 @@ export function IntegrationPanel({
       </header>
 
       {!integration ? (
-        pending.length > 0 ? (
-          <p className="text-[12.5px] text-muted" data-testid="split-pending-note">
-            Há partes que ainda não arrancaram ({pending.map((p) => `«${p.part.title}»`).join(', ')}
-            ). Fecha a repartição se já não as queres.
-          </p>
-        ) : (
+        <>
+          {pending.length > 0 ? (
+            <p className="text-[12.5px] text-muted" data-testid="split-pending-note">
+              {pending.length === 1
+                ? 'Uma parte não chegou a arrancar'
+                : 'Há partes que não chegaram a arrancar'}{' '}
+              ({pending.map((p) => `«${p.part.title}»`).join(', ')}) e já não vão arrancar.
+              Integra-se só o que arrancou; ou fecha a repartição se já não a queres.
+            </p>
+          ) : null}
           <div>
             <button
               type="button"
@@ -220,7 +224,7 @@ export function IntegrationPanel({
               Integrar
             </button>
           </div>
-        )
+        </>
       ) : (
         <>
           <Steps race={race} />

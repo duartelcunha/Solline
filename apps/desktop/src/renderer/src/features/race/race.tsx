@@ -335,6 +335,37 @@ function TieNote({ race }: { race: Race }) {
   );
 }
 
+/**
+ * Numa repartição que ainda espera por partes: parar de arrancar o que falta. Fica calado (não é
+ * o caminho normal); as pistas que já correm seguem até acabar.
+ */
+function StopSplit({ race }: { race: Race }) {
+  const [busy, setBusy] = useState(false);
+  if (race.kind !== 'split' || race.phase !== 'running' || (race.split?.pending.length ?? 0) === 0)
+    return null;
+  return (
+    <div
+      className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-muted"
+      data-testid="split-stop-row"
+    >
+      <span className="min-w-0 flex-1">Há partes à espera de outras.</span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void actions.stopSplit(race.id).finally(() => setBusy(false));
+        }}
+        title="As que ainda não arrancaram não arrancam; as que já correm seguem até acabar"
+        className="sl-press h-7 rounded-control border border-line px-2.5 text-[12px] hover:bg-surface-hover hover:text-fg disabled:opacity-50"
+        data-testid="split-stop"
+      >
+        Parar a repartição
+      </button>
+    </div>
+  );
+}
+
 /** A corrida ou repartição: o pedido, os pedidos das pistas no topo e as pistas lado a lado. */
 export function RaceView({ raceId }: { raceId: string }) {
   const race = useApp((s) => s.races[raceId]);
@@ -343,6 +374,10 @@ export function RaceView({ raceId }: { raceId: string }) {
   useDragScroll(area);
   if (!race) return null;
   const split = race.kind === 'split';
+  // Os problemas que não são de nenhuma pista (uma parte que não abriu, a repartição parada).
+  const general = (race.split?.warnings ?? []).filter(
+    (w) => w.kind === 'problem' && !race.lanes.some((l) => l.sessionId === w.sessionId),
+  );
   return (
     <section
       ref={area}
@@ -354,6 +389,12 @@ export function RaceView({ raceId }: { raceId: string }) {
         {race.text}
       </p>
       <AskBar race={race} />
+      <StopSplit race={race} />
+      {general.length > 0 ? (
+        <div className="mb-3">
+          <WarningChips warnings={general} race={race} />
+        </div>
+      ) : null}
       <TieNote race={race} />
       <div className="flex min-h-0 gap-3">
         {race.lanes.map((lane) => (

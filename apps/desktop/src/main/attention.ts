@@ -58,6 +58,22 @@ export class AttentionTracker {
     }
   }
 
+  /**
+   * Como `trackLanes`, mas só para repartições abertas: as pistas de uma repartição fechada já
+   * foram deitadas fora e não voltam a seguir-se com um `race.state` tardio.
+   */
+  trackRace(
+    race: {
+      kind: string;
+      phase: string;
+      lanes: readonly { sessionId: string; agent: string; state: SessionState }[];
+    },
+    project: string,
+  ): void {
+    if (race.kind !== 'split' || race.phase === 'closed') return;
+    this.trackLanes(race.lanes, project);
+  }
+
   /** O aviso que este evento merece, ou null. Atualiza sempre o estado guardado. */
   observe(event: EngineEvent, focused: boolean): Attention | null {
     if (event.type === 'session.checks') return this.#checks(event, focused);

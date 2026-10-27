@@ -59,6 +59,7 @@ const LABELS: Record<string, string> = {
   'split.integrate': 'Integrar repartição',
   'split.resolveNow': 'Abrir sessão para resolver um conflito',
   'split.continue': 'Continuar a integração',
+  'split.stop': 'Parar a repartição',
   'race.bring': 'Trazer o resultado para o projeto',
 };
 

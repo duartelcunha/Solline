@@ -5,16 +5,20 @@ import {
   chainSentence,
   chains,
   draftsFromPlan,
+  joinLetters,
   launchCount,
   letter,
   newDraft,
   patchDraft,
+  planEdited,
   removeDraft,
   templateDrafts,
   toPart,
   toReviewPayload,
   toStartParts,
   visibleWarnings,
+  zoneProblem,
+  zeroRunsFirst,
 } from './plan-model.ts';
 
 const base = { agent: 'claude', model: 'sonnet' };
@@ -159,5 +163,53 @@ describe('o que a revisão mostra', () => {
     expect(launchCount(review)).toBe(4);
     expect(launchCount({ ...review, costMultiplier: 0 })).toBe(0);
     expect(launchCount(null)).toBe(0);
+  });
+});
+
+describe('o plano editado, as zonas e a parte zero', () => {
+  it('um plano como veio não está editado; qualquer mudança (ou parte nova) está', () => {
+    const initial = draftsFromPlan(plan, base);
+    // Os ids só servem ao React: um plano igual com outros ids continua por editar.
+    expect(planEdited(initial, draftsFromPlan(plan, base))).toBe(false);
+    expect(planEdited(initial, patchDraft(initial, 1, { goal: 'Outra coisa' }))).toBe(true);
+    expect(planEdited(initial, addDraft(initial, base, null))).toBe(true);
+    expect(planEdited(initial, removeDraft(addDraft(initial, base, null), 2))).toBe(false);
+  });
+
+  it('chavetas por fechar numa zona dizem-se antes de lançar', () => {
+    const drafts = draftsFromPlan(plan, base);
+    expect(zoneProblem(drafts)).toBeNull();
+    expect(zoneProblem(patchDraft(drafts, 1, { allowed: 'src/{a,b}/**\nsrc/x' }))).toBeNull();
+    expect(zoneProblem(patchDraft(drafts, 1, { allowed: 'src/ok\nsrc/{a,b' }))).toBe(
+      'Na parte B há uma zona com chavetas que não fecham.',
+    );
+    expect(zoneProblem(patchDraft(drafts, 0, { forbidden: 'x}' }))).toContain('parte A');
+  });
+
+  it('as chavetas por fechar também são recusadas pelo contrato que se envia', () => {
+    const drafts = patchDraft(draftsFromPlan(plan, base), 1, { allowed: 'src/{a,b' });
+    expect(SplitReviewPayload.safeParse(toReviewPayload(drafts, ['typecheck'])).success).toBe(
+      false,
+    );
+  });
+
+  it('"A, B e C": as partes em frase', () => {
+    expect(joinLetters([0])).toBe('A');
+    expect(joinLetters([0, 1])).toBe('A e B');
+    expect(joinLetters([0, 1, 2])).toBe('A, B e C');
+  });
+
+  it('a parte A só corre sozinha à frente se é a zero e a revisão a deixa lançar', () => {
+    const review = { sequential: [[0]], dropped: [], hubs: [], costMultiplier: 2, warnings: [] };
+    expect(zeroRunsFirst(review, true)).toBe(true);
+    expect(zeroRunsFirst(review, false)).toBe(false);
+    expect(
+      zeroRunsFirst(
+        { ...review, dropped: [{ index: 0, reason: 'Sem verificação própria.' }] },
+        true,
+      ),
+    ).toBe(false);
+    // Outra parte caída não muda nada para a zero.
+    expect(zeroRunsFirst({ ...review, dropped: [{ index: 2, reason: 'x' }] }, true)).toBe(true);
   });
 });

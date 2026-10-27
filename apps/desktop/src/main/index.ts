@@ -76,8 +76,8 @@ const engine = new EngineHost((event) => {
   win?.webContents.send(IPC.event, event);
   // Uma parte que arranca depois da parte zero só aparece num race.state: passa a ser seguida
   // (só o estado dela; nunca o conteúdo).
-  if (event.type === 'race.state' && event.race.kind === 'split')
-    attention.trackLanes(event.race.lanes, projectNames.get(event.race.projectId) ?? 'Projeto');
+  if (event.type === 'race.state')
+    attention.trackRace(event.race, projectNames.get(event.race.projectId) ?? 'Projeto');
   const notice = attention.observe(event, win?.isFocused() ?? false);
   if (notice) notify(notice);
   if (event.type === 'engine.error' && !event.sessionId) recovery?.show('crashed', event.message);
@@ -374,9 +374,11 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       const request = payload as CommandPayload<'split.plan'>;
       const project = await projects.get(request.projectId);
       if (!project) throw new Error('Projeto desconhecido');
-      const specs =
-        project.checks ??
-        (await engine.request('projects.detectChecks', { cwd: project.path })).checks;
+      // Num projeto sem confiança nada se corre: o planeador não conta com verificações.
+      const specs = project.trusted
+        ? (project.checks ??
+          (await engine.request('projects.detectChecks', { cwd: project.path })).checks)
+        : [];
       return engine.request('split.planNow', {
         text: request.text,
         cwd: project.path,

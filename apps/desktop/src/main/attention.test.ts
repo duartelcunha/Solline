@@ -110,6 +110,18 @@ describe('avisos fora da app', () => {
     expect(t.observe(state('s1', 'running'), false)).toBeNull();
   });
 
+  it('as pistas de uma repartição fechada não voltam a seguir-se', () => {
+    const t = tracker();
+    const lanes = [{ sessionId: 's9', agent: 'claude', state: 'idle' as const }];
+    t.trackRace({ kind: 'split', phase: 'closed', lanes }, 'solline');
+    expect(t.observe(state('s9', 'needs-you'), false)).toBeNull();
+    // Uma corrida (não repartição) não passa por aqui; uma repartição aberta sim.
+    t.trackRace({ kind: 'race', phase: 'running', lanes }, 'solline');
+    expect(t.observe(state('s9', 'needs-you'), false)).toBeNull();
+    t.trackRace({ kind: 'split', phase: 'running', lanes }, 'solline');
+    expect(t.observe(state('s9', 'needs-you'), false)).toMatchObject({ body: 'Precisa de ti' });
+  });
+
   it('o nome do agente', () => {
     expect(agentLabel('codex')).toBe('Codex');
     expect(agentLabel('opencode')).toBe('Opencode');
