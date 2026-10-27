@@ -1,4 +1,9 @@
-import { claudeReviewer, resolveClaudeExecutable, type EngineOptions } from '@solline/engine';
+import {
+  claudePlanner,
+  claudeReviewer,
+  resolveClaudeExecutable,
+  type EngineOptions,
+} from '@solline/engine';
 
 /** Production factory. The separate QA build replaces this module at compile time only. */
 export function engineOptions(): EngineOptions {
@@ -12,6 +17,9 @@ export function engineOptions(): EngineOptions {
     isolated: process.env.SOLLINE_ISOLATED === '1',
     ...(process.env.SOLLINE_REVIEWER === '1'
       ? { reviewer: claudeReviewer({ claudeExecutable }) }
+      : {}),
+    ...(process.env.SOLLINE_PLANNER === '1'
+      ? { planner: claudePlanner({ claudeExecutable }) }
       : {}),
     ...(process.env.SOLLINE_CHECKS === '1' ? { checks: {} } : {}),
   };

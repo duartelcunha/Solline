@@ -11,6 +11,7 @@ export {
   type ReviewedFinding,
   type Reviewer,
 } from './quality/reviewer.ts';
+export { claudePlanner, type Planner } from './races/planner.ts';
 export { SessionQuality, fixMessage } from './quality/session-quality.ts';
 export { PermissionBroker, type BrokerOutcome } from './permission-broker.ts';
 export { ClaudeNormalizer } from './adapters/claude/normalizer.ts';

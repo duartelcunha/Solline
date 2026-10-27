@@ -74,8 +74,10 @@ test.beforeAll(async () => {
     ),
     SOLLINE_USER_DATA: userData,
     SOLLINE_ISOLATED: '1',
-    // Com o SDK real, o revisor também corre (lê o turno e deixa achados).
-    ...(process.env.SOLLINE_E2E_SDK === '1' ? { SOLLINE_REVIEWER: '1', SOLLINE_CHECKS: '1' } : {}),
+    // Com o SDK real, o revisor e o planeador também correm (leem o projeto, só leitura).
+    ...(process.env.SOLLINE_E2E_SDK === '1'
+      ? { SOLLINE_REVIEWER: '1', SOLLINE_PLANNER: '1', SOLLINE_CHECKS: '1' }
+      : {}),
   } as Record<string, string>;
   app = exe
     ? await electron.launch({ executablePath: exe, env })
