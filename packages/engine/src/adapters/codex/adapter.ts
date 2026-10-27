@@ -235,7 +235,9 @@ export class CodexAppServerAdapter implements AgentAdapter {
         ...(model ? { model } : {}),
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
-        developerInstructions: CRAFT_RULES,
+        developerInstructions: this.#options.instructions
+          ? `${CRAFT_RULES}\n\n${this.#options.instructions}`
+          : CRAFT_RULES,
         ...(config ? { config } : {}),
       };
       const fork = this.#options.fork ? parseCodexPoint(this.#options.fork) : null;

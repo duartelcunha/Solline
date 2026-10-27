@@ -103,6 +103,8 @@ export function catalogDefinition(
     // O ACP obriga os agentes a aceitar servidores MCP por stdio.
     mcp: true,
     brain: 'stdio',
+    // Os agentes ACP só têm mensagens: as regras seguem com a primeira.
+    rules: { via: 'context' },
     // Corre sem segredos do anfitrião: as chaves que precisar escolhes tu no painel.
     configurableKeys: true,
     detect: async () => {

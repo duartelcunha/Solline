@@ -27,6 +27,7 @@ import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.
 import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
 import { DelegateTask, spacesCommandSchemas } from './spaces.ts';
+import { rulesCommandSchemas, rulesInternalSchemas } from './rules.ts';
 
 /**
  * Contrato dos comandos da Ponte: interface -> main -> motor.
@@ -113,6 +114,7 @@ export const SessionCreateResult = z.object({
 
 export const commandSchemas = {
   ...spacesCommandSchemas,
+  ...rulesCommandSchemas,
   'engine.snapshot': { payload: Empty, result: EngineSnapshot },
   'engine.flush': { payload: Empty, result: Empty },
   'engine.shutdown': { payload: Empty, result: Empty },
@@ -380,6 +382,8 @@ export const MAIN_COMMANDS = [
   'session.create',
   'session.close',
   'worktrees.discard',
+  'rules.import',
+  'rules.export',
 ] as const satisfies CommandName[];
 export type MainCommandName = (typeof MAIN_COMMANDS)[number];
 export function isMainCommand(command: CommandName): command is MainCommandName {
@@ -399,6 +403,7 @@ export const CommandNameSchema = z.enum(commandNames as [CommandName, ...Command
  * pedido da interface os consegue nomear.
  */
 export const internalCommandSchemas = {
+  ...rulesInternalSchemas,
   'spaces.dispatch': {
     payload: DelegateTask.extend({ start: SessionStartPayload.optional() }).strict(),
     result: spacesCommandSchemas['spaces.delegate'].result,

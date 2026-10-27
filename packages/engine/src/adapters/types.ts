@@ -42,6 +42,11 @@ export interface AgentStartOptions {
    * fica como estava nesse momento, numa sessão nova do agente.
    */
   fork?: string | undefined;
+  /**
+   * As regras do projeto (escritas na Solline) para os agentes com canal de instruções: vão junto
+   * às regras de ofício, no prompt de sistema (Claude) ou nas developerInstructions (Codex).
+   */
+  instructions?: string | undefined;
 }
 
 export interface SendOptions {

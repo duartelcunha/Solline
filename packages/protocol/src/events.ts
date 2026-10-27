@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SpacesState } from './spaces.ts';
+import { RulesState } from './rules.ts';
 import { AgentId, AskBlock, ConversationDelta, SessionState, Workspace } from './conversation.ts';
 import { Checks, SetupState } from './checks.ts';
 import { Race } from './race.ts';
@@ -134,6 +135,7 @@ export const AgentsChangedEvent = z.object({
 export const EngineEvent = z
   .discriminatedUnion('type', [
     z.object({ kind: z.literal('event'), type: z.literal('spaces.changed'), spaces: SpacesState }),
+    z.object({ kind: z.literal('event'), type: z.literal('rules.changed'), rules: RulesState }),
     AgentsChangedEvent,
     EngineReadyEvent,
     SessionEvent,

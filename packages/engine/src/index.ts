@@ -129,6 +129,20 @@ export {
   type BrainTool,
 } from './brain/tool.ts';
 export { contextTool } from './brain/tools/context.ts';
+export { RulesManager } from './rules/manager.ts';
+export { rulesTools } from './rules/tools.ts';
+export { exportRules, nativeCoverage, readNativeFiles, withMarker } from './rules/files.ts';
+export { globToRegExp, matchesAny, matchesGlob } from './rules/glob.ts';
+export {
+  INDEX_TITLE,
+  START_TITLE,
+  lengthWarning,
+  renderAgentsMd,
+  renderStart,
+  renderTouched,
+  type RuleTarget,
+} from './rules/render.ts';
+export { splitSections } from './rules/sections.ts';
 export {
   MCP_CATALOG,
   findNode,

@@ -127,6 +127,23 @@ describe('recovered project policy', () => {
       expect(f.projects.get).not.toHaveBeenCalled();
     },
   );
+  it('keeps rules.list readable for a removed project, but rules effects need the project', async () => {
+    const f = fixture();
+    f.projects.get.mockResolvedValue(undefined);
+    await reconcilePolicy(f.engine, f.projects, 'rules.list', { projectId: 'project' });
+    expect(f.calls).toEqual([]);
+    for (const command of ['rules.save', 'rules.delete', 'rules.import', 'rules.export'] as const) {
+      const payload =
+        command === 'rules.save'
+          ? { projectId: 'project', title: 'A', text: 'b' }
+          : command === 'rules.delete'
+            ? { projectId: 'project', id: 'x' }
+            : { projectId: 'project' };
+      await expect(reconcilePolicy(f.engine, f.projects, command, payload)).rejects.toThrow(
+        'histórico foi preservado',
+      );
+    }
+  });
   it('resolves orphan scope from the engine rather than interpreting its id as a path', async () => {
     const f = fixture();
     await reconcilePolicy(f.engine, f.projects, 'worktrees.bring', { id: 'orphan' });

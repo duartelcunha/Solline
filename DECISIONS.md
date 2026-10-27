@@ -620,3 +620,48 @@
 - **Por verificar:** um agente ACP real a usar o shim (só testado com um agente falso); o Codex a
   chamar a ferramenta num turno com modelo; o shim dentro de um instalador completo (o
   `electron-builder --dir` põe-no em `app.asar.unpacked/out/main/brain-shim.cjs`).
+
+## M6, fase 2: regras do projeto escritas uma vez, para todos os agentes (27/10/2026)
+
+- **O que são:** regras curtas, escritas pelo utilizador, guardadas na Solline por projeto, cada uma
+  com título, texto, padrões de ficheiro opcionais (`*.ts`, `src/db/**`) e um interruptor. A Solline
+  nunca escreve o conteúdo de nenhuma (a pesquisa: ficheiros de contexto escritos por modelos baixam
+  o sucesso e gastam ~20% mais; regras curtas escritas por pessoas ajudam ~4%).
+- **Chegam sem tocar no repositório**, no formato de cada agente, quando a sessão arranca: Claude no
+  prompt de sistema (depois das regras de ofício), Codex nas `developerInstructions`, ACP com a
+  primeira mensagem (como o resumo de rebobinar; `memory.intro`, que segue uma vez e fica no diário).
+  Regras sem padrões vão inteiras; as com padrões só como índice (título, id, padrões e "lê com a
+  ferramenta read_rule quando editares estes ficheiros"; sem cérebro o índice diz só "aplica-se
+  quando editares").
+- **Ao tocar:** antes de cada mensagem, o motor vê (por `changedPaths` dos checkpoints) que ficheiros
+  os turnos anteriores mudaram e, se casam com uma regra com padrões que ainda não seguiu, a regra
+  inteira vai como contexto com essa mensagem. Uma vez por regra e sessão (`rulesDelivered` no
+  diário); só conta o que o agente mudou, não o que leu. Rebobinar a conversa em resumo (agente novo
+  sem histórico) volta a pôr tudo a zero; rebobinar por ponto do agente não.
+- **Sem duplicar:** o Claude lê o CLAUDE.md (que importa o AGENTS.md) e o Codex lê o AGENTS.md. Se
+  esses ficheiros são exportações da Solline por editar e iguais ao que sairia agora, o bloco do
+  arranque não vai para esse agente (as com padrões continuam a entrar ao tocar). Exportação
+  desatualizada, editada, escrita à mão ou projeto sem confiança (o Claude não lê o CLAUDE.md): o
+  bloco vai. Quem importou de um ficheiro escrito à mão fica com um aviso (`native`) até exportar.
+- **Importar:** o CLAUDE.md e o AGENTS.md da raiz, uma regra por `##` de topo (o que vem antes é
+  mais uma, com o nome do `#`), sem repetir (título e texto, a menos de caixa e espaços). Sem
+  padrões. Uma exportação da Solline por editar não se importa; editada, "adota-se" com
+  `rules.import {path}`.
+- **Exportar:** `AGENTS.md` (regras sem padrões e índice) e `CLAUDE.md` com `@AGENTS.md`, nunca uma
+  ligação simbólica, cada um com um marcador `<!-- solline:rules v1 sha256=... -->` com o hash do
+  resto. Só reescreve um ficheiro com marcador cujo hash bate (CRLF conta como LF); ficheiros sem
+  marcador, editados, ligações ou pastas dão conflito e não se escreve nenhum dos dois. O main
+  pede confirmação nativa ("Escrever AGENTS.md e CLAUDE.md em <pasta>?") e dá a pasta ao motor
+  (`rules.exportNow`); a interface nunca manda caminhos.
+- **Aviso de tamanho:** acima de ~150 linhas ou ~8000 caracteres nas regras sem padrões, o estado
+  traz um aviso (`warnings`, `kind: 'length'`). Nunca bloqueia.
+- **Estado:** `RulesState` viaja como os Espaços: evento `rules.changed` com tudo, no snapshot e no
+  diário de recuperação. `rules.list` é só de leitura (não entra no diário); `rules.save/delete/
+  import/export` entram.
+- **Ferramentas do cérebro:** `read_rule {id}` e `list_rules`, só de leitura (correm sem pedir). O
+  projeto é o da sessão que chama; um id de outro projeto ou de uma regra desligada dá erro.
+- **Padrões:** matcher próprio e pequeno (`*`, `**`, `?`, `{a,b}`, `[abc]`; sem barra vale em
+  qualquer pasta). O repositório só tem picomatch e minimatch como dependências indiretas, e o Node
+  `path.matchesGlob` ainda é experimental.
+- **Por verificar:** um agente real a seguir o bloco e a chamar `read_rule` num turno com modelo; a
+  interface (fase 6).

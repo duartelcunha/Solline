@@ -8,6 +8,10 @@ export const SavedSession = z
     trusted: z.boolean(),
     points: z.array(z.tuple([z.string(), z.string().nullable()])),
     context: z.string().optional(),
+    /** O bloco das regras do projeto que ainda não seguiu (agentes sem canal de instruções). */
+    intro: z.string().optional(),
+    /** As regras com padrões que já seguiram inteiras nesta sessão. */
+    rulesDelivered: z.array(z.string()).optional(),
     named: z.boolean(),
     worktree: z
       .object({

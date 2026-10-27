@@ -34,6 +34,7 @@ import {
 } from './session.ts';
 import { morphUpdate, morphs } from '../lib/morph.ts';
 import { receiveSpaces, useSpaces } from './spaces.ts';
+import { receiveRules, useRules } from './rules.ts';
 import { flushNavigation } from '../features/navigation/persistence.ts';
 
 /**
@@ -173,6 +174,7 @@ function storeFromItem(item: EngineSnapshot['sessions'][number]): SessionStore {
 
 export function restoreSnapshot(snapshot: EngineSnapshot, ui: UiRecoveryState): void {
   if (snapshot.spaces) useSpaces.setState({ data: snapshot.spaces });
+  if (snapshot.rules) useRules.setState({ data: snapshot.rules });
   if (snapshot.durability.status === 'failed')
     throw new Error(snapshot.durability.error ?? 'O estado não está guardado');
   for (const unsubscribe of draftSubscriptions.values()) unsubscribe();
@@ -445,6 +447,10 @@ export function dispatch(event: EngineEvent): void {
     receiveSpaces(event.spaces);
     return;
   }
+  if (event.type === 'rules.changed') {
+    receiveRules(event.rules);
+    return;
+  }
   if (event.type === 'race.state') {
     useApp.setState((s) => ({ races: { ...s.races, [event.race.id]: event.race } }));
     if (event.race.kind === 'split' && event.race.phase !== 'closed' && startingSplits === 0)
@@ -534,6 +540,61 @@ export const actions = {
     useSpaces.setState({ panel: 'tasks' });
     useApp.setState({ view: 'spaces', spaceProjectId: projectId, activeProjectId: projectId });
   },
+  /** As regras de um projeto, com os avisos; null se falhou (o erro fica no aviso). */
+  async listRules(projectId: string): Promise<CommandResult<'rules.list'> | null> {
+    try {
+      return await request('rules.list', { projectId });
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui ler as regras. ${message(error)}` });
+      return null;
+    }
+  },
+
+  /** Cria (sem id) ou altera uma regra; devolve a lista do projeto, ou null se falhou. */
+  async saveRule(input: CommandPayload<'rules.save'>): Promise<CommandResult<'rules.save'> | null> {
+    try {
+      return await request('rules.save', input);
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui guardar a regra. ${message(error)}` });
+      return null;
+    }
+  },
+
+  async deleteRule(projectId: string, id: string): Promise<CommandResult<'rules.delete'> | null> {
+    try {
+      return await request('rules.delete', { projectId, id });
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui apagar a regra. ${message(error)}` });
+      return null;
+    }
+  },
+
+  /** Importa o CLAUDE.md e o AGENTS.md da pasta (ou só `path`); null se falhou. */
+  async importRules(
+    projectId: string,
+    path?: 'AGENTS.md' | 'CLAUDE.md',
+  ): Promise<CommandResult<'rules.import'> | null> {
+    try {
+      return await request('rules.import', { projectId, ...(path ? { path } : {}) });
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui importar as regras. ${message(error)}` });
+      return null;
+    }
+  },
+
+  /**
+   * Escreve o AGENTS.md e o CLAUDE.md na pasta do projeto (o main pede confirmação). Um conflito
+   * (ficheiro teu) volta no resultado e não é um erro; null só se falhou.
+   */
+  async exportRules(projectId: string): Promise<CommandResult<'rules.export'> | null> {
+    try {
+      return await request('rules.export', { projectId });
+    } catch (error) {
+      useApp.setState({ notice: `Não consegui exportar as regras. ${message(error)}` });
+      return null;
+    }
+  },
+
   async refreshTaskSessions(): Promise<void> {
     const snapshot = await request('engine.snapshot', {});
     for (const item of snapshot.sessions) {

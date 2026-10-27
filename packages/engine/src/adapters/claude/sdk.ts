@@ -499,7 +499,11 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       permissionMode: toPermissionModeOr(options.mode ?? 'default', 'default'),
       includePartialMessages: true,
       thinking: { type: 'adaptive', display: 'summarized' },
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: CRAFT_RULES },
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: options.instructions ? `${CRAFT_RULES}\n\n${options.instructions}` : CRAFT_RULES,
+      },
       // Sem confiança, só as definições do utilizador: nada do .claude/ nem do CLAUDE.md da pasta.
       settingSources:
         options.loadSettings === false

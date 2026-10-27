@@ -326,6 +326,15 @@ export class SessionCheckpoints {
     });
   }
 
+  /** Os caminhos que um turno mudou (só os nomes: sem calcular o diff). */
+  changedPaths(turnId: string): Promise<string[]> {
+    return this.#serial(async () => {
+      this.#require();
+      const { from, to } = await this.#range({ kind: 'turn', turnId });
+      return (await this.#diffEntries(from, to)).filter((e) => !e.skipped).map((e) => e.path);
+    });
+  }
+
   apply(action: ReviewAction, filePath?: string, hunkId?: string): Promise<Timeline> {
     return this.#serial(async () => {
       this.#require();

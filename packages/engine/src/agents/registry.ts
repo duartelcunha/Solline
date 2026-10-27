@@ -2,11 +2,12 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentDescriptor, AgentId, ModeOption } from '@solline/protocol';
+import type { AgentDescriptor, AgentId, ModeOption, NativeRuleFile } from '@solline/protocol';
 import { binaryName, platformPackageName } from '../adapters/claude/executable.ts';
 import { CLAUDE_MODES, ClaudeSdkAdapter } from '../adapters/claude/sdk.ts';
 import type { AgentAdapterFactory } from '../adapters/types.ts';
 import type { BrainTransport } from '../brain/brain.ts';
+import type { RuleTarget as RuleChannel } from '../rules/render.ts';
 import { CodexAppServerAdapter } from '../adapters/codex/adapter.ts';
 import { codexNeedsLogin, startCodexLogin } from '../adapters/codex/account.ts';
 import { spawnCodex, type CodexTransport } from '../adapters/codex/transport.ts';
@@ -47,6 +48,12 @@ export interface AgentDefinition {
    * stdio (o shim, com o Node do sistema). Sem isto, a sessão não as tem. Exige mcp.
    */
   brain?: BrainTransport;
+  /**
+   * Como recebe as regras do projeto: `via` é o canal (instructions: no arranque da sessão;
+   * context: com a primeira mensagem) e `native` os ficheiros da pasta que o agente já lê sozinho
+   * (se forem exportações da Solline em dia, não se repete o bloco). Sem isto, não recebe regras.
+   */
+  rules?: { via: RuleChannel; native?: readonly NativeRuleFile[] };
   /**
    * Estado nesta máquina; nunca lê credenciais. Pode perguntar ao agente se tem sessão (o
    * Codex), e guarda a resposta um bocado; refresh volta a perguntar.
@@ -126,6 +133,8 @@ export function claudeDefinition(options: BuiltinOptions = {}): AgentDefinition 
     mcp: true,
     // O servidor da Solline corre dentro do motor, sem processo nem canal.
     brain: 'in-process',
+    // O Claude Code lê o CLAUDE.md (que importa o AGENTS.md) em projetos de confiança, se carrega definições.
+    rules: { via: 'instructions', native: options.isolated ? [] : ['CLAUDE.md', 'AGENTS.md'] },
     detect: () => detectClaude(options.claudeExecutable),
     create: (start, sink) =>
       new ClaudeSdkAdapter(
@@ -202,6 +211,7 @@ export function codexDefinition(
     // Pela config do thread (mcp_servers.<nome>), só nesta sessão.
     mcp: true,
     brain: 'stdio',
+    rules: { via: 'instructions', native: ['AGENTS.md'] },
     detect: async ({ refresh = false } = {}) => {
       const found = resolve();
       if (!found) {

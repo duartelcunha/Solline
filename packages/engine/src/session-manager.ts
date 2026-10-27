@@ -55,6 +55,10 @@ import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
 import type { McpCatalog } from './mcp/catalog.ts';
 import type { Brain, BrainBinding } from './brain/brain.ts';
+import { nativeCoverage } from './rules/files.ts';
+import { matchesAny } from './rules/glob.ts';
+import type { RulesManager } from './rules/manager.ts';
+import { renderStart, renderTouched } from './rules/render.ts';
 
 /** Com um servidor MCP que corre programas ligado, nada de modos sem perguntas. */
 const RESTRICTED_RISKS = new Set(['auto', 'full']);
@@ -117,6 +121,13 @@ interface Memory {
   cycle: SessionTurns;
   /** Resumo que segue com a próxima mensagem, depois de rebobinar numa sessão nova. */
   context: string | undefined;
+  /** As regras do projeto para os agentes sem canal de instruções: seguem com a próxima mensagem. */
+  intro: string | undefined;
+  /**
+   * As regras com padrões: as que já seguiram inteiras (uma vez por sessão) e os turnos de que já
+   * se viram os ficheiros mudados.
+   */
+  rules: { delivered: Set<string>; scanned: Set<string> };
   /** A segunda opinião: um revisor lê o diff de cada turno (sem revisor, não existe). */
   quality: SessionQuality | undefined;
   /** A worktree da sessão (só quando o projeto já tinha uma sessão na pasta). */
@@ -161,6 +172,7 @@ export class SessionManager {
   readonly #registry: AgentRegistry;
   readonly #mcp: McpCatalog | undefined;
   readonly #brain: Brain | undefined;
+  readonly #rules: RulesManager | undefined;
   readonly #checkCwd: (cwd: string) => Promise<void>;
   readonly #store: CheckpointStore | undefined;
   readonly #keysFor: (agent: string) => Promise<readonly string[]>;
@@ -192,6 +204,8 @@ export class SessionManager {
     mcp?: McpCatalog | undefined;
     /** As ferramentas da Solline para os agentes; sem isto, nenhuma sessão as tem. */
     brain?: Brain | undefined;
+    /** As regras do projeto escritas na Solline; sem isto, nenhuma sessão as recebe. */
+    rules?: RulesManager | undefined;
     /** Para testes: troca a verificação da pasta. */
     checkCwd?: (cwd: string) => Promise<void>;
     /** Checkpoints escondidos por turno; sem isto, rever e rebobinar ficheiros ficam desligados. */
@@ -212,6 +226,7 @@ export class SessionManager {
     this.#registry = options.registry;
     this.#mcp = options.mcp;
     this.#brain = options.brain;
+    this.#rules = options.rules;
     this.#checkCwd = options.checkCwd ?? defaultCheckCwd;
     this.#store = options.checkpoints;
     this.#keysFor = options.keysFor ?? (async () => []);
@@ -303,6 +318,8 @@ export class SessionManager {
       openTurn: null,
       cycle: this.#turnsFor(() => info),
       context: undefined,
+      intro: undefined,
+      rules: { delivered: new Set(), scanned: new Set() },
       quality: this.#hasReviewer
         ? new SessionQuality({
             reviewer: this.#reviewer,
@@ -487,13 +504,16 @@ export class SessionManager {
       const turnId = submissionId ?? crypto.randomUUID();
       const point = entry.adapter.rewindPoint?.();
       const checkpoints = memory.checkpoints;
+      // Antes de abrir o turno novo: só entram as regras dos ficheiros que os turnos anteriores mudaram.
+      const touched = await this.#touchedRules(entry, memory);
       if (checkpoints) {
         const { staged, done } = checkpoints.beginTurn(turnId, text);
         await staged;
         memory.openTurn = turnId;
         void done.then(() => this.#emitTimeline(sessionId));
       }
-      const context = memory.context;
+      const context =
+        [memory.intro, memory.context, touched?.text].filter(Boolean).join('\n\n') || undefined;
       let sent: string;
       try {
         sent = await entry.adapter.send(text, { turnId, ...(context ? { context } : {}) });
@@ -506,6 +526,9 @@ export class SessionManager {
         throw error;
       }
       memory.context = undefined;
+      memory.intro = undefined;
+      for (const id of touched?.ids ?? []) memory.rules.delivered.add(id);
+      for (const id of touched?.turns ?? []) memory.rules.scanned.add(id);
       if (point !== undefined) memory.points.set(sent, point);
       if (memory.worktree && !memory.named) {
         memory.named = true;
@@ -667,6 +690,11 @@ export class SessionManager {
         throw error;
       }
       memory.context = kind === 'summary' ? summaryOf(kept) : undefined;
+      // Um agente novo sem o histórico antigo precisa de ver outra vez as regras que já tinham seguido.
+      if (kind === 'summary') {
+        memory.rules.delivered.clear();
+        memory.rules.scanned.clear();
+      }
       // Pelo sink, para os turnos guardados aqui e a interface cortarem no mesmo sítio.
       this.#deltaFor(entry.info, memory)({ type: 'rewind', turnId });
       for (const id of dropped) memory.points.delete(id);
@@ -813,6 +841,8 @@ export class SessionManager {
           trusted: entry.trusted,
           points: [...memory.points],
           ...(memory.context ? { context: memory.context } : {}),
+          ...(memory.intro ? { intro: memory.intro } : {}),
+          ...(memory.rules.delivered.size ? { rulesDelivered: [...memory.rules.delivered] } : {}),
           named: memory.named,
           ...(memory.worktree ? { worktree: memory.worktree } : {}),
           checkpoints: memory.checkpoints?.recovery() ?? null,
@@ -873,6 +903,8 @@ export class SessionManager {
         turns: view.turns,
         points: new Map(record.points),
         context: record.context,
+        intro: record.intro,
+        rules: { delivered: new Set(record.rulesDelivered ?? []), scanned: new Set() },
         openTurn: null,
         cycle,
         checkpoints: undefined,
@@ -2080,6 +2112,72 @@ export class SessionManager {
     return undefined;
   }
 
+  /**
+   * As regras do projeto no formato do agente: no arranque (instructions) ou com a primeira
+   * mensagem (intro). Não vão se o agente já lê, da pasta, uma exportação da Solline em dia.
+   */
+  async #ruleBlock(
+    info: SessionInfo,
+    definition: AgentDefinition,
+    trusted: boolean,
+    readTool: boolean,
+  ): Promise<{ instructions?: string; intro?: string } | undefined> {
+    const channel = definition.rules;
+    if (!this.#rules || !channel) return undefined;
+    const rules = this.#rules.enabled(info.projectId);
+    if (rules.length === 0) return undefined;
+    const native = trusted ? (channel.native ?? []) : [];
+    if (native.length > 0) {
+      const coverage = await nativeCoverage(info.cwd, rules).catch(() => undefined);
+      if (coverage && native.every((name) => coverage[name] === 'current')) return undefined;
+    }
+    const text = renderStart(rules, { target: channel.via, readTool });
+    if (!text) return undefined;
+    return channel.via === 'instructions' ? { instructions: text } : { intro: text };
+  }
+
+  /**
+   * As regras com padrões cujos ficheiros o agente mudou nos turnos anteriores e que ainda não
+   * seguiram: vão inteiras com a próxima mensagem, uma vez por regra e sessão. Uma falha ao ler os
+   * checkpoints nunca impede a mensagem.
+   */
+  async #touchedRules(
+    entry: Entry,
+    memory: Memory,
+  ): Promise<{ text: string; ids: string[]; turns: string[] } | undefined> {
+    const checkpoints = memory.checkpoints;
+    if (!this.#rules || !checkpoints || !entry.definition.rules) return undefined;
+    const pending = this.#rules
+      .enabled(entry.info.projectId)
+      .filter((rule) => rule.globs.length > 0 && !memory.rules.delivered.has(rule.id));
+    if (pending.length === 0) return undefined;
+    const turns = checkpoints
+      .timeline()
+      .checkpoints.filter(
+        (c) => c.state === 'done' && c.stats.files > 0 && !memory.rules.scanned.has(c.turnId),
+      )
+      .map((c) => c.turnId);
+    const hit = new Set<string>();
+    const seen: string[] = [];
+    for (const turnId of turns) {
+      try {
+        const paths = await checkpoints.changedPaths(turnId);
+        for (const rule of pending)
+          if (paths.some((p) => matchesAny(rule.globs, p))) hit.add(rule.id);
+        seen.push(turnId);
+      } catch {
+        // Sem este turno por agora: tenta-se outra vez na próxima mensagem.
+      }
+    }
+    const matched = pending.filter((rule) => hit.has(rule.id));
+    const text = renderTouched(matched);
+    if (!text) {
+      for (const id of seen) memory.rules.scanned.add(id);
+      return undefined;
+    }
+    return { text, ids: matched.map((rule) => rule.id), turns: seen };
+  }
+
   async #start(
     info: SessionInfo,
     definition: AgentDefinition,
@@ -2111,6 +2209,7 @@ export class SessionManager {
     // Retomar ou rebobinar arranca outro agente: o acesso do anterior fecha antes de abrir o novo.
     this.#sessions.get(info.id)?.brain?.revoke();
     const brain = await this.#bindBrain(info, definition);
+    const rules = await this.#ruleBlock(info, definition, trusted, Boolean(brain));
     const servers = [
       ...mcp.map((s) => withoutSecrets(s, env)),
       // O shim vai como mais um servidor MCP; o limite de 8 é dos do catálogo e este não conta.
@@ -2128,6 +2227,7 @@ export class SessionManager {
         env,
         ...(servers.length ? { mcpServers: servers } : {}),
         ...(brain?.transport === 'in-process' ? { brain } : {}),
+        ...(rules?.instructions ? { instructions: rules.instructions } : {}),
       },
       this.#sinkFor(
         info,
@@ -2147,6 +2247,9 @@ export class SessionManager {
       if (requested) checkRequested(started.capabilities, requested);
       info.settings = started.settings;
       info.state = 'idle';
+      // Uma sessão retomada já tem as regras no histórico do agente; uma nova leva-as na primeira mensagem.
+      const own = this.#memory.get(info.id);
+      if (own && rules?.intro && !resume) own.intro = rules.intro;
       // Um modo que o agente aceitou no arranque mas não anuncia (por exemplo Auto num modelo
       // sem suporte) volta ao modo por omissão: a interface nunca mostra um modo que não há.
       const fallback = definition.defaultMode;

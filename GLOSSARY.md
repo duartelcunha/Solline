@@ -76,3 +76,5 @@ Os nomes do domínio da Solline, como o código os usa.
 - **Mapa**: a vista em árvore da linhagem de um projeto. Opcional; a cor é a do fabricante.
 - **Cérebro**: o servidor MCP `solline` que o motor dá aos agentes de cada sessão normal. Em
   processo no Claude; por um shim e um canal local nos outros. Cada chamada sabe de que sessão é.
+- **Regra do projeto**: uma instrução curta, escrita pelo utilizador e guardada na Solline, que chega a
+  todos os agentes do projeto no formato de cada um. Com padrões de ficheiro, entra inteira ao tocar neles.

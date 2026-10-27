@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -41,6 +42,10 @@ import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
 import { ENGINE_VERSION } from './version.ts';
 import { Brain, sourceShimPath, type BrainOptions } from './brain/brain.ts';
+import { contextTool } from './brain/tools/context.ts';
+import { exportRules, readNativeFiles } from './rules/files.ts';
+import { RulesManager } from './rules/manager.ts';
+import { rulesTools } from './rules/tools.ts';
 import { SpaceManager } from './spaces/manager.ts';
 import { SpaceAnalysis, type AnalysisRunner } from './spaces/analysis.ts';
 import { claudeAnalysis } from './spaces/claude-analysis.ts';
@@ -131,6 +136,8 @@ type Handlers = {
 /** O motor recebe envelopes de pedido e devolve envelopes de resposta. Não sabe do Electron. */
 export class Engine {
   readonly spaces: SpaceManager;
+  /** As regras do projeto escritas na Solline (iguais para todos os agentes). */
+  readonly rules: RulesManager;
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
   readonly races: RaceManager;
@@ -213,7 +220,8 @@ export class Engine {
       } catch (error) {
         this.#persistenceError = error instanceof Error ? error : new Error(String(error));
         emit({ kind: 'event', type: 'engine.error', message: this.#persistenceError.message });
-        if (event.type === 'spaces.changed') throw this.#persistenceError;
+        if (event.type === 'spaces.changed' || event.type === 'rules.changed')
+          throw this.#persistenceError;
         return;
       }
       emit(sequenced);
@@ -230,8 +238,15 @@ export class Engine {
             ? new WorktreeManager({ root: path.join(options.dataDir, 'worktrees') })
             : undefined));
     const reviewing = reviewersFor(options);
+    this.rules = new RulesManager({
+      save: (rules) => emitAll({ kind: 'event', type: 'rules.changed', rules }),
+    });
     this.#brain = options.brain
-      ? new Brain({ ...options.brain, shim: options.brain.shim ?? sourceShimPath() })
+      ? new Brain({
+          ...options.brain,
+          tools: options.brain.tools ?? [contextTool, ...rulesTools(this.rules)],
+          shim: options.brain.shim ?? sourceShimPath(),
+        })
       : undefined;
     this.sessions = new SessionManager({
       beforeEffect: (command, sessionId, text) =>
@@ -240,6 +255,7 @@ export class Engine {
       registry,
       mcp,
       brain: this.#brain,
+      rules: this.rules,
       checkpoints: this.#checkpoints,
       keysFor: (agent) => settings.keys(agent),
       // Nos testes isolados não se gasta a subscrição a rever turnos falsos.
@@ -360,6 +376,7 @@ export class Engine {
     this.races.restoreRecovery(restored.snapshot.races);
     this.splits.restoreRecovery(restored.snapshot.races);
     this.spaces.restore(restored.snapshot.spaces);
+    this.rules.restore(restored.snapshot.rules);
     for (const operation of restored.snapshot.operations)
       this.#operations.set(operation.id, operation);
     for (const saved of restored.sessions) this.#recordedSessions.add(saved.view.session.id);
@@ -411,6 +428,21 @@ export class Engine {
       'spaces.insightDecision': async (p) => this.spaces.decideInsight(p.id, p.decision),
       'spaces.analyze': () => this.analysis.analyze(false),
       'spaces.tick': () => this.analysis.analyze(true),
+      'rules.list': async (p) => this.rules.view(p.projectId),
+      'rules.save': async (p) => this.rules.save(p),
+      'rules.delete': async (p) => this.rules.delete(p.projectId, p.id),
+      'rules.importNow': async (p) => {
+        await assertFolder(p.cwd);
+        return this.rules.importFiles(p.projectId, await readNativeFiles(p.cwd, p.path));
+      },
+      'rules.exportNow': async (p) => {
+        await assertFolder(p.cwd);
+        const rules = this.rules.enabled(p.projectId);
+        if (rules.length === 0) throw new Error('Não há regras ativas para exportar.');
+        const result = await exportRules(p.cwd, rules);
+        if ('written' in result) this.rules.exported(p.projectId);
+        return result;
+      },
       'engine.snapshot': async () => this.#state().snapshot,
       'engine.flush': async () => {
         await this.flush();
@@ -733,6 +765,7 @@ export class Engine {
       sessions: sessions.map((saved) => saved.view),
       races: this.races?.recovery() ?? [],
       ...(this.spaces ? { spaces: this.spaces.snapshot() } : {}),
+      ...(this.rules && this.rules.snapshot().revision > 0 ? { rules: this.rules.snapshot() } : {}),
       operations: [...this.#operations.values()],
       durability:
         this.#persistenceError || this.#journal?.error
@@ -776,7 +809,19 @@ export class Engine {
   }
 }
 
+/** A pasta do projeto vem do main, mas só se escreve numa pasta absoluta que existe. */
+async function assertFolder(cwd: string): Promise<void> {
+  const isFolder =
+    path.isAbsolute(cwd) &&
+    (await stat(cwd).then(
+      (s) => s.isDirectory(),
+      () => false,
+    ));
+  if (!isFolder) throw new Error('A pasta do projeto já não existe.');
+}
+
 const READ_ONLY = new Set<EngineCommandName>([
+  'rules.list',
   'spaces.snapshot',
   'spaces.syncProjects',
   'engine.ping',

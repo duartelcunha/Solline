@@ -5,6 +5,7 @@ import { Quality } from './quality.ts';
 import { Timeline, ReviewComment } from './review.ts';
 import { Race, RaceLaneSpec } from './race.ts';
 import { SpacesState } from './spaces.ts';
+import { RulesState } from './rules.ts';
 
 /** Human inspection only: an allowlist of intent, never an executable replay payload. */
 export const RecoveryOperationDetails = z.object({
@@ -80,6 +81,7 @@ export const EngineSnapshot = z
     sessions: z.array(RecoverySession),
     races: z.array(Race),
     spaces: SpacesState.optional(),
+    rules: RulesState.optional(),
     operations: z.array(RecoveryOperation),
     durability: z.object({ status: z.enum(['saved', 'failed']), error: z.string().optional() }),
   })
