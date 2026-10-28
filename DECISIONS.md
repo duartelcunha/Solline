@@ -569,7 +569,8 @@
 - Por fazer, com nome (da revisão da fase 6):
   - Média: os servidores MCP do `~/.codex/config.toml` arrancam dentro do revisor Codex, e o sandbox
     só de leitura não os limita. Correção possível: `config: { mcp_servers: {} }` no `thread/start`,
-    por testar num Codex real.
+    por testar num Codex real. (Feito no M6, fase 0: cada servidor, plugins e apps desligados na
+    config da thread e confirmados com `mcpServerStatus/list`.)
   - Média-baixa: na sessão que recebeu o testemunho, o "pedido" que o revisor lê é o rascunho (escrito
     por um modelo), o que choca com a regra de não dar resumos ao revisor. Decidir.
   - Baixa: os ids dos achados repetem-se ao rever o mesmo turno; `stats.total` conta em dobro; achados
