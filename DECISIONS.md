@@ -963,3 +963,48 @@ import/export` entram.
   de consulta; o main a acompanhar as sessões que o motor abre sozinho (as notificações delas só existem
   depois de a interface as adotar); o catálogo contra o registo oficial e o Gestor de Credenciais reais;
   ler as capturas com olhos frescos no dia seguinte.
+
+## M6, revisão antes de fechar (28/10/2026)
+
+- **Corrigido:**
+  - **MCP:** `npx` corre com `--prefix=<dados>/mcp-run` e `uvx` com `--no-config`. O agente arranca o
+    servidor na pasta do projeto, e um `.npmrc` (`registry=`), um `node_modules` ou um `uv.toml` dela
+    trocavam o pacote aprovado por outro. O `--prefix` não entra na impressão nem na confirmação
+    (é da Solline, igual para todos).
+  - **MCP:** no Claude, os servidores por stdio entram por `setMcpServers` depois do arranque (pelo stdin).
+    O SDK punha-os em `--mcp-config <json>` na linha de comando do `claude.exe`, com os segredos à vista
+    de quem lista processos ou audita arranques. O servidor da Solline (em processo) vai nas duas vezes.
+  - **MCP:** a confirmação nativa mostra `NOME="valor"` nas variáveis públicas e `NOME (secreta)` nas
+    secretas. Variáveis proibidas por família (`NODE_`, `NPM_`, `UV_`, `PIP_`, `PYTHON`, `GIT_`, `XDG_`,
+    `LD_`, `DYLD_`), mais as pastas do utilizador e os certificados. Os invisíveis passam a ser todo o
+    `Cf` mais U+2028/2029. A cauda do stderr da sonda tapa os segredos antes de cortar. No Windows, um
+    caminho absoluto tem de ser `.exe`/`.com`.
+  - **Consultas:** o fim do turno de quem pediu cancela os cartões dele, e interromper ou fechar a meio de
+    abrir fecha a filha. Os resumos de delegação não recomeçam a quota (era uma cascata de 3, 9, 27…).
+    Numa consulta, o Claude não tem Edit, Write, MultiEdit nem NotebookEdit (`disallowedTools`).
+  - **Memória:** o que se propõe numa consulta ou delegação, ou num turno aberto por um resumo, é externo.
+    As propostas da análise também. `gh`, `git fetch/pull/clone`, `npm view`, `npx`, `pip download` e
+    `ssh` contam como rede.
+  - **Cérebro:** antes do hello, só cabe 1 KiB por ligação.
+- **Por fazer (decisões de produto):**
+  - **Importar regras:** entram ligadas, sem pré-visualização e mesmo num projeto sem confiança (onde o
+    Claude não leria o CLAUDE.md). Um agente ou um commit de fora pode ter escrito esses ficheiros.
+    Proposta: importar desligadas, ou com pré-visualização por secção; sem confiança, confirmação nativa.
+  - **Bash nas consultas do Claude:** uma regra "allow" das definições do utilizador
+    (ex. `Bash(git commit:*)`) decide antes do `canUseTool`, e o motor não chega a recusar. Opções: tirar o
+    Bash às consultas, ou abri-las sem as definições do utilizador. Tem de ser provado num smoke.
+  - **Passar o testemunho ou bifurcar uma consulta** dá uma sessão normal (com as ferramentas e com
+    escrita) na pasta partilhada. Recusar estes gestos nas consultas?
+  - **Aprovar memórias externas em lote** só é impedido na interface; `memory.approve` com vários ids
+    aceita-as. Recusar no motor?
+  - **`memory.toRule` de uma memória externa** passa texto de fora a regra ("segue-a") sem segunda
+    confirmação.
+  - **Impressão das ferramentas:** não conta as `instructions` do `initialize` (o Claude põe-nas no
+    prompt), nem `title`/`outputSchema`. E a sonda guarda-se pelo id: uma sonda antiga que acaba depois de
+    uma edição pode ficar como referência da versão nova.
+  - **Um "Permitir" que demora mais do que os 900 s do Codex** cancela-se quando o turno acaba. Num Claude
+    em processo não há limite: o cartão espera o que for preciso.
+- **Por verificar num smoke real:** `npx --prefix` e `uvx --no-config` a arrancar um pacote de verdade;
+  o Claude real a ligar os servidores do catálogo por `setMcpServers` antes da primeira mensagem (e o que
+  acontece se um falhar); se o Codex guarda a config do `thread/start` (com os segredos e o token do
+  cérebro) nos ficheiros dele; o Claude em `plan` com regras "allow" de Bash numa consulta.
