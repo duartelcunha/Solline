@@ -7,6 +7,31 @@ import type { Project, SessionState } from '@solline/protocol';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 import { SessionMark } from '../agents/bots.tsx';
 import { NewSessionButton } from '../agents/new-session-button.tsx';
+import { useSpaces } from '../../stores/spaces.ts';
+import { pendingCounts } from '../memory/memory-model.ts';
+
+/** Quantas propostas de memória esperam por ti: um número calmo, sem fundo, que só diz que há algo. */
+function usePendingCounts() {
+  const memories = useSpaces((s) => s.data.memories);
+  return pendingCounts(memories);
+}
+
+function PendingCount({ count, testId }: { count: number; testId: string }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      aria-hidden
+      data-testid={testId}
+      className="ml-auto shrink-0 text-[11px] tabular-nums text-attention"
+    >
+      {count}
+    </span>
+  );
+}
+
+function pendingLabel(count: number): string {
+  return `${count} ${count === 1 ? 'memória proposta' : 'memórias propostas'} por aprovar`;
+}
 
 const STATE_LABEL: Record<SessionState, string> = {
   starting: 'a arrancar',
@@ -62,6 +87,7 @@ const reveal =
 
 function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: string[] }) {
   const activeProject = useApp((s) => s.activeProjectId === project.id);
+  const pending = usePendingCounts().byProject.get(project.id) ?? 0;
   return (
     <li className="mb-2">
       <div className="group flex items-center gap-1 pr-1">
@@ -69,12 +95,17 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
           type="button"
           onClick={() => actions.openSpace(project.id)}
           title={project.path}
-          aria-label={`Projeto ${project.name}`}
+          aria-label={
+            pending > 0
+              ? `Projeto ${project.name}, ${pendingLabel(pending)}`
+              : `Projeto ${project.name}`
+          }
           data-testid="project-row"
           className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium transition-colors duration-150 active:bg-surface-hover/70 ${activeProject ? 'text-fg' : 'text-muted hover:text-fg'}`}
         >
           <Folder size={14} strokeWidth={1.75} className="shrink-0 text-subtle" />
           <span className="truncate">{project.name}</span>
+          <PendingCount count={pending} testId="project-pending" />
         </button>
         <button
           type="button"
@@ -128,6 +159,7 @@ export function Sidebar({
   search?: React.ReactNode;
 }) {
   const projects = useApp((s) => s.projects);
+  const pending = usePendingCounts().total;
   return (
     <aside
       className="flex min-h-0 flex-col border-r border-line bg-sidebar"
@@ -144,10 +176,12 @@ export function Sidebar({
           type="button"
           onClick={() => actions.openSpace(null)}
           data-testid="open-general"
+          aria-label={pending > 0 ? `Geral, ${pendingLabel(pending)}` : 'Geral'}
           className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-[13px] text-muted hover:bg-surface-hover hover:text-fg"
         >
           <Globe2 size={15} strokeWidth={1.75} />
           Geral
+          <PendingCount count={pending} testId="general-pending" />
         </button>
         <DeskButton />
         <MapButton />

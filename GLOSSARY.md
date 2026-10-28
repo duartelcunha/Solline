@@ -106,3 +106,8 @@ Os nomes do domínio da Solline, como o código os usa.
   mudou, o servidor fica a pedir nova aprovação e não é entregue.
 - **Escolha por projeto**: os servidores do catálogo que um projeto usa. Chegam a cada sessão nova dele ao
   arrancar, sem tocar nas configs dos agentes. Pistas, partes, consultas e delegações ficam sem eles.
+- **Caixa de memórias**: no separador Memória de um Espaço, as propostas dos agentes à espera de ti e as
+  «a confirmar». Aprova-se, edita-se ou recusa-se em lote; uma proposta de origem externa só se aprova
+  uma a uma.
+- **Ferramentas MCP de um projeto**: o separador MCP de um projeto escolhe quais servidores do catálogo
+  entram nas suas sessões; o catálogo em si está no separador MCP de Geral.

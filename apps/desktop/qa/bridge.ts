@@ -1,5 +1,12 @@
 import {
+  emptyRules,
   emptySpaces,
+  type ConsultRequest,
+  type McpCatalogServer,
+  type McpCatalogState,
+  type ProjectRule,
+  type ProjectRulesView,
+  type RulesState,
   type SpaceTask,
   SpaceMemory,
   commandSchemas,
@@ -42,29 +49,7 @@ import {
   timeline as initialTimeline,
   type Scene,
 } from './fixtures';
-
-/** Um servidor MCP de cenário, só para os pedidos do catálogo terem um resultado válido. */
-const qaMcpServer = {
-  id: 'qa',
-  name: 'qa',
-  spec: {
-    label: 'Servidor de cenário',
-    command: 'npx',
-    args: ['-y', 'exemplo@1.0.0'],
-    env: [],
-    source: { kind: 'manual' as const },
-  },
-  commandLine: 'npx -y exemplo@1.0.0',
-  fingerprint: '0'.repeat(64),
-  status: 'ready' as const,
-  approved: true,
-  tools: [],
-  toolsHash: '1'.repeat(64),
-  probedAt: 1792663200000,
-  changed: null,
-  error: null,
-  createdAt: 1792663200000,
-};
+import { cerebro, cerebroRegistry, consultRequest } from './cerebro';
 
 function required<T>(value: T | undefined, label: string): T {
   if (value === undefined) throw new Error(`QA: ${label} ausente`);
@@ -91,6 +76,10 @@ export function installBridge(scene: Scene) {
   const sessions = new Map<string, SessionInfo>();
   const canonical = new Map<string, RecoverySession>();
   let spaces = emptySpaces();
+  let rules: RulesState = emptyRules();
+  let mcp: McpCatalogState = { servers: [], projects: {} };
+  let consults: ConsultRequest[] = [];
+  let mcpCount = 0;
   const races = new Map<string, EngineSnapshot['races'][number]>();
   const windowListeners = new Set<(state: WindowState) => void>();
   const closeListeners = new Set<() => Promise<void>>();
@@ -157,6 +146,8 @@ export function installBridge(scene: Scene) {
       races: [...races.values()],
       operations: [],
       spaces,
+      rules,
+      consults,
       durability: { status: 'saved' },
     });
   }
@@ -177,6 +168,8 @@ export function installBridge(scene: Scene) {
     const record = JSON.parse(saved) as Record<string, unknown>;
     const recovered = EngineSnapshot.parse(record.snapshot);
     spaces = recovered.spaces ?? emptySpaces();
+    rules = recovered.rules ?? emptyRules();
+    consults = recovered.consults ?? [];
     if (recovered.epoch !== epoch) throw new Error('QA: epoch de recuperação inesperado');
     ui = UiRecoverySchema.parse(record.ui);
     sequence = recovered.sequence;
@@ -327,6 +320,55 @@ ${goal}
       origin: { kind: 'lane', raceId: 'corrida-qa' },
     });
     addSession(base('lin-solta', 'Sessão solta'));
+  }
+  if (saved === null && (scene === 'cerebro' || scene === 'rules-conflict')) {
+    addSession(
+      base('cb-sessao', 'Plano da navegação'),
+      say('cb-sessao', 'Planeia a navegação entre sessões.'),
+    );
+    spaces = { ...spaces, memories: cerebro.memories(project.id, 'cb-sessao'), revision: 1 };
+    rules = cerebro.rules(project.id);
+  }
+  if (scene === 'cerebro' || scene === 'rules-conflict' || scene === 'mcp-skipped')
+    mcp = { servers: cerebro.servers(), projects: { [project.id]: ['docs', 'notas'] } };
+  function rulesView(projectId: string): ProjectRulesView {
+    const found = rules.projects[projectId];
+    return {
+      projectId,
+      rules: found?.rules ?? [],
+      importedFrom: found?.importedFrom ?? [],
+      warnings: found?.warnings ?? [],
+    };
+  }
+  function saveRules(projectId: string, view: ProjectRulesView) {
+    rules = {
+      ...rules,
+      revision: rules.revision + 1,
+      projects: {
+        ...rules.projects,
+        [projectId]: {
+          rules: view.rules,
+          importedFrom: view.importedFrom,
+          warnings: view.warnings,
+        },
+      },
+    };
+    emit({ kind: 'event', type: 'rules.changed', rules });
+  }
+  /** O que o motor faz depois de permitires: abre a sessão da consulta ou da delegação. */
+  function openConsultSession(request: ConsultRequest) {
+    const title =
+      request.kind === 'ask'
+        ? `Pergunta de Claude: ${request.text.slice(0, 40)}`
+        : (request.title ?? 'Tarefa delegada');
+    const child: SessionInfo = {
+      ...base(`child-${++count}`, title, 'codex'),
+      state: 'running',
+      origin: { kind: request.kind, sessionId: request.sessionId },
+    };
+    addSession(child, say(child.id, request.text));
+    emit({ kind: 'event', type: 'session.state', sessionId: child.id, state: 'running' });
+    setTimeout(() => state(child.id, 'idle'), 600);
   }
   function recordEvent(event: EngineEvent) {
     if (event.type === 'race.state') {
@@ -536,6 +578,24 @@ ${goal}
             ? 'running'
             : 'idle',
     );
+    if (
+      scene === 'consult-ask' ||
+      scene === 'consult-same-vendor' ||
+      scene === 'consult-delegate'
+    ) {
+      state(sessionId, 'running');
+      const request = consultRequest(scene === 'consult-delegate' ? 'delegate' : 'ask', sessionId, {
+        ...(scene === 'consult-same-vendor'
+          ? {
+              to: 'claude',
+              sameVendor: true,
+              summary: 'O Claude quer perguntar a outra sessão do Claude',
+            }
+          : {}),
+      });
+      consults = [request];
+      emit({ kind: 'event', type: 'consult.request', sessionId, request });
+    }
     if (scene === 'queue' || scene === 'worktree-queue') {
       const queue = {
         paused: scene === 'worktree-queue',
@@ -717,6 +777,14 @@ ${goal}
           agentSessionId: 'qa-agent',
           settings: { model: 'sonnet', effort: 'high', mode: 'default' },
           workspace: { kind: 'project' },
+          ...(scene === 'mcp-skipped'
+            ? {
+                mcpSkipped: [
+                  { id: 'notas', reason: 'needs-approval' as const },
+                  { id: 'ledger', reason: 'changed' as const },
+                ],
+              }
+            : {}),
         };
         if (scene === 'worktree-queue')
           session.workspace = {
@@ -1169,29 +1237,290 @@ ${goal}
         persist();
         return { closed: true };
       }
-      // Os cartões de "Perguntar a…" e "Delegar" são da fase 6: aqui só se aceita a resposta.
-      case 'consult.answer':
+      case 'consult.answer': {
+        const request = required(
+          consults.find((c) => c.id === payload.requestId),
+          'pedido de consulta',
+        );
+        const decision = String(payload.decision) as 'allow' | 'allowSession' | 'deny';
+        consults = consults.filter((c) => c.id !== request.id);
+        emit({
+          kind: 'event',
+          type: 'consult.settled',
+          sessionId: request.sessionId,
+          requestId: request.id,
+          outcome: decision,
+        });
+        if (decision !== 'deny') openConsultSession(request);
         return {};
-      // O catálogo MCP (a vista é da fase 6): aqui só se aceita o pedido, sem servidores reais.
+      }
+      case 'rules.list':
+        return rulesView(String(payload.projectId));
+      case 'rules.save': {
+        const input = commandSchemas['rules.save'].payload.parse(payload);
+        const view = rulesView(input.projectId);
+        const now = Date.now();
+        const existing = input.id ? view.rules.find((r) => r.id === input.id) : undefined;
+        const rule: ProjectRule = {
+          id: input.id ?? crypto.randomUUID(),
+          projectId: input.projectId,
+          title: input.title,
+          text: input.text,
+          globs: input.globs,
+          enabled: input.enabled,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+        saveRules(input.projectId, {
+          ...view,
+          rules: existing
+            ? view.rules.map((r) => (r.id === rule.id ? rule : r))
+            : [...view.rules, rule],
+        });
+        return rulesView(input.projectId);
+      }
+      case 'rules.delete': {
+        const projectId = String(payload.projectId);
+        const view = rulesView(projectId);
+        saveRules(projectId, { ...view, rules: view.rules.filter((r) => r.id !== payload.id) });
+        return rulesView(projectId);
+      }
+      case 'rules.import': {
+        const projectId = String(payload.projectId);
+        const view = rulesView(projectId);
+        const path = payload.path as 'AGENTS.md' | 'CLAUDE.md' | undefined;
+        const found: ProjectRule[] =
+          path === 'AGENTS.md'
+            ? []
+            : [
+                {
+                  id: crypto.randomUUID(),
+                  projectId,
+                  title: 'Estilo dos ficheiros',
+                  text: 'Indentação de dois espaços e aspas simples.',
+                  globs: [],
+                  enabled: true,
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                },
+              ];
+        const fresh = found.filter((r) => !view.rules.some((v) => v.title === r.title));
+        if (fresh.length) saveRules(projectId, { ...view, rules: [...view.rules, ...fresh] });
+        const files = [
+          {
+            name: 'CLAUDE.md' as const,
+            state: path === 'AGENTS.md' ? ('missing' as const) : ('read' as const),
+          },
+          { name: 'AGENTS.md' as const, state: 'missing' as const },
+        ];
+        return {
+          imported: fresh,
+          skipped: found
+            .filter((r) => !fresh.includes(r))
+            .map((r) => ({ title: r.title, reason: 'duplicate' as const })),
+          files: files.filter((f) => !path || f.name === path),
+        };
+      }
+      case 'rules.export':
+        if (scene === 'rules-conflict')
+          return {
+            conflict: {
+              path: 'C:/qa/atelier/AGENTS.md',
+              reason: 'edited' as const,
+              message: 'O ficheiro foi editado à mão.',
+            },
+          };
+        return { written: ['C:/qa/atelier/AGENTS.md', 'C:/qa/atelier/CLAUDE.md'] };
+      case 'memory.approve': {
+        const input = commandSchemas['memory.approve'].payload.parse(payload);
+        spaces.memories = spaces.memories.map((m) =>
+          input.ids.includes(m.id)
+            ? SpaceMemory.parse({
+                ...m,
+                state: 'active',
+                projectId: input.scope === 'global' ? null : m.projectId,
+                text: input.edits?.[m.id]?.text ?? m.text,
+                approvedAt: Date.now(),
+              })
+            : m,
+        );
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return spaces;
+      }
+      case 'memory.reject': {
+        const ids = payload.ids as string[];
+        spaces.memories = spaces.memories.filter((m) => !ids.includes(m.id));
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return spaces;
+      }
+      case 'memory.confirm': {
+        const ids = payload.ids as string[];
+        spaces.memories = spaces.memories.map((m) =>
+          ids.includes(m.id) ? SpaceMemory.parse({ ...m, state: 'active', stale: null }) : m,
+        );
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return spaces;
+      }
+      case 'memory.toRule': {
+        const memory = required(
+          spaces.memories.find((m) => m.id === payload.id),
+          'memória',
+        );
+        if (memory.state !== 'active' && memory.state !== 'toConfirm')
+          throw new Error('Aprova a memória antes de a passar para as regras.');
+        const projectId = memory.projectId ?? String(payload.projectId);
+        const view = rulesView(projectId);
+        saveRules(projectId, {
+          ...view,
+          rules: [
+            ...view.rules,
+            {
+              id: crypto.randomUUID(),
+              projectId,
+              title: memory.text.slice(0, 60),
+              text: memory.text,
+              globs: [],
+              enabled: true,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          ],
+        });
+        spaces.memories = spaces.memories.map((m) =>
+          m.id === memory.id ? SpaceMemory.parse({ ...m, state: 'disabled', stale: null }) : m,
+        );
+        spaces.revision++;
+        emit({ kind: 'event', type: 'spaces.changed', spaces });
+        return rulesView(projectId);
+      }
       case 'mcp.catalog':
-        return { servers: [], projects: {} };
+        return structuredClone(mcp);
       case 'mcp.search':
-        return { results: [], nextCursor: null, skipped: { remote: 0, other: 0 } };
-      case 'mcp.add':
+        return {
+          results: cerebroRegistry.filter((r) =>
+            `${r.title} ${r.name} ${r.description}`
+              .toLowerCase()
+              .includes(String(payload.query).toLowerCase()),
+          ),
+          nextCursor: null,
+          skipped: { remote: 3, other: 1 },
+        };
+      case 'mcp.add': {
+        type Manual = {
+          label: string;
+          command: string;
+          args: string[];
+          env: { name: string; secret: boolean; required: boolean }[];
+        };
+        const source = payload.source as
+          { kind: 'registry'; name: string; version: string } | { kind: 'manual'; spec: Manual };
+        const values = (payload.values ?? {}) as Record<string, string>;
+        const found =
+          source.kind === 'registry'
+            ? required(
+                cerebroRegistry.find((r) => r.name === source.name),
+                'servidor do registo',
+              )
+            : null;
+        const withValues = <T extends { name: string; secret: boolean }>(env: T[]) =>
+          env.map((e) => ({
+            ...e,
+            ...(!e.secret && values[e.name] ? { value: values[e.name] as string } : {}),
+          }));
+        const id = `srv-${++mcpCount}`;
+        const server: McpCatalogServer = {
+          id,
+          name: id,
+          spec: found
+            ? {
+                label: found.title,
+                command: found.registryType === 'npm' ? 'npx' : 'uvx',
+                args: [],
+                env: withValues(found.env),
+                source: {
+                  kind: 'registry',
+                  name: found.name,
+                  version: found.version,
+                  registryType: found.registryType,
+                  identifier: found.identifier,
+                  verified: found.verified,
+                },
+              }
+            : {
+                ...(source as { spec: Manual }).spec,
+                env: withValues((source as { spec: Manual }).spec.env),
+                source: { kind: 'manual' },
+              },
+          commandLine: found?.commandLine ?? 'comando acrescentado',
+          fingerprint: '2'.repeat(64),
+          status: 'needs-approval',
+          approved: false,
+          tools: null,
+          toolsHash: null,
+          probedAt: null,
+          changed: null,
+          error: null,
+          createdAt: Date.now(),
+        };
+        mcp = { ...mcp, servers: [...mcp.servers, server] };
+        emit({ kind: 'event', type: 'mcp.changed', mcp });
+        return { server };
+      }
       case 'mcp.update':
-      case 'mcp.probe':
-        return { server: qaMcpServer };
-      case 'mcp.approve':
-        return { server: qaMcpServer, approved: true };
-      case 'mcp.remove':
+      case 'mcp.probe': {
+        const server = required(
+          mcp.servers.find((s) => s.id === payload.id),
+          'servidor MCP',
+        );
+        return { server };
+      }
+      case 'mcp.approve': {
+        const server = required(
+          mcp.servers.find((s) => s.id === payload.id),
+          'servidor MCP',
+        );
+        const approved: McpCatalogServer = {
+          ...server,
+          approved: true,
+          status: 'ready',
+          changed: null,
+          error: null,
+          tools: server.tools ?? [
+            { name: 'ping', description: 'Responde se o servidor está vivo.' },
+          ],
+          toolsHash: '3'.repeat(64),
+          probedAt: Date.now(),
+        };
+        mcp = { ...mcp, servers: mcp.servers.map((s) => (s.id === server.id ? approved : s)) };
+        emit({ kind: 'event', type: 'mcp.changed', mcp });
+        return { server: approved, approved: true };
+      }
+      case 'mcp.remove': {
+        mcp = {
+          servers: mcp.servers.filter((s) => s.id !== payload.id),
+          projects: Object.fromEntries(
+            Object.entries(mcp.projects).map(([key, ids]) => [
+              key,
+              ids.filter((id) => id !== payload.id),
+            ]),
+          ),
+        };
+        emit({ kind: 'event', type: 'mcp.changed', mcp });
         return { removed: true };
+      }
       case 'mcp.setSecret':
         return {};
-      case 'mcp.setProject':
-        return {
-          servers: [],
-          projects: payload.serverIds ? { [String(payload.projectId)]: payload.serverIds } : {},
+      case 'mcp.setProject': {
+        mcp = {
+          ...mcp,
+          projects: { ...mcp.projects, [String(payload.projectId)]: payload.serverIds as string[] },
         };
+        emit({ kind: 'event', type: 'mcp.changed', mcp });
+        return structuredClone(mcp);
+      }
       default:
         throw new Error(`QA: comando sem cenário: ${command}`);
     }

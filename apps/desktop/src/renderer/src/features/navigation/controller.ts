@@ -44,7 +44,7 @@ function applyTarget(raw: NavigationTarget) {
       // Set the selection first; openSpace publishes the coherent destination afterwards.
       useSpaces.setState({ selectedTaskId: target.taskId ?? null });
       actions.openSpace(target.projectId);
-      if (target.panel === 'memory') useSpaces.setState({ panel: 'memory' });
+      if (target.panel && target.panel !== 'tasks') useSpaces.setState({ panel: target.panel });
     } else actions.openDesk();
   } finally {
     applying = false;
@@ -70,7 +70,7 @@ export function currentTarget(): NavigationTarget {
       view: 'spaces',
       projectId: s.spaceProjectId,
       ...(task ? { taskId: task.id } : {}),
-      ...(useSpaces.getState().panel === 'memory' ? { panel: 'memory' as const } : {}),
+      ...(useSpaces.getState().panel !== 'tasks' ? { panel: useSpaces.getState().panel } : {}),
     };
   }
   return { view: 'desk' };

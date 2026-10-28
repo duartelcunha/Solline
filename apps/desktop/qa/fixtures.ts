@@ -395,5 +395,11 @@ export const scenes = [
   'unavailable-mcp',
   'long-controls',
   'long-tool',
+  'cerebro',
+  'rules-conflict',
+  'consult-ask',
+  'consult-same-vendor',
+  'consult-delegate',
+  'mcp-skipped',
 ] as const;
 export type Scene = (typeof scenes)[number];

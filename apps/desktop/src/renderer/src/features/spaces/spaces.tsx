@@ -12,10 +12,14 @@ import {
 } from 'lucide-react';
 import type { SpaceTask } from '@solline/protocol';
 import { actions, useApp, useSession } from '../../stores/app.ts';
-import { quietSpace, spaceRequest, useSpaces } from '../../stores/spaces.ts';
+import { quietSpace, spaceRequest, useSpaces, type SpacePanel } from '../../stores/spaces.ts';
 import { TaskDetails } from './task-details.tsx';
 import { SpaceSettingsPanel } from './space-settings.tsx';
 import { SpaceMemories } from './space-memories.tsx';
+import { RulesEditor } from '../rules/rules-editor.tsx';
+import { McpCatalog } from '../mcp/mcp-catalog.tsx';
+import { ProjectMcp } from '../mcp/mcp-project.tsx';
+import { pendingFor } from '../memory/memory-model.ts';
 import './spaces.css';
 import { sourceLabel } from './source-label.ts';
 
@@ -38,8 +42,11 @@ export function Spaces() {
   const [saving, setSaving] = useState(false);
   const selected = useSpaces((s) => s.selectedTaskId);
   const setSelected = (selectedTaskId: string | null) => useSpaces.setState({ selectedTaskId });
-  const panel = useSpaces((s) => s.panel);
-  const setPanel = (panel: 'tasks' | 'memory') => useSpaces.setState({ panel });
+  const storedPanel = useSpaces((s) => s.panel);
+  // As regras são de um projeto: em Geral não há o separador, e a escolha antiga volta às tarefas.
+  const panel: SpacePanel = storedPanel === 'rules' && projectId === null ? 'tasks' : storedPanel;
+  const setPanel = (panel: SpacePanel) => useSpaces.setState({ panel });
+  const pending = useSpaces((s) => pendingFor(s.data.memories, projectId).length);
   const tasks = data.tasks.filter((t) => t.projectId === projectId);
   const task = tasks.find((t) => t.id === selected);
   const insights = data.insights.filter(
@@ -87,8 +94,36 @@ export function Spaces() {
             type="button"
             aria-pressed={panel === 'memory'}
             onClick={() => setPanel('memory')}
+            data-testid="space-tab-memory"
           >
             Memória
+            {pending > 0 ? (
+              <span
+                className="ml-1.5 tabular-nums text-attention"
+                data-testid="space-tab-memory-count"
+                aria-label={`${pending} ${pending === 1 ? 'proposta' : 'propostas'} por aprovar`}
+              >
+                {pending}
+              </span>
+            ) : null}
+          </button>
+          {projectId !== null ? (
+            <button
+              type="button"
+              aria-pressed={panel === 'rules'}
+              onClick={() => setPanel('rules')}
+              data-testid="space-tab-rules"
+            >
+              Regras
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-pressed={panel === 'tools'}
+            onClick={() => setPanel('tools')}
+            data-testid="space-tab-tools"
+          >
+            MCP
           </button>
         </div>
       </div>
@@ -99,6 +134,14 @@ export function Spaces() {
       ) : null}
       {panel === 'memory' ? (
         <SpaceMemories projectId={projectId} />
+      ) : panel === 'rules' && projectId !== null ? (
+        <RulesEditor key={projectId} projectId={projectId} />
+      ) : panel === 'tools' ? (
+        projectId === null ? (
+          <McpCatalog />
+        ) : (
+          <ProjectMcp projectId={projectId} />
+        )
       ) : (
         <>
           {projectId === null ? <SpaceSettingsPanel /> : null}

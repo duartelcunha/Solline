@@ -4,11 +4,22 @@ import type { SpaceMemory } from '@solline/protocol';
 import { quietSpace, spaceRequest, useSpaces } from '../../stores/spaces.ts';
 import { actions, sessionStore, useApp } from '../../stores/app.ts';
 import { sourceLabel } from './source-label.ts';
+import { MemoryInbox } from '../memory/memory-inbox.tsx';
 
 export function SpaceMemories({ projectId }: { projectId: string | null }) {
   const tasks = useSpaces((s) => s.data.tasks);
   const projects = useApp((s) => s.projects);
-  const memories = useSpaces((s) => s.data.memories).filter((m) => m.projectId === projectId);
+  // As propostas e as «a confirmar» vivem na caixa de cima; a lista é só do que está em uso.
+  const memories = useSpaces((s) => s.data.memories).filter(
+    (m) => m.projectId === projectId && (m.state === 'active' || m.state === 'disabled'),
+  );
+  const hasInbox = useSpaces((s) =>
+    s.data.memories.some(
+      (m) =>
+        (m.state === 'pending' || m.state === 'toConfirm') &&
+        (projectId === null || m.projectId === projectId),
+    ),
+  );
   const [editing, setEditing] = useState<SpaceMemory | 'new' | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -50,6 +61,7 @@ export function SpaceMemories({ projectId }: { projectId: string | null }) {
           Memória
         </button>
       </div>
+      <MemoryInbox projectId={projectId} />
       {editing ? (
         <div className="space-memory-editor">
           <label className="space-label" htmlFor="memory-text">
@@ -77,7 +89,7 @@ export function SpaceMemories({ projectId }: { projectId: string | null }) {
           </div>
         </div>
       ) : null}
-      {!memories.length && !editing ? (
+      {!memories.length && !editing && !hasInbox ? (
         <div className="space-empty">
           <Brain size={30} strokeWidth={1} aria-hidden />
           <p>Um espaço para o que aprendemos.</p>
@@ -161,14 +173,18 @@ export function SpaceMemories({ projectId }: { projectId: string | null }) {
                 }
               >
                 <Check size={13} />
-                {m.state === 'pending'
-                  ? 'Aprovar'
-                  : m.state === 'active'
-                    ? 'Desativar'
-                    : m.state === 'toConfirm'
-                      ? 'Confirmar'
-                      : 'Ativar'}
+                {m.state === 'active' ? 'Desativar' : 'Ativar'}
               </button>
+              {m.state === 'active' && m.projectId !== null ? (
+                <button
+                  type="button"
+                  className="space-control"
+                  onClick={() => void actions.memoryToRule(m.id, m.projectId ?? undefined)}
+                  title="Faz desta memória uma regra do projeto e desliga-a"
+                >
+                  Passar para as regras
+                </button>
+              ) : null}
               {projectId !== null ? (
                 <button
                   type="button"

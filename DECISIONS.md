@@ -885,3 +885,81 @@ import/export` entram.
   nos três adaptadores); pacotes OCI, NuGet e MCPB; argumentos de pacote que pedem valor ao utilizador;
   cofre fora do Windows; rodar/expirar segredos (`rodar até`); vista do catálogo e do escolher por projeto
   (fase 6); mostrar `mcpSkipped` na interface.
+
+## M6, fase 6: a interface do «um só cérebro» (28/10/2026)
+
+- **Onde está cada vista: dentro do Espaço, não na barra lateral.** O Espaço já é onde vivem as tarefas
+  e a memória, e «Geral» é «o que liga os teus projetos». Os separadores passam a ser Tarefas, Memória,
+  Regras (só nos projetos) e MCP. A barra lateral continua a só navegar; não há vista de topo nova. A
+  retoma (`NavigationTarget.panel`) aceita agora `rules` e `tools`.
+  - **Memória:** a caixa de propostas e as «A confirmar» ficam no topo do separador, por cima da lista de
+    memórias em uso (a lista só mostra `active` e `disabled`). Num projeto vêem-se as dele; em Geral, as
+    de todos os projetos, com o nome do projeto.
+  - **Regras:** o editor de um projeto (as regras são por projeto, por isso não há em Geral).
+  - **MCP:** em Geral, o catálogo global (acrescentar, aprovar, sondar, segredos, tirar); num projeto, só
+    a escolha dos servidores dele (até 8) e um botão «Gerir o catálogo» que abre Geral. O catálogo é
+    global e a escolha é do projeto, e cada uma fica onde faz sentido.
+- **Contador de propostas por aprovar:** um número âmbar, sem fundo, na linha de Geral (total), na de cada
+  projeto e no separador Memória. Conta só `pending`; as «a confirmar» vêem-se na secção.
+- **Regras:** nada de «gerar»; a Solline só guarda o que escreves. Interruptor por regra (posição, forma e
+  nome: não depende só da cor), padrões escritos por vírgulas ou linhas e validados com o `RuleGlob` do
+  protocolo, aviso do motor à vista (`warnings`) e uma medida de «sempre à vista dos agentes» que espelha
+  os limites do motor (150 linhas, 8000 caracteres; o aviso é do motor, a medida é só um espelho).
+  Importar tem três escolhas (os dois, só o CLAUDE.md, só o AGENTS.md; a escolha de um ficheiro é a forma
+  de «adotar» uma exportação editada). Num conflito de exportação mostra o caminho e a razão e oferece
+  importar o que lá está. Apagar pede confirmação no próprio botão.
+- **Memórias:** aprovar, editar o texto (até 2000 caracteres), escolher Projeto ou Geral e recusar, uma a
+  uma ou em lote. O lote faz uma chamada por âmbito (`planApproval`); se a segunda falhar, a primeira já
+  valeu.
+  - **Decisão minha:** uma proposta de **origem externa** não entra em «Escolher todas» (a caixa fica
+    desligada, com a razão): lê-se e aprova-se uma a uma, com o aviso à vista.
+  - **Prova:** `ficheiro:linhas` ou `commit abc…`. A Solline não tem ponte para abrir ficheiros, por isso
+    clicar na prova **copia-a**; a sessão de origem abre-se (se ainda existir).
+  - **Transformar em regra** numa proposta faz duas coisas: aprova-a (âmbito projeto, com a tua edição) e
+    passa-a com `memory.toRule`, porque o motor só passa memórias aprovadas. Se a segunda falhar, a
+    memória fica aprovada e o erro aparece no aviso. As memórias ativas também ganham «Passar para as
+    regras».
+- **Cartões de «Perguntar a…» e «Delegar»:** na conversa, depois dos turnos e antes da fila, no estilo do
+  cartão de permissão (teclas 1, 2 e Esc, foco uma vez por pedido, o mesmo cuidado com quem está a ler).
+  Mostram a frase do motor, o texto do agente (dado, nunca ordem; o contexto fica dobrado), e no delegar o
+  agente, o modo e o título; o aviso de mesmo fabricante fica em âmbar.
+  - **Duas pontas da fase 4, corrigidas:** a sessão com um cartão pendente aparece como «precisa de ti»
+    (`SessionData.engineState` guarda o estado do motor e `info.state` junta-lhe os cartões; só vale por
+    cima de «a trabalhar»), por isso a mesa, a barra lateral, o bot e a contagem da Mesa o seguem sem
+    mais mudanças. O main avisa com uma notificação urgente quando chega um `consult.request`.
+  - **Na mesa**, perguntar permite-se direto no cartão (é só leitura); **delegar só abre a sessão** (decisão
+    minha: o modo e o texto têm de se ver antes de dar acesso para editar numa worktree). Recusar vale nos dois.
+  - **Ligação à sessão aberta:** as consultas e delegações de uma sessão ficam listadas no fim da conversa
+    dela (agente, estado, «Abrir»); a sessão filha diz de onde veio (já existia).
+  - **Lacuna que a fase 4 deixou e esta fase fechou:** as sessões que o motor abre sozinho (consulta,
+    delegação) só mandam eventos, e a interface nunca criava a loja delas. Um evento de uma sessão
+    desconhecida agenda (150 ms, uma vez de cada) a leitura do snapshot e adota só as sessões com origem
+    `ask` ou `delegate` (as pistas e as sessões que a interface cria têm o seu caminho).
+- **Catálogo MCP:** cada servidor mostra a origem (espaço de nomes do registo, versão fixada e quem
+  verificou o dono, com ícone e palavras), a linha de comando exata, o estado (Pronto, Por aprovar,
+  Precisa de nova aprovação, Com erro), as ferramentas sondadas e, quando mudaram, o que mudou (novas,
+  tiradas, alteradas). Aprovar é do main (confirmação nativa). Segredos num campo de password que se limpa
+  ao guardar e nunca se volta a mostrar.
+  - **Limite que se vê:** o catálogo não diz se um segredo já tem valor, por isso o «Guardado» só confirma
+    o gesto, e há «Tirar valor».
+  - **Decisão minha:** não há edição de servidores acrescentados à mão (o `mcp.update` não tem uma
+    semântica clara para segredos já guardados); tira-se e acrescenta-se de novo.
+  - A pesquisa mostra «Já está no catálogo» e diz quantas entradas ficaram de fora (remotas ou de outro
+    tipo). Servidores ainda não prontos podem escolher-se num projeto, com o aviso «ainda não entra nas
+    sessões» (a sessão abre sem eles).
+  - **Na sessão:** `SessionInfo.mcpSkipped` aparece numa linha calma por baixo do cabeçalho, com o nome e a
+    razão de cada servidor, e um atalho para o catálogo.
+- **Motion:** quase nada anima de propósito. O cartão de consulta entra com o mesmo `appear` dos outros
+  pedidos; as ações premem com `sl-press`; os interruptores das regras deslizam 150 ms só em `transform`
+  (transição, interrompível, sem movimento com movimento reduzido). Nada anima em repouso, e a caixa de
+  memórias, o catálogo e as regras são coisas de ler e decidir, que se usam poucas vezes por dia mas pedem
+  calma, por isso não ganham entradas nem escalonamentos.
+- **Verificado:** testes dos modelos e do estado (`consult.test.ts`, `*-model.test.ts`, `attention.test.ts`),
+  o spec `qa/tests/cerebro.spec.ts` (27 testes em claro e escuro, janela estreita e teclado) e capturas
+  de cada vista. Os cenários do QA (`cerebro`, `rules-conflict`, `consult-*`, `mcp-skipped`) são
+  sintéticos: `qa/cerebro.ts`.
+- **Por verificar:** um Claude e um Codex reais a pedir uma consulta e uma delegação e a sessão filha a
+  aparecer na app instalada (a adoção só foi vista com a ponte de QA); o aviso do Windows para um pedido
+  de consulta; o main a acompanhar as sessões que o motor abre sozinho (as notificações delas só existem
+  depois de a interface as adotar); o catálogo contra o registo oficial e o Gestor de Credenciais reais;
+  ler as capturas com olhos frescos no dia seguinte.

@@ -51,6 +51,18 @@
   opacity: 0.45;
   cursor: default;
 }
+/* Ações secundárias de um cartão: sem contorno em repouso, para a decisão principal respirar. */
+.space-quiet {
+  border-color: transparent;
+  color: var(--sl-text-muted);
+}
+.space-quiet:hover:not(:disabled) {
+  color: var(--sl-text);
+  border-color: var(--sl-border);
+}
+.spaces-view input[type='checkbox'] {
+  accent-color: var(--sl-text);
+}
 .space-primary,
 .space-primary:hover:not(:disabled) {
   background: var(--sl-text);

@@ -37,6 +37,7 @@ import { NavigationSearch } from './features/navigation/search.tsx';
 import { NavigationSettings } from './features/navigation/settings.tsx';
 import { navigationEntries } from './features/navigation/search-entries.ts';
 import { TaskContext } from './features/navigation/task-context.tsx';
+import { McpSkippedNote } from './features/mcp/mcp-skipped.tsx';
 import { Spaces } from './features/spaces/spaces.tsx';
 import { quietSpace, useSpaces } from './stores/spaces.ts';
 
@@ -350,6 +351,8 @@ export function App() {
       });
     });
     void actions.loadAgents();
+    // O catálogo MCP chega por mcp.changed; a leitura inicial cobre o arranque.
+    void actions.loadMcpCatalog();
     return () => {
       off();
       offNavigation();
@@ -449,6 +452,9 @@ export function App() {
 
           <NoticeBar notice={notice} />
           {activeSessionId ? <TaskContext sessionId={activeSessionId} /> : null}
+          {activeSessionId ? (
+            <McpSkippedNote key={`m-${activeSessionId}`} sessionId={activeSessionId} />
+          ) : null}
           {activeSessionId ? (
             <HandedBanner key={activeSessionId} sessionId={activeSessionId} />
           ) : null}
