@@ -114,6 +114,12 @@ export class ConsultManager {
   readonly #watches = new Map<string, Watch>();
   /** As consultas que cada sessão tem a correr (para as parar se o turno for interrompido). */
   readonly #running = new Map<string, Set<string>>();
+  /**
+   * Muda sempre que o turno de uma sessão acaba ou é interrompido. Uma chamada guarda o valor ao
+   * começar e, depois de cada espera (o cartão, a worktree, abrir a sessão), só segue se ainda for
+   * o mesmo: um "Permitir" que chega depois de o agente desistir não abre nada.
+   */
+  readonly #epochs = new Map<string, number>();
   #stopping = false;
 
   constructor(options: ConsultOptions) {
@@ -144,6 +150,7 @@ export class ConsultManager {
 
   /** O turno de uma sessão foi interrompido: os pedidos dela caem e as consultas que abriu param. */
   interrupted(sessionId: string): void {
+    this.#bump(sessionId);
     this.#approvals.cancelSession(sessionId);
     const children = this.#running.get(sessionId);
     if (!children) return;
@@ -158,6 +165,8 @@ export class ConsultManager {
   sessionClosed(sessionId: string): void {
     this.#approvals.forget(sessionId);
     this.#calls.delete(sessionId);
+    // Uma chamada a meio vê a sessão fechada em #wanted (consultSource), não precisa do contador.
+    this.#epochs.delete(sessionId);
     // Quem perguntou já não está para ler a resposta: deixa de se esperar por ela.
     for (const child of this.#running.get(sessionId) ?? [])
       this.#watches.get(child)?.settle({ end: 'cancelled' });
@@ -180,6 +189,12 @@ export class ConsultManager {
 
   /** Os eventos das sessões: é por aqui que se vê o primeiro turno de uma consulta ou delegação acabar. */
   observe(event: EngineEvent): void {
+    if (event.type === 'session.event' && event.delta.type === 'turn.end') {
+      // O turno de quem chamou acabou (o agente desistiu de esperar: o Codex corta as ferramentas
+      // aos 900 s): os cartões dele já não têm quem leia a resposta.
+      this.#bump(event.sessionId);
+      this.#approvals.cancelSession(event.sessionId);
+    }
     if (this.#watches.size === 0) return;
     if (event.type === 'session.event') {
       const watch = this.#watches.get(event.sessionId);
@@ -208,6 +223,7 @@ export class ConsultManager {
     const source = this.#caller(ctx);
     const sessions = this.#need();
     this.#spend(ctx);
+    const epoch = this.#epoch(source.id);
     const question = clip(cleanBlock(args.question), CONSULT_MAX_QUESTION);
     if (!question) throw new BrainToolError('A pergunta está vazia.');
     const context = args.context
@@ -247,6 +263,11 @@ export class ConsultManager {
       childId = created.session.id;
     } catch (error) {
       throw new BrainToolError(`Não consegui abrir a consulta: ${errorText(error)}`);
+    }
+    // Entretanto o turno de quem perguntou acabou, foi interrompido ou a sessão fechou.
+    if (!this.#wanted(source.id, epoch)) {
+      await sessions.close(childId, 'discard', true).catch(() => undefined);
+      this.#decided('cancelled', 'consulta');
     }
 
     const watch = this.#watch(childId);
@@ -306,6 +327,7 @@ export class ConsultManager {
     const source = this.#caller(ctx);
     const sessions = this.#need();
     this.#spend(ctx);
+    const epoch = this.#epoch(source.id);
     const task = clip(cleanBlock(args.task), CONSULT_MAX_TASK);
     if (!task) throw new BrainToolError('A tarefa está vazia.');
     const worktrees = this.#worktrees;
@@ -349,6 +371,10 @@ export class ConsultManager {
       throw new BrainToolError('Delegar só funciona em projetos git com pelo menos um commit.');
     // O branch ganha o nome do título (a primeira mensagem é só o enquadramento da tarefa).
     worktree = await worktrees.rename(worktree, title).catch(() => worktree as Worktree);
+    if (!this.#wanted(source.id, epoch)) {
+      await worktrees.remove(worktree, 'always').catch(() => undefined);
+      this.#decided('cancelled', 'delegação');
+    }
     const turnId = ctx.turn().id;
     let childId: string;
     try {
@@ -370,6 +396,10 @@ export class ConsultManager {
     } catch (error) {
       await worktrees.remove(worktree, 'always').catch(() => undefined);
       throw new BrainToolError(`Não consegui abrir a sessão delegada: ${errorText(error)}`);
+    }
+    if (!this.#wanted(source.id, epoch)) {
+      await sessions.close(childId, 'discard', true).catch(() => undefined);
+      this.#decided('cancelled', 'delegação');
     }
 
     const watch = this.#watch(childId);
@@ -413,6 +443,23 @@ export class ConsultManager {
         'Esta sessão passou o testemunho: já não pode perguntar nem delegar.',
       );
     return source;
+  }
+
+  #epoch(sessionId: string): number {
+    return this.#epochs.get(sessionId) ?? 0;
+  }
+
+  #bump(sessionId: string): void {
+    this.#epochs.set(sessionId, this.#epoch(sessionId) + 1);
+  }
+
+  /** Quem chamou ainda espera por esta chamada: a mesma sessão aberta, no mesmo turno. */
+  #wanted(sessionId: string, epoch: number): boolean {
+    return (
+      !this.#stopping &&
+      this.#epoch(sessionId) === epoch &&
+      this.#sessions?.consultSource(sessionId) !== undefined
+    );
   }
 
   #need(): ConsultSessions {

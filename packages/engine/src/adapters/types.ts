@@ -47,6 +47,12 @@ export interface AgentStartOptions {
    * às regras de ofício, no prompt de sistema (Claude) ou nas developerInstructions (Codex).
    */
   instructions?: string | undefined;
+  /**
+   * Sessão só de leitura (uma consulta de outro agente): o adaptador tira as ferramentas que só
+   * escrevem, por cima do modo de leitura e da recusa do motor, porque as regras "allow" das
+   * definições do agente decidem antes de o pedido de permissão chegar ao motor.
+   */
+  readOnly?: boolean | undefined;
 }
 
 export interface SendOptions {

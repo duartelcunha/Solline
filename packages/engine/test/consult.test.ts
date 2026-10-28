@@ -41,6 +41,8 @@ const BYPASS: ModeOption = {
  */
 class FakeAgent implements AgentAdapter {
   static all: FakeAgent[] = [];
+  /** Se existir, o start() espera por ela (para ver o que acontece a meio de abrir uma sessão). */
+  static startGate: Promise<void> | undefined;
   readonly received: string[] = [];
   readonly answers: PermissionAnswer[] = [];
   mode: string | null;
@@ -66,6 +68,7 @@ class FakeAgent implements AgentAdapter {
   }
 
   async start() {
+    await FakeAgent.startGate;
     this.sink.state('idle');
     return {
       settings: { model: 'm', effort: null, mode: this.mode },
@@ -287,6 +290,7 @@ beforeEach(async () => {
   git(project, 'commit', '--quiet', '-m', 'início');
   ready = new Set(['claude', 'codex']);
   FakeAgent.all = [];
+  FakeAgent.startGate = undefined;
 });
 
 afterEach(async () => {
@@ -397,6 +401,45 @@ describe('o cartão de aprovação', { timeout: 60_000 }, () => {
     expect(() => consult.answer(claude.id, requests()[0]!.request.id, 'allow')).toThrow(
       /já não está à espera/,
     );
+  });
+
+  it('o turno de quem pediu acabar (o agente desistiu de esperar) cancela o cartão e não abre nada', async () => {
+    build();
+    const claude = await open('claude');
+    const result = claude.call('delegate', { task: 'faz isto' });
+    await waitFor(() => requests().length === 1);
+    // O Codex corta as ferramentas MCP aos 900 s e o turno dele segue e acaba.
+    consult.observe({
+      kind: 'event',
+      type: 'session.event',
+      sessionId: claude.id,
+      delta: { type: 'turn.end', turnId: 'x', outcome: 'done' },
+    } as EngineEvent);
+    expect((await result).text).toMatch(/cancelada/);
+    expect(settled()).toEqual([expect.objectContaining({ outcome: 'cancelled' })]);
+    // Um "Permitir" que chega tarde já não abre a delegação.
+    expect(() => consult.answer(claude.id, requests()[0]!.request.id, 'allow')).toThrow();
+    expect(manager.recovery()).toHaveLength(1);
+  });
+
+  it('interromper quem perguntou enquanto a consulta abre fecha-a sem lhe mandar a pergunta', async () => {
+    build();
+    const claude = await open('claude');
+    let open_!: () => void;
+    FakeAgent.startGate = new Promise<void>((resolve) => {
+      open_ = resolve;
+    });
+    const before = FakeAgent.all.length;
+    const result = asked(claude, 'ask_agent', { question: 'onde?' }, 'allow');
+    await waitFor(() => FakeAgent.all.length > before);
+    const child = newest();
+    await manager.interrupt(claude.id);
+    open_();
+    const done = await result;
+    expect(done.isError).toBe(true);
+    expect(done.text).toMatch(/cancelada/);
+    expect(child.received).toEqual([]);
+    await waitFor(() => manager.recovery().length === 1);
   });
 
   it('um pedido só se responde na sessão a que pertence', async () => {

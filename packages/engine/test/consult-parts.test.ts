@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import type { ModeOption } from '@solline/protocol';
+import type { ModeOption, Turn } from '@solline/protocol';
 import {
   ASK_AGENT_TOOL,
   Brain,
@@ -16,7 +16,8 @@ import {
 import { defineBrainTool } from '../src/brain/tool.ts';
 import { mcpServersConfig } from '../src/adapters/codex/mcp.ts';
 import { CODEX_MODES } from '../src/adapters/codex/modes.ts';
-import { toolIsExternal } from '../src/memory/external.ts';
+import { currentTurn, toolIsExternal, turnText } from '../src/memory/external.ts';
+import { isDelegateDigest } from '../src/consult/messages.ts';
 import { cleanBlock, cleanLine, clip } from '../src/consult/text.ts';
 
 const claude = { id: 'claude', staticModes: CLAUDE_MODES, defaultMode: 'default' };
@@ -123,6 +124,31 @@ describe('as ferramentas do cérebro para perguntar e delegar', () => {
     expect(toolIsExternal(tool('mcp__solline__ask_agent'))).toBe(true);
     expect(toolIsExternal(tool('mcp__solline__read_memory'))).toBe(false);
     expect(toolIsExternal(tool('mcp__solline__delegate'))).toBe(false);
+  });
+
+  it('o turno que um resumo de delegação abre não recomeça a quota e conta como externo', () => {
+    const user = (id: string, text: string): Turn => ({
+      id,
+      role: 'user',
+      blocks: [{ kind: 'text', id: `${id}-t`, text, parentToolId: null }],
+    });
+    const reply = (id: string): Turn => ({ id, role: 'assistant', blocks: [] });
+    const digest = delegateDigest({
+      title: 'Parser',
+      agentLabel: 'Codex',
+      end: 'done',
+      files: [],
+      note: 'feito',
+    });
+    expect(isDelegateDigest(digest)).toBe(true);
+    const options = { fromAgent: (turn: Turn) => isDelegateDigest(turnText(turn)) };
+    const turns = [user('u1', 'faz o parser'), reply('a1'), user('d1', digest), reply('a2')];
+    // O pedido é ainda o do utilizador (u1): as três chamadas dele valem para os resumos todos.
+    expect(currentTurn(turns, options)).toEqual({ id: 'u1', external: true });
+    // Sem resumo, nada mudou: o turno é o último pedido e só é externo se foi buscar fora.
+    expect(currentTurn(turns.slice(0, 2), options)).toEqual({ id: 'u1', external: false });
+    // Numa consulta ou delegação a primeira mensagem é de outro agente: tudo é externo.
+    expect(currentTurn(turns.slice(0, 2), { ...options, external: true }).external).toBe(true);
   });
 });
 

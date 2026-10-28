@@ -309,15 +309,33 @@ describe('origem externa: o turno foi à web ou a servidores de terceiros', () =
     ).toBe(true);
     expect(toolIsExternal(tool('Qualquer', { category: 'other' }))).toBe(true);
     expect(toolIsExternal(tool('Task'))).toBe(true);
+    // Também os que leem issues, PRs, pacotes e repositórios remotos.
+    for (const command of [
+      'gh issue view 12',
+      'gh pr view 3 --comments',
+      'git fetch origin',
+      'git pull',
+      'npm view left-pad',
+      'pnpm info zod',
+      'npx some-tool',
+      'pip download requests',
+      'ssh host cat notes.txt',
+    ])
+      expect(
+        toolIsExternal(tool('Bash', { category: 'execute', input: { command } })),
+        command,
+      ).toBe(true);
   });
 
   it('ler, editar, procurar, comandos locais e as ferramentas da própria Solline não contam', () => {
     expect(toolIsExternal(tool('Read', { category: 'read' }))).toBe(false);
     expect(toolIsExternal(tool('Edit', { category: 'edit' }))).toBe(false);
     expect(toolIsExternal(tool('Grep', { category: 'search' }))).toBe(false);
-    expect(
-      toolIsExternal(tool('Bash', { category: 'execute', input: { command: 'pnpm test' } })),
-    ).toBe(false);
+    for (const command of ['pnpm test', 'git status', 'git log --oneline', 'npm run build'])
+      expect(
+        toolIsExternal(tool('Bash', { category: 'execute', input: { command } })),
+        command,
+      ).toBe(false);
     expect(toolIsExternal(tool('mcp__solline__read_rule'))).toBe(false);
     expect(toolIsExternal(tool('TodoWrite'))).toBe(false);
   });

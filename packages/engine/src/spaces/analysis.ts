@@ -225,6 +225,9 @@ export class SpaceAnalysis {
               source: lesson.sources.join(', '),
               sourceId: lesson.sources[0] ?? null,
               state: 'pending',
+              // A análise lê conversas (com o que os agentes trouxeram da web) e ficheiros do
+              // repositório: o texto dela vem de fora e aprova-se uma a uma, como o de um agente.
+              external: true,
               createdAt: now,
             }),
           );

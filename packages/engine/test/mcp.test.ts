@@ -75,6 +75,22 @@ describe('servidores MCP por sessão', () => {
     await m.disposeAll();
   });
 
+  it('uma consulta só de leitura tira ao Claude as ferramentas que escrevem (as regras "allow" não chegam ao canUseTool)', async () => {
+    const fakes: ReturnType<typeof fakeQuery>[] = [];
+    const m = manager(fakes);
+    const { session: parent } = await m.create(base);
+    await m.create({
+      ...base,
+      mode: 'plan',
+      origin: { kind: 'ask', sessionId: parent.id },
+    });
+    expect(fakes[1]!.rawOptions().disallowedTools).toEqual(
+      expect.arrayContaining(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']),
+    );
+    expect(fakes[0]!.rawOptions().disallowedTools).toBeUndefined();
+    await m.disposeAll();
+  });
+
   it('os segredos do agente chegam vazios ao servidor MCP', async () => {
     process.env.SOLLINE_TESTE_API_KEY = 'segredo';
     try {

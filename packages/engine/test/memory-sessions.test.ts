@@ -310,7 +310,7 @@ class ToolUser implements AgentAdapter {
 }
 
 describe('propor_memory: o motor diz de onde veio o turno', () => {
-  async function open() {
+  async function open(asConsult = false) {
     const project = await folder();
     const { spaces, memory } = stores(project);
     ToolUser.started = [];
@@ -328,12 +328,15 @@ describe('propor_memory: o motor diz de onde veio o turno', () => {
       await manager.disposeAll();
       await brain.dispose();
     });
-    const { session } = await manager.create({
-      projectId: 'p',
-      trusted: true,
-      cwd: project,
-      agent: 'claude',
-    });
+    const base = { projectId: 'p', trusted: true, cwd: project, agent: 'claude' } as const;
+    let { session } = await manager.create(base);
+    if (asConsult) {
+      // Uma delegação: a primeira mensagem é de outro agente, que pode ter lido a web.
+      ({ session } = await manager.create({
+        ...base,
+        origin: { kind: 'delegate', sessionId: session.id },
+      }));
+    }
     const binding = ToolUser.started.at(-1)?.brain;
     if (!binding) throw new Error('A sessão não recebeu o cérebro');
     let n = 0;
@@ -389,6 +392,12 @@ describe('propor_memory: o motor diz de onde veio o turno', () => {
     expect((await propose()).external).toBe(true);
     await turn('outra vez local');
     expect((await propose()).external).toBe(false);
+  });
+
+  it('numa consulta (ou delegação), mesmo um turno só com leituras locais é externo', async () => {
+    const { propose, turn } = await open(true);
+    await turn('lê o ficheiro local');
+    expect((await propose()).external).toBe(true);
   });
 
   it('sem nada visto (nenhum turno ainda), a proposta conta como externa', async () => {

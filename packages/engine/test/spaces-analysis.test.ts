@@ -220,6 +220,8 @@ for (const mode of ['approval', 'automatic'] as const)
     const memories = manager.snapshot().memories;
     expect(memories).toHaveLength(1);
     expect(memories[0]?.state).toBe('pending');
+    // Texto que a análise tirou de conversas e ficheiros: externo, aprova-se uma a uma.
+    expect(memories[0]?.external).toBe(true);
     if (!memories[0]) throw new Error('Sem memória');
     manager.deleteMemory(memories[0].id);
     await writeFile(code, 'export const n = 2;');

@@ -101,6 +101,8 @@ export function toEffortLevel(id: string): EffortLevel {
 
 const CONTROL_TIMEOUT_MS = 15_000;
 const START_TIMEOUT_MS = 90_000;
+/** As ferramentas que só escrevem ficheiros: fora de uma sessão só de leitura. */
+export const READ_ONLY_DISALLOWED = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const;
 const STDERR_LIMIT = 4_000;
 
 export const CRASH_MESSAGE = 'A ligação ao Claude caiu. A conversa está guardada: podes retomar.';
@@ -537,6 +539,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
             ? ['user', 'project', 'local']
             : ['user'],
       canUseTool: this.#canUseTool,
+      // disallowedTools ganha às regras "allow" das definições, que nunca chegam ao canUseTool.
+      ...(options.readOnly ? { disallowedTools: [...READ_ONLY_DISALLOWED] } : {}),
       env: options.env ?? sanitizedEnv(),
       stderr: (data) => {
         this.#stderr = (this.#stderr + data).slice(-STDERR_LIMIT);

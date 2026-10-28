@@ -60,7 +60,8 @@ import { nativeCoverage } from './rules/files.ts';
 import { matchesAny } from './rules/glob.ts';
 import type { RulesManager } from './rules/manager.ts';
 import type { MemoryService } from './memory/manager.ts';
-import { currentTurn } from './memory/external.ts';
+import { currentTurn, turnText } from './memory/external.ts';
+import { isDelegateDigest } from './consult/messages.ts';
 import { renderStart, renderTouched } from './rules/render.ts';
 import type { ConsultManager, ConsultSource } from './consult/manager.ts';
 import { readOnlyModeOf } from './consult/modes.ts';
@@ -2241,7 +2242,13 @@ export class SessionManager {
         agent: info.agent,
         describe: () => ({ title: info.title, folder: basename(info.cwd), cwd: info.cwd }),
         // O que o turno leu fora da pasta (web, servidores de terceiros) vê-se na conversa guardada.
-        turn: () => currentTurn(this.#memory.get(info.id)?.turns ?? []),
+        // Os resumos de delegações não são pedidos do utilizador (nem recomeçam a quota), e numa
+        // consulta ou delegação a primeira mensagem é de outro agente: tudo conta como externo.
+        turn: () =>
+          currentTurn(this.#memory.get(info.id)?.turns ?? [], {
+            fromAgent: (turn) => isDelegateDigest(turnText(turn)),
+            external: opensFromConsult(info),
+          }),
         // A profundidade é 1: quem nasceu de uma consulta ou delegação não consulta nem delega.
         ...(opensFromConsult(info) ? { withhold: CONSULT_TOOL_NAMES } : {}),
       },
@@ -2392,6 +2399,7 @@ export class SessionManager {
         ...(servers.length ? { mcpServers: servers } : {}),
         ...(brain?.transport === 'in-process' ? { brain } : {}),
         ...(rules?.instructions ? { instructions: rules.instructions } : {}),
+        ...(isConsult(info) ? { readOnly: true } : {}),
       },
       this.#sinkFor(
         info,

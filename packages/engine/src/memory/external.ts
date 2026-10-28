@@ -16,8 +16,22 @@ const LOCAL_NAMES = new Set([
 ]);
 const ASK_AGENT = /(^|__|[./:])ask_agent$/;
 const WEBBY = /web|fetch|browse|http|url|curl|wget/i;
-const NETWORK_COMMAND =
-  /\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|nc|ncat)\b|https?:\/\//i;
+/**
+ * Comandos que trazem texto de terceiros: os clientes HTTP, mas também os que leem issues, PRs,
+ * pacotes ou repositórios remotos (gh, git fetch/pull/clone, npm view, pip download…).
+ */
+const NETWORK_COMMAND = new RegExp(
+  [
+    String.raw`\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|start-bitstransfer|bitsadmin|nc|ncat|ssh|scp|sftp|ftp|telnet|gh|glab|hub)\b`,
+    String.raw`\bgit\s+(fetch|pull|clone|ls-remote|submodule|remote\s+update)\b`,
+    String.raw`\b(npm|pnpm|yarn|bun)\s+(view|info|show|search|dlx|create)\b`,
+    String.raw`\b(npx|pnpx|bunx|uvx|pipx)\b`,
+    String.raw`\b(pip|pip3|uv\s+pip)\s+(download|install|index)\b`,
+    String.raw`\bcertutil\b.*-urlcache`,
+    String.raw`https?:\/\/`,
+  ].join('|'),
+  'i',
+);
 
 function commandOf(tool: ToolBlock): string {
   const parts: string[] = [];
@@ -53,14 +67,42 @@ export function usedExternalSources(blocks: readonly Block[]): boolean {
   return blocks.some((block) => block.kind === 'tool' && toolIsExternal(block));
 }
 
+export interface CurrentTurnOptions {
+  /**
+   * Turnos "do utilizador" que o motor abriu com texto de outro agente (o resumo de uma
+   * delegação): não recomeçam o turno (nem a quota de consultas) e contam como fonte externa.
+   */
+  fromAgent?: (turn: Turn) => boolean;
+  /** A sessão inteira vem de outro agente (uma consulta ou delegação): tudo é externo. */
+  external?: boolean;
+}
+
 /**
  * O turno em curso: o último pedido do utilizador e tudo o que o agente fez desde então. Sem
  * nenhum pedido (não devia acontecer), `external` fica verdadeiro.
  */
-export function currentTurn(turns: readonly Turn[]): { id: string | undefined; external: boolean } {
-  const index = turns.findLastIndex((turn) => turn.role === 'user');
+export function currentTurn(
+  turns: readonly Turn[],
+  options: CurrentTurnOptions = {},
+): { id: string | undefined; external: boolean } {
+  const fromAgent = options.fromAgent ?? (() => false);
+  const index = turns.findLastIndex((turn) => turn.role === 'user' && !fromAgent(turn));
   if (index < 0) return { id: undefined, external: true };
   const user = turns[index];
-  const external = turns.slice(index).some((turn) => usedExternalSources(turn.blocks));
+  const external =
+    options.external === true ||
+    turns
+      .slice(index)
+      .some(
+        (turn) => (turn.role === 'user' && fromAgent(turn)) || usedExternalSources(turn.blocks),
+      );
   return { id: user?.id, external };
+}
+
+/** O texto que o utilizador (ou o motor, pela fila) mandou neste turno. */
+export function turnText(turn: Turn): string {
+  return turn.blocks
+    .filter((b) => b.kind === 'text')
+    .map((b) => (b.kind === 'text' ? b.text : ''))
+    .join('\n');
 }
