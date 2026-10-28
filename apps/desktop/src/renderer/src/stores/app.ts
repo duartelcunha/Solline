@@ -36,6 +36,7 @@ import {
 import { morphUpdate, morphs } from '../lib/morph.ts';
 import { receiveSpaces, useSpaces } from './spaces.ts';
 import { receiveRules, useRules } from './rules.ts';
+import { mcpCatalogActions, onMcpNotice, receiveMcpCatalog } from './mcp-catalog.ts';
 import { flushNavigation } from '../features/navigation/persistence.ts';
 
 /**
@@ -453,6 +454,10 @@ export function dispatch(event: EngineEvent): void {
     receiveRules(event.rules);
     return;
   }
+  if (event.type === 'mcp.changed') {
+    receiveMcpCatalog(event.mcp);
+    return;
+  }
   if (event.type === 'race.state') {
     useApp.setState((s) => ({ races: { ...s.races, [event.race.id]: event.race } }));
     if (event.race.kind === 'split' && event.race.phase !== 'closed' && startingSplits === 0)
@@ -552,7 +557,11 @@ async function memoryRequest<C extends 'memory.approve' | 'memory.reject' | 'mem
   }
 }
 
+// Os erros do catálogo MCP aparecem no mesmo aviso que os do resto da app.
+onMcpNotice((text) => useApp.setState({ notice: text }));
+
 export const actions = {
+  ...mcpCatalogActions,
   openSpace(projectId: string | null): void {
     useSpaces.setState({ panel: 'tasks' });
     useApp.setState({ view: 'spaces', spaceProjectId: projectId, activeProjectId: projectId });

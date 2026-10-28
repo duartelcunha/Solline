@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { McpServerDescriptor } from '@solline/protocol';
+import { McpLaunchError } from './launch.ts';
 
 /**
  * Servidores MCP que se podem ligar a uma sessão, revistos e escritos no código (como os
@@ -50,6 +51,8 @@ export interface McpCatalog {
   list(): Promise<McpServerDescriptor[]>;
   /** Lança se o servidor não existir ou não estiver pronto. */
   launch(id: string): Promise<McpLaunch>;
+  /** Os servidores que o projeto escolheu: entram em cada sessão nova dele (só no catálogo do utilizador). */
+  projectServers?(projectId: string): string[];
 }
 
 /**
@@ -136,9 +139,10 @@ export function mcpCatalog(
     list: async () => all().map((r) => r.descriptor),
     launch: async (id) => {
       const found = all().find((r) => r.descriptor.id === id);
-      if (!found) throw new Error(`Servidor MCP desconhecido: ${id}`);
+      if (!found) throw new McpLaunchError('unavailable', `Servidor MCP desconhecido: ${id}`);
       if (!found.launch)
-        throw new Error(
+        throw new McpLaunchError(
+          'unavailable',
           `${found.descriptor.label}: ${found.descriptor.detail ?? 'não está pronto'}`,
         );
       return found.launch;
@@ -158,7 +162,7 @@ export function fixedMcpCatalog(servers: readonly McpLaunch[]): McpCatalog {
       })),
     launch: async (id) => {
       const found = servers.find((s) => s.id === id);
-      if (!found) throw new Error(`Servidor MCP desconhecido: ${id}`);
+      if (!found) throw new McpLaunchError('unavailable', `Servidor MCP desconhecido: ${id}`);
       return found;
     },
   };

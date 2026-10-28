@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SpacesState } from './spaces.ts';
 import { RulesState } from './rules.ts';
+import { McpCatalogState } from './mcp-catalog.ts';
 import { AgentId, AskBlock, ConversationDelta, SessionState, Workspace } from './conversation.ts';
 import { Checks, SetupState } from './checks.ts';
 import { Race } from './race.ts';
@@ -158,6 +159,8 @@ export const EngineEvent = z
   .discriminatedUnion('type', [
     z.object({ kind: z.literal('event'), type: z.literal('spaces.changed'), spaces: SpacesState }),
     z.object({ kind: z.literal('event'), type: z.literal('rules.changed'), rules: RulesState }),
+    /** O catálogo MCP mudou (um servidor acrescentado, aprovado, sondado ou escolhido por um projeto). */
+    z.object({ kind: z.literal('event'), type: z.literal('mcp.changed'), mcp: McpCatalogState }),
     AgentsChangedEvent,
     EngineReadyEvent,
     SessionEvent,

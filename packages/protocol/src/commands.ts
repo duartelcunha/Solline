@@ -29,6 +29,7 @@ import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
 import { DelegateTask, memoryCommandSchemas, spacesCommandSchemas } from './spaces.ts';
 import { rulesCommandSchemas, rulesInternalSchemas } from './rules.ts';
+import { mcpCommandSchemas, mcpInternalSchemas } from './mcp-catalog.ts';
 
 /**
  * Contrato dos comandos da Ponte: interface -> main -> motor.
@@ -119,6 +120,7 @@ export const commandSchemas = {
   ...spacesCommandSchemas,
   ...memoryCommandSchemas,
   ...rulesCommandSchemas,
+  ...mcpCommandSchemas,
   'engine.snapshot': { payload: Empty, result: EngineSnapshot },
   'engine.flush': { payload: Empty, result: Empty },
   'engine.shutdown': { payload: Empty, result: Empty },
@@ -389,6 +391,11 @@ export const MAIN_COMMANDS = [
   'worktrees.discard',
   'rules.import',
   'rules.export',
+  'mcp.add',
+  'mcp.update',
+  'mcp.setSecret',
+  'mcp.remove',
+  'mcp.approve',
 ] as const satisfies CommandName[];
 export type MainCommandName = (typeof MAIN_COMMANDS)[number];
 export function isMainCommand(command: CommandName): command is MainCommandName {
@@ -409,6 +416,7 @@ export const CommandNameSchema = z.enum(commandNames as [CommandName, ...Command
  */
 export const internalCommandSchemas = {
   ...rulesInternalSchemas,
+  ...mcpInternalSchemas,
   'spaces.dispatch': {
     payload: DelegateTask.extend({ start: SessionStartPayload.optional() }).strict(),
     result: spacesCommandSchemas['spaces.delegate'].result,

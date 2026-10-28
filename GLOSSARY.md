@@ -96,3 +96,13 @@ Os nomes do domínio da Solline, como o código os usa.
   para continuares. Filha de quem perguntou no Mapa.
 - **Cartão de consulta**: o pedido pendente de perguntar ou delegar. Permitir, permitir nesta sessão
   (por tipo) ou recusar; fechar a sessão ou interromper o turno cancela-o.
+- **Catálogo MCP**: a lista global de servidores MCP que acrescentaste à Solline (do registo oficial ou à
+  mão), cada um com o comando exato, o estado de aprovação e as ferramentas. Fica no diretório de dados,
+  sem segredos; os valores secretos vivem no Gestor de Credenciais do Windows.
+- **Aprovação exata**: a confirmação nativa, no main, com o comando, os argumentos e os nomes das
+  variáveis que a Solline vai arrancar. Mudar qualquer um deles volta a pedi-la.
+- **Impressão das ferramentas**: os nomes, as descrições e um hash das ferramentas que um servidor
+  anunciou quando o aprovaste. A Solline volta a sondar na primeira entrega de cada execução; se o hash
+  mudou, o servidor fica a pedir nova aprovação e não é entregue.
+- **Escolha por projeto**: os servidores do catálogo que um projeto usa. Chegam a cada sessão nova dele ao
+  arrancar, sem tocar nas configs dos agentes. Pistas, partes, consultas e delegações ficam sem eles.

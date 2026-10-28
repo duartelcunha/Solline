@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { MessageChannelMain, app, utilityProcess, type UtilityProcess } from 'electron';
 import {
   EngineEvent,
+  HostRequest,
   ResponseEnvelope,
   engineCommandSchemas,
   type EngineCommandName,
@@ -36,9 +37,18 @@ export class EngineHost {
   #recoveryKey: Buffer | undefined;
   readonly #pending = new Map<string, Pending>();
   readonly #onEvent: (event: EngineEvent) => void;
+  #host: ((request: HostRequest) => Promise<Record<string, string | null>>) | undefined;
 
   constructor(onEvent: (event: EngineEvent) => void) {
     this.#onEvent = onEvent;
+  }
+
+  /**
+   * Quem responde aos pedidos do motor ao main (os segredos dos servidores MCP, pedidos só no
+   * momento de os arrancar). O valor vai pela MessagePort, nunca para eventos nem registos.
+   */
+  serveHost(handler: (request: HostRequest) => Promise<Record<string, string | null>>): void {
+    this.#host = handler;
   }
 
   start(recoveryKey?: Buffer): void {
@@ -135,7 +145,26 @@ export class EngineHost {
     this.start(key);
   }
 
+  async #answerHost(request: HostRequest): Promise<void> {
+    const port = this.#port;
+    if (!port) return;
+    try {
+      if (!this.#host) throw new Error('O cofre de segredos não está disponível');
+      const values = await this.#host(request);
+      port.postMessage({ kind: 'host-response', id: request.id, ok: true, values });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'O cofre de segredos falhou';
+      port.postMessage({ kind: 'host-response', id: request.id, ok: false, error: { message } });
+    }
+  }
+
   #onMessage(data: unknown): void {
+    if ((data as { kind?: unknown } | null)?.kind === 'host-request') {
+      const request = HostRequest.safeParse(data);
+      if (request.success) void this.#answerHost(request.data);
+      else console.warn('[engine] pedido ao main inválido ignorado');
+      return;
+    }
     const event = EngineEvent.safeParse(data);
     if (event.success) {
       if (event.data.type === 'engine.ready') {

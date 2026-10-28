@@ -793,3 +793,95 @@ import/export` entram.
   comandos de shell sem passar por permissão; o estado da sessão que perguntou enquanto o cartão
   espera (continua «a trabalhar»: a fase 6 tem de o mostrar, e a atenção/notificações ainda não
   contam estes pedidos); uma consulta a um agente ACP real.
+
+## M6, fase 5: o catálogo MCP global (28/10/2026)
+
+- **O que é:** acrescentas um servidor MCP à Solline uma vez, de dois caminhos, e cada projeto escolhe
+  quais usa. O código está em `packages/engine/src/mcp/` (`registry.ts`, `user-catalog.ts`, `probe.ts`,
+  `launch.ts`, `store.ts`, `secrets.ts`, `spec.ts`); o `session-manager.ts` só leva dois ganchos
+  (`#projectMcp` e a nota `mcpSkipped`). O catálogo fixo (REA) continua como estava, ao lado.
+- **Registo oficial** (`registry.modelcontextprotocol.io`, API v0): `mcp.search` pergunta só o texto
+  pesquisado (`search`, `limit`, `version=latest`; sem cookies, `redirect: 'error'`) e valida a resposta
+  com zod (2 MiB no máximo). Mostra o espaço de nomes e quem o verificou: `io.github.*` por GitHub, o
+  resto por DNS (o registo só deixa publicar com essa prova; a Solline não a refaz). Só entram pacotes
+  **npm** (`npx -y pacote@versão`) e **PyPI** (`uvx pacote==versão`) com versão **exata** (semver no npm,
+  PEP 440 no PyPI; recusa `latest`, `1.x`, `^1`, `>=1`, `*`), transporte stdio e estado `active`.
+  `mcp.add` do registo manda só `{name, version}`: o motor volta a pedir os dados ao registo, por isso a
+  interface nunca escolhe o comando. O que o registo manda correr (`runtimeHint`, `runtimeArguments`) é
+  ignorado; só se usam os argumentos de pacote de valor fixo (um que peça valor ao utilizador deixa o
+  pacote de fora). **À mão:** comando, argumentos e variáveis (nome, se é secreta, se é obrigatória).
+- **Aprovação exata, no main:** `mcp.approve` é um comando do main. Mostra a confirmação nativa «A Solline
+  vai arrancar `npx -y @x/y@1.2.3` com as variáveis A, B. Permitir?» (com a origem e o que a aprovação
+  implica) e só então manda `mcp.approveNow` ao motor, com a **impressão** (SHA-256 do comando, dos
+  argumentos e das variáveis: nome, se é secreta, se é obrigatória e, nas públicas, o valor). Se a
+  impressão já não é a que viste, o motor recusa. Mudar comando, argumentos ou variáveis tira a aprovação
+  (e apaga as ferramentas guardadas, que são de outro programa); mudar só o rótulo não. O motor recusa
+  arrancar ou entregar um servidor sem aprovação, com `McpLaunchError('needs-approval')`. Os comandos
+  `*Now`, `mcp.draft` e `mcp.get` são internos: a interface não os consegue nomear.
+- **Impressão das ferramentas:** depois de aprovado, o motor arranca o servidor uma vez (a sonda:
+  `initialize` + `tools/list`, até 10 páginas e 200 ferramentas, 60 s, saída máxima de 4 MiB) e guarda
+  nome, descrição (≤ 300 caracteres, limpa) e o hash de cada ferramenta (nome, descrição, esquema e
+  anotações completos), mais o hash do conjunto. Na primeira entrega de cada execução da app volta a
+  sondar (uma sonda de cada vez por servidor). Se o hash mudou, o servidor passa a `changed`, não se
+  entrega, e a interface vê o que mudou (novas, tiradas, alteradas). Voltar a aprovar tem de levar a
+  impressão que o utilizador viu (`toolsHash`). Se a sonda da aprovação falhou, a primeira sonda que
+  correr bem passa a ser a referência. A sonda corre sem as chaves dos agentes: só um ambiente mínimo
+  (PATH, pastas do utilizador, proxies) mais as variáveis do próprio servidor.
+- **Limite, escrito:** a sonda e o agente arrancam **cada um a sua cópia** do servidor. Um servidor
+  malicioso podia mostrar ferramentas limpas à sonda e outras ao agente. A impressão apanha mudanças de
+  versão e de configuração, não um servidor que mente só a quem o usa. A defesa a sério é um **gateway
+  MCP** (a Solline fica entre o agente e o servidor, vê o que passa e fixa as ferramentas): fica
+  **adiado, com nome**. Até lá, os servidores correm como programas com as permissões do utilizador,
+  nunca com «Permitir sempre», Auto nem acesso total (`executesCode` é sempre `true` nos acrescentados).
+- **Escolha por projeto (`mcp.setProject`, até 8):** cada sessão nova do projeto recebe a escolha ao
+  arrancar, pelos mesmos caminhos do `#mcpFor` (Claude em `mcpServers`, Codex em `mcp_servers.<nome>` no
+  `thread/start`, ACP em `session/new`), sem escrever em `~/.claude`, `~/.codex/config.toml` nem noutras
+  configs. Soma-se aos pedidos à mão (`mcpServerIds`, que continuam estritos: um servidor por aprovar
+  recusa a sessão com a razão). O que o projeto escolheu e não pode entrar **não bloqueia a sessão**:
+  fica em `SessionInfo.mcpSkipped` com uma razão fixa (`needs-approval`, `changed`, `error`,
+  `unavailable`, `restricted-mode`, `limit`; nunca texto do servidor). Pistas, partes de uma repartição,
+  consultas só de leitura (`ask`) e delegações não recebem servidores de terceiros (**decisão minha:** o
+  `delegate` também fica de fora, é uma sessão que um agente abre sozinho, e um modo sem perguntas
+  faria falhar a delegação); passagens, bifurcações e tarefas são sessões normais e recebem-nos. Os
+  revisores, o juiz, o planeador, o redator e as sondas não passam pelo gestor de sessões. Num modo
+  sem perguntas (Auto, acesso total) os servidores ficam de fora com `restricted-mode`. Rebobinar volta
+  a passar pela aprovação, pelo hash e pelo cofre (já não reutiliza o que ficou em memória).
+- **Segredos no Gestor de Credenciais do Windows:** o valor de cada variável secreta vive só aí, com o
+  nome `Solline/mcp/<serverId>/<VARIÁVEL>` (≤ 1000 caracteres; o cofre aceita 2560 bytes). Quem escreve é o
+  **main** (`mcp.add`, `mcp.update`, `mcp.setSecret`, `mcp.remove`); o valor vai da interface ao main e
+  nunca ao motor. O motor pede-os ao main só ao arrancar a sonda ou ao entregar o servidor a uma
+  sessão, por um pedido do motor ao main na mesma MessagePort (`host-request`/`host-response`, só
+  `mcp.secrets` com `serverId` e nomes), e nunca os guarda. Implementação sem dependências nativas (a
+  proposta): `credential-store.ts` corre um PowerShell fixo com `Add-Type` (P/Invoke a
+  `CredWriteW`/`CredReadW`/`CredDeleteW`), o valor segue por stdin em base64 (nunca em argumentos), as
+  leituras fazem-se de uma vez. É a mesma técnica que o cofre da chave de recuperação já usa; não encontrei
+  alternativa melhor sem módulos nativos (`safeStorage` cifra mas guarda num ficheiro, o que o pedido
+  recusa). Atrás da interface `SecretStore` (`packages/protocol`), com `MemorySecretStore` nos testes.
+  Remover um servidor apaga os segredos primeiro.
+- **Segredos nunca saem do agente:** o catálogo (`mcp-catalog.json`, fora do diário de recuperação)
+  guarda só comando, argumentos, nomes, valores públicos e impressões. Eventos (`mcp.changed`), snapshot,
+  diário e erros não os têm: as mensagens da sonda e da entrega passam por `redact` com os valores
+  conhecidos. Teste com o motor inteiro: nem o diário (lido com a chave), nem o estado, nem os eventos,
+  nem os ficheiros da pasta de dados. Variáveis que mudariam o que corre ou de onde se descarrega
+  (`PATH`, `NODE_OPTIONS`, `npm_config_*`, `UV_INDEX*`, `LD_*`, `DYLD_*`…) não se declaram.
+- **Decisões minhas, além do pedido:**
+  - No registo, uma variável é **secreta a menos que o registo diga `isSecret: false`** (o pior caso é ir
+    para o cofre em vez de para o catálogo).
+  - `npx` corre pelo `node.exe` do sistema com o `npx-cli.js` do npm (sem `npx.cmd`, que precisava de
+    shell); o resto procura-se no PATH. Nunca por shell; `.cmd`/`.bat` são recusados no Windows.
+  - `mcp.list` (a escolha à mão por sessão) só mostra os acrescentados que estão prontos; o resto vê-se
+    em `mcp.catalog`.
+  - Mudar só o valor de uma variável secreta (`mcp.setSecret`) não pede aprovação (o nome não muda).
+  - Um servidor que veio do registo não se edita (tira-se e acrescenta-se a versão pretendida).
+- **Interface:** só a ponte. Está feito o protocolo (`mcp-catalog.ts`, `secrets.ts`, `host-link.ts`),
+  o motor, o main, `stores/mcp-catalog.ts` (estado e ações) e o `qa/bridge.ts`; a vista do catálogo é da
+  fase 6.
+- **Por verificar:** o arranque real de um servidor por `npx` e `uvx` (a sonda só foi testada com um
+  servidor falso por stdio, mais a forma da resposta do registo vista à mão); os três agentes reais a
+  usarem um servidor do catálogo com segredos (testado com adaptadores falsos); se o Codex guarda a
+  config do `thread/start` (e as variáveis) nos ficheiros dele; o Gestor de Credenciais **real** só foi
+  exercitado pelo teste gated (`SOLLINE_TEST_CREDMAN=1`, Windows 11) e nunca pela app instalada.
+- **Por fazer, com nome:** gateway MCP (acima); servidores remotos (HTTP/SSE: faltam `url` e cabeçalhos
+  nos três adaptadores); pacotes OCI, NuGet e MCPB; argumentos de pacote que pedem valor ao utilizador;
+  cofre fora do Windows; rodar/expirar segredos (`rodar até`); vista do catálogo e do escolher por projeto
+  (fase 6); mostrar `mcpSkipped` na interface.

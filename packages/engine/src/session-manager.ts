@@ -54,6 +54,7 @@ import type { AgentDefinition, AgentRegistry } from './agents/registry.ts';
 import { SECRET_NAME, agentEnv } from './env.ts';
 import { safestMode } from './adapters/acp/capabilities.ts';
 import type { McpCatalog } from './mcp/catalog.ts';
+import { McpLaunchError } from './mcp/launch.ts';
 import type { Brain, BrainBinding } from './brain/brain.ts';
 import { nativeCoverage } from './rules/files.ts';
 import { matchesAny } from './rules/glob.ts';
@@ -67,6 +68,9 @@ import { CONSULT_TOOL_NAMES } from './consult/names.ts';
 
 /** Com um servidor MCP que corre programas ligado, nada de modos sem perguntas. */
 const RESTRICTED_RISKS = new Set(['auto', 'full']);
+/** Origens que ficam sem os servidores que o projeto escolheu (ver #projectMcp). */
+const NO_PROJECT_MCP = new Set(['lane', 'part', 'ask', 'delegate']);
+const MAX_MCP = 8;
 
 function restrict(capabilities: AgentCapabilities, restricted: boolean): AgentCapabilities {
   if (!restricted) return capabilities;
@@ -304,14 +308,19 @@ export class SessionManager {
       )
     )
       throw new Error('Uma consulta só abre num modo de leitura');
-    const mcp = await this.#mcpFor(definition, payload.mcpServerIds ?? []);
-    const restricted = mcp.some((s) => s.executesCode);
+    const explicit = [...new Set(payload.mcpServerIds ?? [])];
+    const requested = await this.#mcpFor(definition, explicit);
+    const restricted = requested.some((s) => s.executesCode);
     const risk = known.find((m) => m.id === payload.mode)?.risk;
     if (restricted && risk && RESTRICTED_RISKS.has(risk)) {
       throw new Error(
         'Com um servidor MCP que corre programas, escolhe um modo que pergunte antes',
       );
     }
+    // Os servidores que o projeto escolheu no catálogo; os que não puderem entrar ficam anotados.
+    const chosen = await this.#projectMcp(definition, payload, explicit, requested.length, risk);
+    const mcp = [...requested, ...chosen.launches];
+    const mcpIds = [...explicit, ...chosen.ids];
     const place: { cwd: string; workspace: Workspace; worktree?: Worktree; key: string } = forked
       ? {
           cwd: forked.worktree.cwd,
@@ -350,7 +359,8 @@ export class SessionManager {
         mode: payload.mode ?? definition.defaultMode,
       },
       agentSessionId: null,
-      ...(mcp.length ? { mcpServers: payload.mcpServerIds ?? [] } : {}),
+      ...(mcp.length ? { mcpServers: mcpIds } : {}),
+      ...(chosen.skipped.length ? { mcpSkipped: chosen.skipped } : {}),
     };
     const memory: Memory = {
       turns: [],
@@ -724,7 +734,8 @@ export class SessionManager {
           entry.info,
           entry.definition,
           entry.trusted,
-          entry.mcp,
+          // Volta a passar pela aprovação e pelo cofre: nada de reutilizar o que ficou em memória.
+          await this.#mcpFor(entry.definition, entry.info.mcpServers ?? []),
           undefined,
           undefined,
           kind === 'agent' && point ? point : undefined,
@@ -2139,6 +2150,80 @@ export class SessionManager {
   }
 
   /**
+   * Os servidores que o projeto escolheu no catálogo global, entregues a cada sessão nova pelos
+   * mesmos caminhos dos pedidos à mão, sem escrever nas configs dos agentes. Ficam de fora (com a
+   * razão em `mcpSkipped`) os que precisam de aprovação, mudaram ou falharam, os que correm
+   * programas num modo sem perguntas e o que passar do limite de 8. Pistas, partes, consultas só
+   * de leitura e delegações não recebem servidores de terceiros: têm de ficar independentes.
+   */
+  async #projectMcp(
+    definition: AgentDefinition,
+    payload: SessionStartPayload,
+    explicit: readonly string[],
+    taken: number,
+    risk: string | undefined,
+  ): Promise<{
+    ids: string[];
+    launches: McpServerLaunch[];
+    skipped: NonNullable<SessionInfo['mcpSkipped']>;
+  }> {
+    const none = { ids: [], launches: [], skipped: [] };
+    const kind = payload.origin?.kind;
+    const catalog = this.#mcp;
+    const chosenFor = catalog?.projectServers?.bind(catalog);
+    if (
+      !catalog ||
+      !chosenFor ||
+      !definition.mcp ||
+      payload.raceId ||
+      (kind && NO_PROJECT_MCP.has(kind))
+    )
+      return none;
+    const wanted = chosenFor(payload.projectId).filter((id) => !explicit.includes(id));
+    if (wanted.length === 0) return none;
+    const runsCode = new Map((await catalog.list()).map((d) => [d.id, d.executesCode]));
+    const restrictedMode = risk !== undefined && RESTRICTED_RISKS.has(risk);
+    const skipped: NonNullable<SessionInfo['mcpSkipped']> = [];
+    const attempts = await Promise.all(
+      wanted.map(async (id) => {
+        // Sem saber se corre programas (ainda não pronto), conta como se corresse.
+        if (restrictedMode && (runsCode.get(id) ?? true))
+          return { id, skip: 'restricted-mode' as const };
+        try {
+          const s = await catalog.launch(id);
+          return {
+            id,
+            launch: {
+              name: s.name,
+              command: s.command,
+              args: s.args,
+              env: s.env,
+              executesCode: s.executesCode,
+            },
+          };
+        } catch (error) {
+          return {
+            id,
+            skip: error instanceof McpLaunchError ? error.reason : ('error' as const),
+          };
+        }
+      }),
+    );
+    const ids: string[] = [];
+    const launches: McpServerLaunch[] = [];
+    for (const attempt of attempts) {
+      if (attempt.skip) skipped.push({ id: attempt.id, reason: attempt.skip });
+      else if (!attempt.launch || taken + launches.length >= MAX_MCP)
+        skipped.push({ id: attempt.id, reason: 'limit' });
+      else {
+        ids.push(attempt.id);
+        launches.push(attempt.launch);
+      }
+    }
+    return { ids, launches, skipped };
+  }
+
+  /**
    * As ferramentas da Solline desta sessão, ou nada. Pistas e partes de uma repartição (e quem
    * resolve a integração) ficam sem elas: têm de continuar independentes umas das outras.
    */
@@ -2317,7 +2402,9 @@ export class SessionManager {
     );
     entry.adapter = adapter;
     const isNew = !this.#sessions.has(info.id);
-    this.#sessions.set(info.id, { info, adapter, definition, trusted, mcp, brain });
+    // Só o que a sessão precisa de saber (corre programas?): os valores das variáveis ficam no agente.
+    const bare = mcp.map((s) => ({ ...s, env: {} }));
+    this.#sessions.set(info.id, { info, adapter, definition, trusted, mcp: bare, brain });
     const restricted = mcp.some((s) => s.executesCode);
     let started: Awaited<ReturnType<AgentAdapter['start']>> | undefined;
     try {

@@ -21,6 +21,7 @@ import {
   SessionCreatePayload,
   commandSchemas,
   isMainCommand,
+  mcpSecretTarget,
   type CommandName,
   type CommandPayload,
   type CommandResult,
@@ -32,6 +33,8 @@ import { EngineHost } from './engine-host.ts';
 import { ProjectStore, newCommands } from './projects.ts';
 import { resolveSessionStart } from './session-policy.ts';
 import { reconcilePolicy } from './recovered-policy.ts';
+import { createSecretStore } from './credential-store.ts';
+import { applyValues, approvalPrompt, newServerId } from './mcp-main.ts';
 import { UiRecoveryStore } from './ui-recovery.ts';
 import { loadRecoveryKey } from './recovery-key.ts';
 import { RecoveryStartup } from './recovery-startup.ts';
@@ -82,6 +85,13 @@ const engine = new EngineHost((event) => {
   const notice = attention.observe(event, win?.isFocused() ?? false);
   if (notice) notify(notice);
   if (event.type === 'engine.error' && !event.sessionId) recovery?.show('crashed', event.message);
+});
+/** Os segredos dos servidores MCP: só o main os guarda; o motor pede-os na hora de arrancar um servidor. */
+const secrets = createSecretStore();
+engine.serveHost(async (request) => {
+  const targets = request.names.map((name) => mcpSecretTarget(request.serverId, name));
+  const found = await secrets.getMany(targets);
+  return Object.fromEntries(request.names.map((name, i) => [name, found[i] ?? null]));
 });
 const recoveryStartup = new RecoveryStartup(drafts, engine, async () => {
   const key = await loadRecoveryKey(app.getPath('userData'));
@@ -321,6 +331,72 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       if (!project) throw new Error('Projeto desconhecido');
       if (!(await confirmExportRules(project.name))) return { written: [] };
       return engine.request('rules.exportNow', { projectId, cwd: project.path });
+    }
+    case 'mcp.add': {
+      // Os valores secretos vão para o Gestor de Credenciais e nunca ao motor.
+      const { source, values } = payload as CommandPayload<'mcp.add'>;
+      const { spec: draft } = await engine.request('mcp.draft', { source });
+      const { spec, secrets: given } = applyValues(draft, values);
+      const id = newServerId();
+      const written: string[] = [];
+      try {
+        for (const [name, value] of Object.entries(given)) {
+          const target = mcpSecretTarget(id, name);
+          await secrets.set(target, value);
+          written.push(target);
+        }
+        return await engine.request('mcp.addNow', { id, spec });
+      } catch (error) {
+        await secrets.remove(written).catch(() => undefined);
+        throw error;
+      }
+    }
+    case 'mcp.update': {
+      const { id, spec: manual, values } = payload as CommandPayload<'mcp.update'>;
+      const { server: current } = await engine.request('mcp.get', { id });
+      const { spec: draft } = await engine.request('mcp.draft', {
+        source: { kind: 'manual', spec: manual },
+      });
+      const { spec, secrets: given } = applyValues(draft, values, current.spec.env);
+      const result = await engine.request('mcp.updateNow', { id, spec });
+      for (const [name, value] of Object.entries(given))
+        await secrets.set(mcpSecretTarget(id, name), value);
+      // Uma variável que deixou de ser secreta (ou de existir) já não precisa do valor no cofre.
+      const stale = current.spec.env
+        .filter((old) => old.secret && !spec.env.some((e) => e.name === old.name && e.secret))
+        .map((old) => mcpSecretTarget(id, old.name));
+      await secrets.remove(stale);
+      return result;
+    }
+    case 'mcp.setSecret': {
+      const { id, name, value } = payload as CommandPayload<'mcp.setSecret'>;
+      const { server } = await engine.request('mcp.get', { id });
+      if (!server.spec.env.some((e) => e.name === name && e.secret))
+        throw new Error('Esta variável não é secreta neste servidor');
+      const target = mcpSecretTarget(id, name);
+      if (value === null) await secrets.remove([target]);
+      else await secrets.set(target, value);
+      return {};
+    }
+    case 'mcp.remove': {
+      const { id } = payload as CommandPayload<'mcp.remove'>;
+      const { server } = await engine.request('mcp.get', { id });
+      // Os segredos apagam-se primeiro: sem eles o servidor não arranca, e o resto é só o registo.
+      await secrets.remove(
+        server.spec.env.filter((e) => e.secret).map((e) => mcpSecretTarget(id, e.name)),
+      );
+      return engine.request('mcp.removeNow', { id });
+    }
+    case 'mcp.approve': {
+      // A aprovação é do main: confirmação nativa com o comando, os argumentos e as variáveis exatos.
+      const { id } = payload as CommandPayload<'mcp.approve'>;
+      const { server } = await engine.request('mcp.get', { id });
+      if (!(await confirm(approvalPrompt(server)))) return { server, approved: false };
+      return engine.request('mcp.approveNow', {
+        id,
+        fingerprint: server.fingerprint,
+        ...(server.changed ? { toolsHash: server.changed.hash } : {}),
+      });
     }
     case 'session.close': {
       const request = payload as CommandPayload<'session.close'>;

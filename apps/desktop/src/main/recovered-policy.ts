@@ -9,6 +9,9 @@ const INSPECTION = new Set<CommandName>([
   'agents.list',
   'agents.keyCandidates',
   'mcp.list',
+  // O catálogo e a pesquisa no registo só leem.
+  'mcp.catalog',
+  'mcp.search',
   'projects.list',
   'worktrees.list',
   'race.get',
@@ -30,6 +33,8 @@ const GLOBAL = new Set<CommandName>([
   'agents.loginCancel',
   'agents.setKeys',
   'projects.add',
+  // O catálogo de servidores MCP é global: não pertence a um projeto.
+  'mcp.probe',
 ]);
 
 /** Refresh main-owned policy before effects; a recovered journal is never its authority. */

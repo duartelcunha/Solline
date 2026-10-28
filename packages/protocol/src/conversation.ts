@@ -340,7 +340,8 @@ export type AgentDescriptor = z.infer<typeof AgentDescriptor>;
 export const McpServerDescriptor = z.object({
   id: z.string(),
   label: z.string(),
-  status: z.enum(['ready', 'not-found', 'unreviewed']),
+  /** needs-approval, changed e error são dos servidores acrescentados pelo utilizador (catálogo global). */
+  status: z.enum(['ready', 'not-found', 'unreviewed', 'needs-approval', 'changed', 'error']),
   detail: z.string().optional(),
   /** Corre programas ou alvos: sem Auto e sem "Permitir sempre" nas ferramentas dele. */
   executesCode: z.boolean(),
@@ -405,6 +406,26 @@ export const SessionInfo = z.object({
   agentSessionId: z.string().nullable(),
   /** Servidores MCP ligados a esta sessão. */
   mcpServers: z.array(z.string()).optional(),
+  /**
+   * Servidores que o projeto escolheu e que esta sessão não recebeu, com a razão (só ids e uma
+   * razão fixa, nunca texto do servidor): precisa de aprovação, ferramentas mudadas, falhou,
+   * modo que não deixa programas, ou limite de 8.
+   */
+  mcpSkipped: z
+    .array(
+      z.object({
+        id: z.string(),
+        reason: z.enum([
+          'needs-approval',
+          'changed',
+          'error',
+          'unavailable',
+          'restricted-mode',
+          'limit',
+        ]),
+      }),
+    )
+    .optional(),
   workspace: Workspace.optional(),
   /** A corrida a que esta sessão pertence (uma pista). */
   raceId: z.string().optional(),

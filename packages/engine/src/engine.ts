@@ -23,7 +23,9 @@ import { builtinRegistry, withFactories, type AgentRegistry } from './agents/reg
 import { CheckpointStore, type CheckpointStoreOptions } from './checkpoints/store.ts';
 import { fileAgentSettings, memoryAgentSettings, type AgentSettings } from './agents/settings.ts';
 import { SECRET_NAME } from './env.ts';
-import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
+import { MCP_CATALOG, findNode, mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
+import type { McpSecretReader } from './mcp/secrets.ts';
+import { UserMcpCatalog, combinedCatalog, type UserCatalogOptions } from './mcp/user-catalog.ts';
 import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
 import { codexAvailability } from './quality/codex-reviewer.ts';
 import { routeReviewer, type ReviewerPicker } from './quality/routing.ts';
@@ -71,8 +73,16 @@ export interface EngineOptions {
   adapters?: Partial<Record<AgentId, AgentAdapterFactory>>;
   /** Para testes: troca o registo inteiro. */
   registry?: AgentRegistry;
-  /** Para testes: troca o catálogo de servidores MCP. */
+  /** Para testes: troca o catálogo fixo de servidores MCP (o do utilizador fica ao lado). */
   mcp?: McpCatalog;
+  /**
+   * De onde o motor tira os valores dos segredos dos servidores do catálogo, no momento de os
+   * arrancar (a sonda ou a entrega a uma sessão). No app, é pedido ao main; sem isto, um servidor
+   * com variáveis secretas não arranca.
+   */
+  mcpSecrets?: McpSecretReader | undefined;
+  /** Para testes: o registo oficial, a sonda e a procura de programas do catálogo do utilizador. */
+  mcpUser?: Pick<UserCatalogOptions, 'registry' | 'probe' | 'probeTimeoutMs' | 'node' | 'pathEnv'>;
   /**
    * As ferramentas da Solline para os agentes (o servidor MCP "solline"). Sem isto, nenhuma sessão
    * as tem. O shim para o Codex e os agentes ACP vem de `shim` (a app instalada diz onde está).
@@ -147,6 +157,8 @@ export class Engine {
   readonly consult: ConsultManager;
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
+  /** O catálogo de servidores MCP do utilizador (aprovação, sonda e escolha por projeto). */
+  readonly mcp: UserMcpCatalog;
   readonly races: RaceManager;
   readonly splits: SplitManager;
   /** Onde vivem as corridas e as repartições (um só registo para as duas). */
@@ -190,7 +202,7 @@ export class Engine {
         packaged: options.packaged,
       });
     const registry = options.adapters ? withFactories(base, options.adapters) : base;
-    const mcp = options.mcp ?? mcpCatalog({ dataDir: options.dataDir });
+    const builtinMcp = options.mcp ?? mcpCatalog({ dataDir: options.dataDir });
     this.#checkpoints =
       options.checkpoints === false
         ? undefined
@@ -260,6 +272,17 @@ export class Engine {
       rules: this.rules,
     });
     this.consult = new ConsultManager({ emit: emitAll, registry, worktrees });
+    // O catálogo do utilizador (servidores acrescentados do registo ou à mão) ao lado do fixo.
+    this.mcp = new UserMcpCatalog({
+      dataDir: options.dataDir,
+      secrets: options.mcpSecrets,
+      node: () => findNode(),
+      reserved: () => (options.mcp ? [] : MCP_CATALOG.map((e) => e.name)),
+      builtinIds: async () => (await builtinMcp.list()).map((d) => d.id),
+      onChange: (state) => emitAll({ kind: 'event', type: 'mcp.changed', mcp: state }),
+      ...options.mcpUser,
+    });
+    const mcp = combinedCatalog(builtinMcp, this.mcp);
     this.#brain = options.brain
       ? new Brain({
           ...options.brain,
@@ -512,6 +535,17 @@ export class Engine {
         receivedAt: Date.now(),
       }),
       'mcp.list': async () => ({ servers: await mcp.list() }),
+      'mcp.catalog': async () => this.mcp.state(),
+      'mcp.search': async (p) => this.mcp.search(p.query, p.cursor),
+      'mcp.setProject': async (p) => this.mcp.setProject(p.projectId, p.serverIds),
+      'mcp.probe': async (p) => ({ server: await this.mcp.probe(p.id) }),
+      'mcp.draft': async (p) => ({ spec: await this.mcp.draft(p.source) }),
+      'mcp.get': async (p) => ({ server: this.mcp.get(p.id) }),
+      'mcp.addNow': async (p) => ({ server: this.mcp.add(p.id, p.spec) }),
+      'mcp.updateNow': async (p) => ({ server: this.mcp.update(p.id, p.spec) }),
+      'mcp.approveNow': async (p) =>
+        this.mcp.approve(p.id, { fingerprint: p.fingerprint, toolsHash: p.toolsHash }),
+      'mcp.removeNow': async (p) => ({ removed: this.mcp.remove(p.id) }),
       'agents.list': async (p) => ({
         agents: await Promise.all(
           registry.list().map(async (d) => ({
@@ -885,6 +919,10 @@ const READ_ONLY = new Set<EngineCommandName>([
   'agents.keys',
   'agents.keyCandidates',
   'mcp.list',
+  'mcp.catalog',
+  'mcp.search',
+  'mcp.get',
+  'mcp.draft',
   'worktrees.list',
   'race.get',
   'race.proposal',

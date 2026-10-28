@@ -3,11 +3,13 @@
  * a lógica toda vive em packages/engine e testa-se em Node puro.
  */
 import type { MessagePortMain } from 'electron';
-import { ENGINE_VERSION, Engine } from '@solline/engine';
+import { ENGINE_VERSION, Engine, HostLink } from '@solline/engine';
 import { EngineEvent, EngineSnapshot } from '@solline/protocol';
 import { engineOptions } from './options.ts';
 
 let port: MessagePortMain | undefined;
+/** Pedidos do motor ao main (os segredos dos servidores MCP), pela mesma porta. */
+const host = new HostLink((request) => port?.postMessage(request));
 
 function createEngine(recoveryKey: unknown): Engine {
   if (!(recoveryKey instanceof Uint8Array) || recoveryKey.byteLength !== 32)
@@ -15,6 +17,7 @@ function createEngine(recoveryKey: unknown): Engine {
   return new Engine({
     ...engineOptions(),
     recoveryKey,
+    mcpSecrets: host.secrets,
     emit: (event) => {
       // Validado antes de sair; o main volta a validar ao receber.
       const checked = EngineEvent.safeParse(event);
@@ -44,6 +47,7 @@ function serve(next: MessagePortMain, recoveryKey: unknown): void {
     return;
   }
   next.on('message', (event) => {
+    if (host.handle(event.data)) return;
     void engine.handle(event.data).then((response) => next.postMessage(response));
   });
   next.start();

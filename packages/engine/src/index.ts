@@ -180,3 +180,9 @@ export {
   type McpEntry,
   type McpLaunch,
 } from './mcp/catalog.ts';
+export { McpLaunchError, findExecutable, findNpxCli, resolveCommand } from './mcp/launch.ts';
+export { McpRegistry, namespaceOf, type RegistryFetch } from './mcp/registry.ts';
+export { probeMcpServer, type ProbeFn, type ProbeResult, type ProbeTarget } from './mcp/probe.ts';
+export { HostLink, secretReaderFrom, type McpSecretReader } from './mcp/secrets.ts';
+export { UserMcpCatalog, combinedCatalog, type UserCatalogOptions } from './mcp/user-catalog.ts';
+export { commandLine, fingerprint, redact, toolsFingerprint } from './mcp/spec.ts';

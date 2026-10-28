@@ -43,6 +43,29 @@ import {
   type Scene,
 } from './fixtures';
 
+/** Um servidor MCP de cenário, só para os pedidos do catálogo terem um resultado válido. */
+const qaMcpServer = {
+  id: 'qa',
+  name: 'qa',
+  spec: {
+    label: 'Servidor de cenário',
+    command: 'npx',
+    args: ['-y', 'exemplo@1.0.0'],
+    env: [],
+    source: { kind: 'manual' as const },
+  },
+  commandLine: 'npx -y exemplo@1.0.0',
+  fingerprint: '0'.repeat(64),
+  status: 'ready' as const,
+  approved: true,
+  tools: [],
+  toolsHash: '1'.repeat(64),
+  probedAt: 1792663200000,
+  changed: null,
+  error: null,
+  createdAt: 1792663200000,
+};
+
 function required<T>(value: T | undefined, label: string): T {
   if (value === undefined) throw new Error(`QA: ${label} ausente`);
   return value;
@@ -1149,6 +1172,26 @@ ${goal}
       // Os cartões de "Perguntar a…" e "Delegar" são da fase 6: aqui só se aceita a resposta.
       case 'consult.answer':
         return {};
+      // O catálogo MCP (a vista é da fase 6): aqui só se aceita o pedido, sem servidores reais.
+      case 'mcp.catalog':
+        return { servers: [], projects: {} };
+      case 'mcp.search':
+        return { results: [], nextCursor: null, skipped: { remote: 0, other: 0 } };
+      case 'mcp.add':
+      case 'mcp.update':
+      case 'mcp.probe':
+        return { server: qaMcpServer };
+      case 'mcp.approve':
+        return { server: qaMcpServer, approved: true };
+      case 'mcp.remove':
+        return { removed: true };
+      case 'mcp.setSecret':
+        return {};
+      case 'mcp.setProject':
+        return {
+          servers: [],
+          projects: payload.serverIds ? { [String(payload.projectId)]: payload.serverIds } : {},
+        };
       default:
         throw new Error(`QA: comando sem cenário: ${command}`);
     }

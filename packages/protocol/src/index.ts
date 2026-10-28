@@ -18,3 +18,6 @@ export * from './recovery.ts';
 export * from './navigation.ts';
 export * from './spaces.ts';
 export * from './rules.ts';
+export * from './mcp-catalog.ts';
+export * from './secrets.ts';
+export * from './host-link.ts';
