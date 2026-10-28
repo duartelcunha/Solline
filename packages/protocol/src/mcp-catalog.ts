@@ -20,21 +20,16 @@ export type McpServerId = z.infer<typeof McpServerId>;
 
 const ProjectRef = z.string().min(1).max(128);
 
-/** Invisíveis e de controlo (inclui quebras de linha): nada disto entra em comandos nem em nomes. */
+/**
+ * Controlo (Cc, inclui as quebras de linha), formatação invisível (Cf: zero-width, marcas e
+ * isolamentos bidi U+202A–202E e U+2066–2069, U+061C, hífen suave, etiquetas U+E0000–E007F) e
+ * separadores de linha e parágrafo: nada disto entra em comandos nem em nomes, porque podia
+ * reordenar ou esconder o que a confirmação mostra.
+ */
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
 export function hasHiddenChars(text: string): boolean {
-  for (const char of text) {
-    const code = char.codePointAt(0) ?? 0;
-    if (
-      code < 0x20 ||
-      (code >= 0x7f && code <= 0x9f) ||
-      (code >= 0x200b && code <= 0x200f) ||
-      (code >= 0x202a && code <= 0x202e) ||
-      (code >= 0x2060 && code <= 0x2064) ||
-      code === 0xfeff
-    )
-      return true;
-  }
-  return false;
+  return HIDDEN.test(text);
 }
 
 /** Texto de uma linha, sem invisíveis, até `max` caracteres. */
@@ -48,31 +43,36 @@ const Line = (max: number) =>
  * Variáveis que mudariam o que o servidor corre ou de onde se descarrega (o PATH, o NODE_OPTIONS,
  * o registo do npm, os índices do uv): nunca se declaram num servidor do catálogo.
  */
+const RESERVED_ENV = new Set([
+  'PATH',
+  'PATHEXT',
+  'COMSPEC',
+  'SYSTEMROOT',
+  'WINDIR',
+  // As pastas do utilizador mudam de onde vêm o ~/.npmrc, o uv.toml e as caches.
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  // Certificados: um CA à escolha abre o descarregamento a quem estiver no meio.
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'REQUESTS_CA_BUNDLE',
+  'CURL_CA_BUNDLE',
+]);
+
+/** Famílias inteiras: Node e npm, uv, pip e Python, git, o carregador dinâmico e as pastas XDG. */
+const RESERVED_ENV_PREFIXES = ['NODE_', 'NPM_', 'UV_', 'PIP_', 'PYTHON', 'GIT_', 'LD_', 'DYLD_', 'XDG_'];
+
 export function isReservedEnvName(name: string): boolean {
   const upper = name.toUpperCase();
-  return (
-    [
-      'PATH',
-      'PATHEXT',
-      'COMSPEC',
-      'SYSTEMROOT',
-      'WINDIR',
-      'NODE_OPTIONS',
-      'NODE_PATH',
-      'NODE_EXTRA_CA_CERTS',
-      'PYTHONPATH',
-      'PYTHONSTARTUP',
-      'PYTHONHOME',
-      'UV_INDEX',
-      'UV_INDEX_URL',
-      'UV_EXTRA_INDEX_URL',
-      'UV_DEFAULT_INDEX',
-      'SSL_CERT_FILE',
-    ].includes(upper) ||
-    upper.startsWith('NPM_CONFIG_') ||
-    upper.startsWith('LD_') ||
-    upper.startsWith('DYLD_')
-  );
+  return RESERVED_ENV.has(upper) || RESERVED_ENV_PREFIXES.some((p) => upper.startsWith(p));
 }
 
 export const McpEnvName = EnvKeyName.refine((name) => !isReservedEnvName(name), {

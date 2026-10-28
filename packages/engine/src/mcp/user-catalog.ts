@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import {
   McpManualSpec,
   McpServerSpec,
@@ -80,8 +83,11 @@ export class UserMcpCatalog {
   readonly #verified = new Set<string>();
   readonly #errors = new Map<string, string>();
   readonly #probing = new Map<string, Promise<'ok' | 'changed'>>();
+  readonly #dataDir: string | undefined;
+  #isolation: string | undefined;
 
   constructor(options: UserCatalogOptions = {}) {
+    this.#dataDir = options.dataDir;
     this.#file = new CatalogFile(options.dataDir);
     this.#registry = options.registry ?? new McpRegistry();
     this.#secrets = options.secrets;
@@ -306,9 +312,22 @@ export class UserMcpCatalog {
     return this.#view(this.#find(id));
   }
 
+  /** A pasta vazia de onde o npm lê a config de projeto (nunca a da sessão). */
+  #isolationDir(): string {
+    this.#isolation ??= this.#dataDir
+      ? path.join(this.#dataDir, 'mcp-run')
+      : mkdtempSync(path.join(tmpdir(), 'solline-mcp-run-'));
+    mkdirSync(this.#isolation, { recursive: true });
+    return this.#isolation;
+  }
+
   #resolved(stored: StoredServer): Resolved {
     try {
-      return resolveCommand(stored.spec, { node: this.#node, pathEnv: this.#pathEnv() });
+      return resolveCommand(stored.spec, {
+        node: this.#node,
+        pathEnv: this.#pathEnv(),
+        isolation: this.#isolationDir(),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.#errors.set(stored.id, cleanText(message, 300));

@@ -163,6 +163,9 @@ function run(operations: readonly Operation[], timeoutMs = 60_000): Promise<stri
         resolve(lines);
       },
     );
+    // Um PowerShell que morre antes de ler dava EPIPE sem dono e derrubava o main; o erro do
+    // processo já chega ao callback acima.
+    child.stdin?.on('error', () => undefined);
     child.stdin?.end(input);
   });
 }

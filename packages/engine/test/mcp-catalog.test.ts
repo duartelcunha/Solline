@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -21,6 +29,7 @@ import {
   type ProbeFn,
   type RegistryFetch,
 } from '../src/index.ts';
+import { stderrTail } from '../src/mcp/probe.ts';
 import { toolPrint, toolsFingerprint } from '../src/mcp/spec.ts';
 
 const dirs: string[] = [];
@@ -295,6 +304,25 @@ describe('catálogo do utilizador', () => {
       { ...good, env: [{ name: 'PATH', secret: false, required: false }] },
       { ...good, env: [{ name: 'NODE_OPTIONS', secret: false, required: false }] },
       { ...good, env: [{ name: 'npm_config_registry', secret: false, required: false }] },
+      // Também as famílias inteiras e as pastas de onde vêm as configs e os certificados.
+      ...[
+        'NODE_TLS_REJECT_UNAUTHORIZED',
+        'UV_FIND_LINKS',
+        'UV_CONFIG_FILE',
+        'PIP_INDEX_URL',
+        'PYTHONWARNINGS',
+        'GIT_SSH_COMMAND',
+        'REQUESTS_CA_BUNDLE',
+        'SSL_CERT_DIR',
+        'USERPROFILE',
+        'AppData',
+        'XDG_CONFIG_HOME',
+        'Path',
+      ].map((name) => ({ ...good, env: [{ name, secret: true, required: false }] })),
+      // Isolamentos bidi e etiquetas invisíveis reordenavam o que a confirmação mostra.
+      { ...good, args: ['a⁦b'] },
+      { ...good, args: ['a\u{E0041}b'] },
+      { ...good, args: ['a b'] },
       {
         ...good,
         env: [
@@ -517,8 +545,10 @@ describe('catálogo do utilizador', () => {
     await approved(env);
     await env.catalog.setProject('p1', ['srv1']);
     await env.catalog.setProject('p2', ['srv1']);
+    // mcp-run é a pasta vazia de onde o npm lê a config de projeto (nunca a da sessão).
     const files = readdirSync(dataDir);
-    expect(files).toEqual(['mcp-catalog.json']);
+    expect(files.sort()).toEqual(['mcp-catalog.json', 'mcp-run']);
+    expect(readdirSync(path.join(dataDir, 'mcp-run'))).toEqual([]);
     const text = readFileSync(path.join(dataDir, 'mcp-catalog.json'), 'utf8');
     expect(text).not.toContain(SECRET);
     expect(text).toContain('"REGIAO"');
@@ -597,6 +627,14 @@ describe('arranque sem shell', () => {
       command: node,
       args: [cli, '-y', 'a@1.0.0', '--x'],
     });
+    // A config de projeto do npm (registry=, node_modules) vem de uma pasta só da Solline, nunca
+    // da pasta da sessão, onde o agente arranca o servidor.
+    expect(
+      resolveCommand(
+        { command: 'npx', args: ['-y', 'a@1.0.0'] },
+        { node: () => node, isolation: root },
+      ),
+    ).toEqual({ command: node, args: [cli, `--prefix=${root}`, '-y', 'a@1.0.0'] });
     expect(() => resolveCommand({ command: 'npx', args: [] }, { node: () => null })).toThrow(
       'Node.js',
     );
@@ -621,6 +659,31 @@ describe('arranque sem shell', () => {
       command: process.execPath,
       args: ['a'],
     });
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'no Windows, um caminho absoluto tem de ser .exe ou .com (nem «a.cmd.» nem «a.bat »)',
+    () => {
+      const dir = tempDir();
+      const script = path.join(dir, 'a.cmd');
+      writeFileSync(script, '@echo off');
+      const opts = { node: () => null };
+      expect(() => resolveCommand({ command: `${script}.`, args: [] }, opts)).toThrow('shell');
+      expect(() => resolveCommand({ command: `${script} `, args: [] }, opts)).toThrow('shell');
+      const other = path.join(dir, 'b.txt');
+      writeFileSync(other, '');
+      expect(() => resolveCommand({ command: other, args: [] }, opts)).toThrow('.exe');
+    },
+  );
+
+  it('uvx corre sem as configs de uv da pasta da sessão', () => {
+    const dir = tempDir();
+    const uvx = path.join(dir, process.platform === 'win32' ? 'uvx.exe' : 'uvx');
+    writeFileSync(uvx, '');
+    if (process.platform !== 'win32') chmodSync(uvx, 0o755);
+    expect(
+      resolveCommand({ command: 'uvx', args: ['pkg==1.0.0'] }, { node: () => null, pathEnv: dir }),
+    ).toEqual({ command: uvx, args: ['--no-config', 'pkg==1.0.0'] });
   });
 });
 
@@ -677,6 +740,19 @@ describe('sonda', () => {
     expect(error.message).not.toContain(SECRET);
     expect(error.message).toContain('***');
   }, 60_000);
+
+  it('a cauda do stderr nunca leva um pedaço de segredo (cortado no início ou nos 300 caracteres)', () => {
+    const secret = 'abcdefghijklmnopqrstuvwxyz012345';
+    // A janela começou a meio do segredo (o resto saiu da cauda).
+    const startCut = stderrTail(`${secret.slice(5)}${'y'.repeat(600)}`, true, secret.length, [
+      secret,
+    ]);
+    expect(startCut).not.toContain(secret.slice(5, 15));
+    // O corte dos 300 caracteres cairia a meio do segredo se se cortasse antes de tapar.
+    const endCut = stderrTail(`${'z'.repeat(290)}${secret}${'w'.repeat(10)}`, false, 0, [secret]);
+    expect(endCut).not.toContain(secret.slice(0, 6));
+    expect(endCut).toContain('***');
+  });
 
   it('o servidor corre só com o ambiente mínimo e as variáveis dele, nunca com as chaves dos agentes', async () => {
     process.env.ANTHROPIC_API_KEY = 'chave-do-agente-xyz';

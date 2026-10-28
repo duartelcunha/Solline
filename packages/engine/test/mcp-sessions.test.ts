@@ -169,6 +169,12 @@ describe('a escolha do projeto chega a cada sessão nova', () => {
     });
     expect(a.session.mcpServers).toEqual(['srv1']);
     expect(a.session.mcpSkipped).toBeUndefined();
+    // O SDK põe as opções de query() na linha de comando do claude.exe (--mcp-config): os
+    // servidores com variáveis chegam depois, por setMcpServers, pelo stdin.
+    const raw = claude[0]!.rawOptions();
+    expect(JSON.stringify(raw.mcpServers ?? {})).not.toContain(SECRET);
+    expect(Object.keys(raw.mcpServers ?? {})).not.toContain('ferramentas');
+    expect(claude[0]!.calls.some((c) => c.method === 'setMcpServers')).toBe(true);
 
     const b = await manager.create({ ...base, agent: 'codex', mode: 'ask' });
     expect(codexServers(codex[0]!)['mcp_servers.ferramentas']).toMatchObject({

@@ -43,8 +43,15 @@ export function approvalPrompt(server: McpCatalogServer): {
   acceptLabel: string;
   cancelLabel: string;
 } {
-  const names = server.spec.env.map((e) => e.name);
-  const vars = names.length > 0 ? `com as variáveis ${names.join(', ')}` : 'sem variáveis';
+  // Tudo o que a impressão aprova tem de se ver: o valor das públicas e quais são secretas.
+  const shown = server.spec.env.map((e) =>
+    e.secret
+      ? `${e.name} (secreta)`
+      : e.value !== undefined
+        ? `${e.name}=${JSON.stringify(e.value)}`
+        : `${e.name} (sem valor)`,
+  );
+  const vars = shown.length > 0 ? `com as variáveis ${shown.join(', ')}` : 'sem variáveis';
   const source = server.spec.source;
   const origin =
     source.kind === 'registry'

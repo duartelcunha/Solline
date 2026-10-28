@@ -81,7 +81,10 @@ export function recordingSink(): RecordingSink {
 
 export interface FakeQueryControl {
   queryFn: typeof sdkQuery;
+  /** As opções com os servidores que chegaram depois por setMcpServers (o que o Claude vê). */
   options(): Options;
+  /** As opções tal como o query() as recebeu (o que vai para a linha de comando do claude.exe). */
+  rawOptions(): Options;
   permissionResults: PermissionResult[];
   calls: { method: string; args: unknown[] }[];
   /** true depois do close() do query. */
@@ -99,10 +102,17 @@ export function fakeQuery(
   extra: { models?: ModelInfo[] } = {},
 ): FakeQueryControl {
   let captured: Options | undefined;
+  /** Os servidores que chegaram por setMcpServers (pelo stdin, não pela linha de comando). */
+  let setServers: Options['mcpServers'];
   let closedFlag = false;
   let crashWith: ((error: Error) => void) | undefined;
   const control: FakeQueryControl = {
     options: () => {
+      if (!captured) throw new Error('query() ainda não foi chamado');
+      if (!setServers) return captured;
+      return { ...captured, mcpServers: { ...captured.mcpServers, ...setServers } };
+    },
+    rawOptions: () => {
       if (!captured) throw new Error('query() ainda não foi chamado');
       return captured;
     },
@@ -179,6 +189,11 @@ export function fakeQuery(
           account: {},
         }),
         interrupt: call('interrupt'),
+        setMcpServers: async (servers: NonNullable<Options['mcpServers']>) => {
+          control.calls.push({ method: 'setMcpServers', args: [servers] });
+          setServers = servers;
+          return { added: Object.keys(servers), removed: [], errors: {} };
+        },
         setPermissionMode: call('setPermissionMode'),
         setModel: call('setModel'),
         applyFlagSettings: call('applyFlagSettings'),

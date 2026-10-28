@@ -73,11 +73,27 @@ describe('confirmação nativa da aprovação', () => {
   it('mostra o comando, os argumentos e os nomes das variáveis exatos', () => {
     const prompt = approvalPrompt(server());
     expect(prompt.message).toBe(
-      'A Solline vai arrancar `npx -y @acme/search@1.2.3 --modo "seguro a"` com as variáveis ACME_KEY, ACME_REGION. Permitir?',
+      'A Solline vai arrancar `npx -y @acme/search@1.2.3 --modo "seguro a"` com as variáveis ACME_KEY (secreta), ACME_REGION (sem valor). Permitir?',
     );
     expect(prompt.detail).toContain('registo oficial');
     expect(prompt.detail).toContain('GitHub');
     expect(prompt.detail).toContain('Gestor de Credenciais');
+  });
+
+  it('mostra o valor de cada variável pública: tudo o que a impressão aprova se vê', () => {
+    const prompt = approvalPrompt(
+      server({
+        spec: {
+          ...spec,
+          env: [
+            { name: 'ACME_KEY', secret: true, required: true },
+            { name: 'ACME_REGION', secret: false, required: false, value: 'eu west' },
+          ],
+        },
+      }),
+    );
+    expect(prompt.message).toContain('ACME_KEY (secreta)');
+    expect(prompt.message).toContain('ACME_REGION="eu west"');
   });
 
   it('sem variáveis, diz-o; à mão, diz que foi escrito pelo utilizador', () => {

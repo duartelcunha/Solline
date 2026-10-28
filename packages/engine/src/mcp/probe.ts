@@ -93,6 +93,22 @@ interface Reply {
   error?: { message?: unknown };
 }
 
+/**
+ * A cauda do stderr que pode ir para uma mensagem de erro, sem pedaços de segredos: tapa primeiro
+ * os valores inteiros na janela toda, só depois corta. Se a janela foi cortada no início, a margem
+ * (o tamanho do maior segredo) sai, porque é aí que um valor pode ter ficado a meio.
+ */
+export function stderrTail(
+  raw: string,
+  cut: boolean,
+  margin: number,
+  secrets: readonly string[],
+): string {
+  const covered = redact(raw, secrets);
+  const safe = cut ? covered.slice(margin) : covered;
+  return redact(cleanText(safe.slice(-STDERR_TAIL), 300), secrets);
+}
+
 export const probeMcpServer: ProbeFn = async (target, options = {}) => {
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
   const secrets = options.secrets ?? [];
@@ -125,9 +141,15 @@ export const probeMcpServer: ProbeFn = async (target, options = {}) => {
     });
   };
 
+  // A cauda guarda mais o tamanho do maior segredo: um valor cortado no início da janela fica todo
+  // dentro dessa margem, que se deita fora depois de tapar os inteiros (ver stderrTail).
+  const margin = Math.max(0, ...secrets.map((s) => s.length));
+  let cut = false;
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
-    stderr = (stderr + chunk).slice(-STDERR_TAIL);
+    const joined = stderr + chunk;
+    cut ||= joined.length > STDERR_TAIL + margin;
+    stderr = joined.slice(-(STDERR_TAIL + margin));
   });
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => {
@@ -197,7 +219,7 @@ export const probeMcpServer: ProbeFn = async (target, options = {}) => {
     return await Promise.race([run(), failed]);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    const tail = cleanText(stderr, 300);
+    const tail = stderrTail(stderr, cut, margin, secrets);
     // Sem `cause`: o erro original podia trazer valores que o servidor ecoou.
     failure = new Error(redact(tail ? `${reason} (${tail})` : reason, secrets));
   } finally {

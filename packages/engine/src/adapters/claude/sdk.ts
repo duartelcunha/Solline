@@ -1,6 +1,7 @@
 import type {
   CanUseTool,
   EffortLevel,
+  McpStdioServerConfig,
   ModelInfo,
   Options,
   PermissionMode,
@@ -357,6 +358,18 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       );
       this.#capabilities = capabilitiesFrom(init.models);
       if (!this.#settings.model) this.#settings.model = this.#capabilities.models[0]?.id ?? null;
+      // Antes da primeira mensagem (o send só vem depois do start), pelo canal de controlo.
+      const stdio = this.#stdioServers();
+      if (stdio)
+        await withTimeout(
+          q.setMcpServers({
+            ...stdio,
+            // O nome "solline" é da Solline; repeti-lo mantém o servidor em processo ligado.
+            ...(inProcess ? { [inProcess.server.name]: inProcess.server } : {}),
+          }),
+          START_TIMEOUT_MS,
+          'Servidores MCP do Claude',
+        );
     } catch (error) {
       this.#shell.close();
       queue.close();
@@ -488,6 +501,18 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     if (this.#pump) await withTimeout(this.#pump, 5_000, 'Fechar a sessão').catch(() => undefined);
   }
 
+  /** Os servidores MCP por stdio desta sessão (catálogo), no formato do SDK; undefined se não há. */
+  #stdioServers(): Record<string, McpStdioServerConfig> | undefined {
+    const servers = this.#options.mcpServers ?? [];
+    if (servers.length === 0) return undefined;
+    return Object.fromEntries(
+      servers.map((s) => [
+        s.name,
+        { type: 'stdio' as const, command: s.command, args: [...s.args], env: { ...s.env } },
+      ]),
+    );
+  }
+
   #sdkOptions(brain?: ClaudeBrain): Options {
     const options = this.#options;
     return {
@@ -516,25 +541,10 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       stderr: (data) => {
         this.#stderr = (this.#stderr + data).slice(-STDERR_LIMIT);
       },
-      ...(options.mcpServers?.length || brain
-        ? {
-            mcpServers: {
-              ...Object.fromEntries(
-                (options.mcpServers ?? []).map((s) => [
-                  s.name,
-                  {
-                    type: 'stdio' as const,
-                    command: s.command,
-                    args: [...s.args],
-                    env: { ...s.env },
-                  },
-                ]),
-              ),
-              // Por último: o nome "solline" é da Solline, nenhum servidor do catálogo o ocupa.
-              ...(brain ? { [brain.server.name]: brain.server } : {}),
-            },
-          }
-        : {}),
+      // Só o servidor em processo vai nas opções: o SDK passa os stdio ao claude.exe em
+      // `--mcp-config <json>` na linha de comando, com as variáveis (e os segredos do catálogo) à
+      // vista de quem lista processos ou audita arranques. Esses entram no start(), pelo stdin.
+      ...(brain ? { mcpServers: { [brain.server.name]: brain.server } } : {}),
       ...(options.fork && this.#point
         ? {
             resume: this.#point.session,
