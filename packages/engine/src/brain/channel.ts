@@ -26,6 +26,7 @@ const DEFAULT_HELLO_TIMEOUT_MS = 5_000;
 const MAX_SOCKETS = 128;
 const MAX_SOCKETS_PER_TOKEN = 8;
 const MAX_PENDING_PER_SOCKET = 16;
+const MAX_HELLO_BYTES = 1024;
 
 /** O que o canal precisa de uma sessão ligada. */
 export interface ChannelSession {
@@ -162,17 +163,20 @@ export class BrainChannel {
       conn.issued?.sockets.delete(socket);
     });
     let buffer = Buffer.alloc(0);
+    // Antes do hello, quem liga ainda não provou nada: só cabe um hello (128 ligações x 1 MiB
+    // por autenticar enchiam a memória do motor).
+    const limit = () => (conn.issued ? this.#maxBytes : Math.min(this.#maxBytes, MAX_HELLO_BYTES));
     socket.on('data', (chunk: Buffer) => {
       buffer = Buffer.concat([buffer, chunk]);
       for (;;) {
         const end = buffer.indexOf(0x0a);
         if (end < 0) {
-          if (buffer.length > this.#maxBytes) this.#fatal(conn, 'message too large');
+          if (buffer.length > limit()) this.#fatal(conn, 'message too large');
           return;
         }
         const line = buffer.subarray(0, end);
         buffer = buffer.subarray(end + 1);
-        if (line.length > this.#maxBytes) return this.#fatal(conn, 'message too large');
+        if (line.length > limit()) return this.#fatal(conn, 'message too large');
         if (line.length === 0) continue;
         this.#message(conn, line.toString('utf8'));
         if (conn.dead || socket.destroyed) return;

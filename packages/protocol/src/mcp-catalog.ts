@@ -68,7 +68,17 @@ const RESERVED_ENV = new Set([
 ]);
 
 /** Famílias inteiras: Node e npm, uv, pip e Python, git, o carregador dinâmico e as pastas XDG. */
-const RESERVED_ENV_PREFIXES = ['NODE_', 'NPM_', 'UV_', 'PIP_', 'PYTHON', 'GIT_', 'LD_', 'DYLD_', 'XDG_'];
+const RESERVED_ENV_PREFIXES = [
+  'NODE_',
+  'NPM_',
+  'UV_',
+  'PIP_',
+  'PYTHON',
+  'GIT_',
+  'LD_',
+  'DYLD_',
+  'XDG_',
+];
 
 export function isReservedEnvName(name: string): boolean {
   const upper = name.toUpperCase();

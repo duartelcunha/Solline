@@ -345,6 +345,15 @@ describe('BrainChannel', () => {
     await endless.closed;
   });
 
+  it('antes do hello só cabe um hello: quem ainda não provou nada não enche a memória', async () => {
+    const { brain } = brainOf();
+    const { pipe } = launchEnv(await stdioBinding(brain, session('a')));
+    const stranger = await connectChannel(pipe);
+    stranger.raw('a'.repeat(2048));
+    expect(await stranger.next()).toEqual({ type: 'error', message: 'message too large' });
+    await stranger.closed;
+  });
+
   it('o número de ligações por token tem limite', async () => {
     const { brain } = brainOf();
     const { pipe, token } = launchEnv(await stdioBinding(brain, session('a')));
