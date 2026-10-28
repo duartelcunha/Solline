@@ -63,7 +63,9 @@ app.on('second-instance', () => {
   mainWindow.focus();
 });
 let windowRevision = 0;
-const customControls = process.platform === 'win32';
+// Botões nativos do Windows (com os esquemas de encaixe e o realce do sistema). Os botões
+// escondidos atrás de um traço só apareciam com o rato no canto e falhavam depois de maximizar.
+const customControls = false;
 let draftKey: Buffer | undefined;
 const drafts = new UiRecoveryStore(
   join(app.getPath('userData'), 'recovery-ui'),

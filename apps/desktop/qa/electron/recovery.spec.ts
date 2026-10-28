@@ -740,8 +740,12 @@ test('actual window close warns and restart restores exact text, paused queue an
   expect(before.sessions[0]?.queue.items.map((item) => item.text)).toEqual([
     'Texto em fila, sem envio automático',
   ]);
-  await qa.page.getByRole('button', { name: 'Controlos da janela', exact: true }).focus();
-  await qa.page.getByRole('button', { name: 'Fechar janela', exact: true }).click();
+  // O botão nativo de fechar passa pelo mesmo evento `close` da janela.
+  await qa.app().evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((win) => win.webContents.getURL().endsWith('/index.html'))
+      ?.close(),
+  );
   const recovery = await qa.recovery();
   await qa.shot(recovery, 'close-warning-before-preservation');
   await qa.saveTrace();
@@ -785,20 +789,10 @@ test('window IPC rejects unknown actions and observes native maximize without op
   await expect
     .poll(() => qa.page.evaluate(() => window.solline.window.state()))
     .toMatchObject({ maximized: true });
-  await qa.page.getByRole('button', { name: 'Controlos da janela', exact: true }).focus();
-  await expect(
-    qa.page.getByRole('button', { name: 'Restaurar tamanho da janela', exact: true }),
-  ).toBeVisible();
   const maximized = await qa.page.evaluate(() => window.solline.window.state());
   expect(maximized.revision).toBeGreaterThan(initial.revision);
-  await qa.page.keyboard.press('Escape');
-  await expect(
-    qa.page.getByRole('button', { name: 'Controlos da janela', exact: true }),
-  ).toBeFocused();
-  await expect(qa.page.getByTestId('window-controls')).toHaveAttribute('data-open', 'false');
-  await expect(
-    qa.page.getByRole('button', { name: 'Restaurar tamanho da janela', exact: true }),
-  ).toBeHidden();
+  expect(maximized.customControls).toBe(false);
+  await expect(qa.page.getByTestId('window-controls')).toHaveCount(0);
   expect(
     await qa.app().evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
@@ -844,26 +838,16 @@ ConvertTo-Json -InputObject @([SollineBorderProbe]::Probe(${handle})) -Compress
 `], { windowsHide: true, timeout: 15_000 });
   const hits: unknown = JSON.parse(stdout);
   await info.attach('native-border-hit-test', { body: JSON.stringify(hits), contentType: 'application/json' });
-  expect(hits).toEqual([14, 11, 12]); // top-right, right, top sizing borders
-  const controls = qa.page.getByTestId('window-controls');
-  await qa.page.mouse.move((await qa.page.evaluate(() => innerWidth)) - 2, 2);
-  await expect(controls).toHaveAttribute('data-open', 'true');
-  await qa.page.getByRole('button', { name: 'Maximizar janela', exact: true }).click();
+  // Right and top borders still size the window; the corner belongs to the native buttons.
+  expect((hits as number[]).slice(1)).toEqual([11, 12]);
+  await qa.page.evaluate(() => window.solline.window.action('toggle-maximize'));
   await expect.poll(() => qa.page.evaluate(() => window.solline.window.state())).toMatchObject({ maximized: true });
   await qa.shot(qa.page, 'corner-maximized');
-  // Maximization moves the corner away from the previous pointer position.
-  await qa.page.mouse.move(400, 400);
-  await qa.page.mouse.move((await qa.page.evaluate(() => innerWidth)) - 2, 2);
-  await qa.page.getByRole('button', { name: 'Restaurar tamanho da janela', exact: true }).click();
+  await qa.page.evaluate(() => window.solline.window.action('toggle-maximize'));
   await expect.poll(() => qa.page.evaluate(() => window.solline.window.state())).toMatchObject({ maximized: false });
-  await qa.page.mouse.move(400, 400);
-  await qa.page.mouse.move((await qa.page.evaluate(() => innerWidth)) - 2, 2);
-  await qa.page.getByRole('button', { name: 'Minimizar janela', exact: true }).click();
+  await qa.page.evaluate(() => window.solline.window.action('minimize'));
   await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('/index.html'))?.isMinimized())).toBe(true);
   await app.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('/index.html')); win?.restore(); win?.focus(); });
-  await qa.page.mouse.move(400, 400);
-  await qa.page.mouse.move((await qa.page.evaluate(() => innerWidth)) - 2, 2);
-  await expect(controls).toHaveAttribute('data-open', 'true');
 });
 
 test('abrupt whole-process loss restores acknowledged draft and paused work without replay', async ({
