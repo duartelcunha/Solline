@@ -883,8 +883,8 @@ import/export` entram.
   exercitado pelo teste gated (`SOLLINE_TEST_CREDMAN=1`, Windows 11) e nunca pela app instalada.
 - **Por fazer, com nome:** gateway MCP (acima); servidores remotos (HTTP/SSE: faltam `url` e cabeçalhos
   nos três adaptadores); pacotes OCI, NuGet e MCPB; argumentos de pacote que pedem valor ao utilizador;
-  cofre fora do Windows; rodar/expirar segredos (`rodar até`); vista do catálogo e do escolher por projeto
-  (fase 6); mostrar `mcpSkipped` na interface.
+  cofre fora do Windows; rodar/expirar segredos (`rodar até`); vista do catálogo, escolher por projeto e
+  `mcpSkipped` na interface (feitos na fase 6).
 
 ## M6, fase 6: a interface do «um só cérebro» (28/10/2026)
 

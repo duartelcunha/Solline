@@ -141,8 +141,8 @@ Inspiração: Bugbot do Cursor, `/review` do Codex, crítico do Jules, handoff e
 
 Estado (27/10/2026): feito. Segunda opinião de outro fabricante no fim do turno, a pedido e antes de
 trazer, com achados por prioridade e confiança; passagem de testemunho com rascunho editável e
-cadeia de retomas; bifurcação numa worktree própria; Mapa da linhagem. Por fazer, com nome: os
-servidores MCP do Codex arrancam dentro do revisor; o rascunho chega ao revisor na sessão que
+cadeia de retomas; bifurcação numa worktree própria; Mapa da linhagem. Por fazer, com nome: o
+rascunho chega ao revisor na sessão que
 recebeu o testemunho (decidir); dividir `session-manager.ts` e `stores/app.ts`, que cresceram
 demais. A lista completa está em `DECISIONS.md`.
 
@@ -155,6 +155,8 @@ pedir uma segunda opinião ou passar uma subtarefa a outro. O catálogo MCP pass
 sincronizado com todos.
 
 Inspiração: steering do Kiro, regras e memórias do Cursor, Oracle do Amp, sincronização MCP do AionUi.
+
+Estado (28/10/2026): feito. As regras escritas uma vez chegam a cada agente sem tocar no repositório, no formato dele, e podem ser exportadas para `AGENTS.md` e `CLAUDE.md`. Os agentes propõem memórias com prova, mas só entram com a tua aprovação; ficam "a confirmar" quando o código que citam muda ou ao fim de 28 dias. "Perguntar a…" e "Delegar" pedem sempre o teu cartão de aprovação. O catálogo MCP é global e cada projeto escolhe os seus servidores; só arranca o que aprovaste exatamente, mostra as ferramentas que o servidor anuncia e guarda os segredos no Gestor de Credenciais do Windows. O revisor Codex deixou de arrancar os servidores MCP do utilizador. Por fazer, com nome: decidir a importação de regras (hoje entram ligadas e sem pré-visualização), o Bash nas consultas do Claude, recusar passar o testemunho ou bifurcar uma consulta, e recusar no motor a aprovação em lote de memórias de origem externa. A lista completa está em `DECISIONS.md`.
 
 ### M7: do pedido ao PR
 
