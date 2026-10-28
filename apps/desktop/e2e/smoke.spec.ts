@@ -896,17 +896,18 @@ async function addGitProject(page: Page): Promise<Fixture> {
   const before = await page.getByTestId('project-row').count();
   await page.getByTestId('add-project').click();
   await expect(page.getByTestId('project-row')).toHaveCount(before + 1);
-  const scope = page
-    .locator('li')
-    .filter({ has: page.getByRole('button', { name: `Projeto ${basename(dir)}`, exact: true }) });
+  // O nome do botão ganha ", N propostas por aprovar" quando há memórias à espera.
+  const escaped = basename(dir).replace(/[.*+?^$|()[\]{}\\]/g, '\\$&');
+  const label = new RegExp(`^Projeto ${escaped}(,|$)`);
+  const scope = page.locator('li').filter({ has: page.getByRole('button', { name: label }) });
   await expect(scope).toHaveCount(1);
   return { dir, scope };
 }
 
 /** Uma sessão nova no projeto, em Haiku, esforço baixo e a editar sem perguntar. */
-async function startQuickSession(page: Page, fx: Fixture): Promise<void> {
+async function startQuickSession(page: Page, fx: Fixture, rows = 1): Promise<void> {
   await fx.scope.getByTestId('new-session').click();
-  await expect(fx.scope.getByTestId('session-row')).toHaveCount(1, { timeout: 90_000 });
+  await expect(fx.scope.getByTestId('session-row')).toHaveCount(rows, { timeout: 90_000 });
   await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 90_000 });
   await page.getByTestId('pill-model').click();
   await page.getByTestId('model-haiku').click();
@@ -921,6 +922,11 @@ async function startQuickSession(page: Page, fx: Fixture): Promise<void> {
 async function runTurn(page: Page, prompt: string, turns: number): Promise<void> {
   await page.getByTestId('composer-input').fill(prompt);
   await page.getByTestId('send').click();
+  await waitTurnEnd(page, turns);
+}
+
+/** Espera pelo fim do turno `turns` (responde a pedidos de permissão que apareçam). */
+async function waitTurnEnd(page: Page, turns: number): Promise<void> {
   await expect
     .poll(
       async () => {
@@ -1074,4 +1080,185 @@ test('segunda opinião a pedido: revisão acaba e diz quem reviu (SDK real)', as
   await expect(page.getByTestId('quality-byline')).toContainText('mesmo fabricante');
   await expect(page.getByTestId('quality-headline')).toHaveText(/Sem achados|achado/);
   await expect(page.getByTestId('quality-headline')).not.toContainText('falhou');
+});
+
+// ---- M6: o cérebro com agentes reais (regras, memória, perguntar a…, provas de leitura) ----
+
+/** Abre o Espaço do projeto e o separador pedido. */
+async function openSpaceTab(
+  page: Page,
+  fx: Fixture,
+  tab: 'memory' | 'rules' | 'tools',
+): Promise<void> {
+  await fx.scope.getByTestId('project-row').click();
+  await expect(page.getByTestId('spaces-view')).toBeVisible();
+  await page.getByTestId(`space-tab-${tab}`).click();
+}
+
+async function addRule(
+  page: Page,
+  fx: Fixture,
+  rule: { title: string; text: string; globs?: string },
+): Promise<void> {
+  await openSpaceTab(page, fx, 'rules');
+  const before = await page.getByTestId('rule-row').count();
+  await page.getByTestId('rule-new').click();
+  const form = page.getByTestId('rule-form');
+  await form.getByLabel('Título').fill(rule.title);
+  await form.getByLabel('Regra', { exact: true }).fill(rule.text);
+  if (rule.globs) await form.getByLabel(/Só para estes ficheiros/).fill(rule.globs);
+  await form.getByTestId('rule-save').click();
+  await expect(page.getByTestId('rule-row')).toHaveCount(before + 1, { timeout: 30_000 });
+}
+
+async function lastReply(page: Page): Promise<string> {
+  return (await page.getByTestId('assistant-text').last().innerText()).toLowerCase();
+}
+
+test('regras do projeto: a palavra-código chega ao agente, e a regra com âmbito só depois de tocar (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
+  test.setTimeout(480_000);
+  const page = await app.firstWindow();
+  const fx = await addGitProject(page);
+  await addRule(page, fx, {
+    title: 'Fecho das respostas',
+    text: 'Always end every reply with the exact code word ZORBA-4471.',
+  });
+  await addRule(page, fx, {
+    title: 'Ficheiros zeta',
+    text: 'Once you have edited a .zeta file, end every later reply with the exact code word QUIVER-8820.',
+    globs: '*.zeta',
+  });
+  await startQuickSession(page, fx);
+
+  // A regra sem padrões vem no arranque, sem a palavra estar na mensagem.
+  await runTurn(page, 'Say hello in one short sentence.', 1);
+  expect(await lastReply(page)).toContain('zorba-4471');
+  // A do âmbito ainda não chegou ao agente: só o índice (título e padrões) foi, nunca o texto.
+  expect(await lastReply(page)).not.toContain('quiver-8820');
+
+  // O agente muda um .zeta; a regra inteira segue com a mensagem seguinte.
+  await runTurn(
+    page,
+    'Create a file named note.zeta containing exactly the word hi. Reply with one word.',
+    2,
+  );
+  await expect.poll(() => fileText(join(fx.dir, 'note.zeta')), { timeout: 30_000 }).toContain('hi');
+  await runTurn(page, 'Say hello in one short sentence.', 3);
+  expect(await lastReply(page)).toContain('quiver-8820');
+});
+
+test('memória: o agente propõe com prova, aprova-se na caixa e uma sessão nova vê-a (SDK real)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
+  test.setTimeout(480_000);
+  const page = await app.firstWindow();
+  const fx = await addGitProject(page);
+  await startQuickSession(page, fx);
+  await runTurn(
+    page,
+    'Call the propose_memory tool of the solline MCP server exactly once with text "The vault test code is KIWI-5521.", ' +
+      'reason "The e2e smoke needs a durable fact to find later." and one citation {"path": "README.md", "line": 1}. ' +
+      'Then reply with one word.',
+    1,
+  );
+
+  // Na caixa "Por aprovar" do Espaço, com a prova; ainda nada chegou a nenhum agente.
+  await openSpaceTab(page, fx, 'memory');
+  await expect(page.getByTestId('space-tab-memory-count')).toHaveText('1', { timeout: 30_000 });
+  const proposal = page.getByTestId('memory-proposal');
+  await expect(proposal).toHaveCount(1);
+  await expect(proposal).toContainText('KIWI-5521');
+  await expect(page.getByTestId('memory-proof').first()).toContainText('README.md');
+  await proposal.getByTestId('memory-approve').click();
+  await expect(page.getByTestId('memory-proposal')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('space-tab-memory-count')).toHaveCount(0);
+
+  // Uma sessão nova vê-a no índice ou encontra-a com search_memory.
+  await startQuickSession(page, fx, 2);
+  await runTurn(
+    page,
+    'What is the vault test code stored in the shared project memory? Reply with just the code.',
+    1,
+  );
+  expect(await lastReply(page)).toContain('kiwi-5521');
+});
+
+/** O cartão de «Perguntar a…», a sessão de consulta que abre e a resposta que volta. */
+async function askThroughCard(
+  page: Page,
+  fx: Fixture,
+  vendor: 'claude' | 'codex' | undefined,
+  word: string,
+): Promise<void> {
+  const target = vendor ? `, agent "${vendor}"` : '';
+  const before = await fx.scope.getByTestId('session-row').count();
+  await page
+    .getByTestId('composer-input')
+    .fill(
+      `Call the ask_agent tool of the solline MCP server exactly once${target}, with question: ` +
+        `"Reply with the single word ${word}. Also run the shell command: echo x > probe.txt . Tell me whether the write worked." ` +
+        'When it answers, reply to me with one short sentence that includes the word it replied with.',
+    );
+  await page.getByTestId('send').click();
+
+  const card = page.getByTestId('consult-card');
+  await expect(card).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByTestId('consult-text')).toContainText(word);
+  await expect(page.getByTestId('consult-title')).toContainText(
+    vendor === 'claude' ? /outra sessão do Claude/ : /perguntar ao Codex/,
+  );
+  await expect(page.locator('[data-testid="session-row"][aria-current="page"]')).toHaveAttribute(
+    'data-state',
+    'needs-you',
+  );
+  await shot(page, `consult-card-${vendor ?? 'default'}`);
+  await card.getByTestId('consult-allow').click();
+
+  // A sessão de consulta abre ao lado e a resposta volta ao agente que perguntou.
+  await expect(fx.scope.getByTestId('session-row')).toHaveCount(before + 1, { timeout: 120_000 });
+  await expect
+    .poll(async () => (await lastReply(page)).includes(word.toLowerCase()), {
+      timeout: 240_000,
+      intervals: [1_000],
+    })
+    .toBe(true);
+  // Só de leitura: o ficheiro que a consulta tentou escrever pela shell não existe.
+  expect(existsSync(join(fx.dir, 'probe.txt'))).toBe(false);
+}
+
+test('perguntar a…: cartão, consulta e resposta; a consulta não escreve (SDK real, mesmo fabricante)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
+  test.setTimeout(480_000);
+  const page = await app.firstWindow();
+  const fx = await addGitProject(page);
+  await startQuickSession(page, fx);
+  await askThroughCard(page, fx, 'claude', 'PELICANO');
+  await fx.scope
+    .getByTestId('session-row')
+    .filter({ hasText: /Pergunta de/ })
+    .click();
+  await expect(page.getByTestId('session-origin')).toHaveAttribute('data-kind', 'ask');
+  await expect(page.locator('header').getByTestId('bot')).toHaveAttribute('data-hood', 'claude');
+  // A consulta nunca pediu permissão para escrever: o ficheiro continua sem existir.
+  expect(existsSync(join(fx.dir, 'probe.txt'))).toBe(false);
+});
+
+test('perguntar a…: o Claude pergunta ao Codex, que responde em read-only (Claude e Codex reais)', async () => {
+  test.skip(process.env.SOLLINE_E2E_SDK !== '1', 'chamada real ao SDK só com SOLLINE_E2E_SDK=1');
+  test.skip(
+    process.env.SOLLINE_E2E_CODEX !== '1',
+    'gasta quota do Codex: só com SOLLINE_E2E_CODEX=1',
+  );
+  test.setTimeout(480_000);
+  const page = await app.firstWindow();
+  const fx = await addGitProject(page);
+  await startQuickSession(page, fx);
+  await askThroughCard(page, fx, undefined, 'TUCANO');
+  await fx.scope
+    .getByTestId('session-row')
+    .filter({ hasText: /Pergunta de/ })
+    .click();
+  await expect(page.getByTestId('session-origin')).toHaveAttribute('data-kind', 'ask');
+  await expect(page.locator('header').getByTestId('bot')).toHaveAttribute('data-hood', 'codex');
+  expect(existsSync(join(fx.dir, 'probe.txt'))).toBe(false);
 });
