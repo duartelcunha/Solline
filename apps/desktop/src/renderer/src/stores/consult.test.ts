@@ -6,7 +6,7 @@ import {
   type SessionInfo,
 } from '@solline/protocol';
 import { capabilities } from '../../../../qa/fixtures';
-import { actions, dispatch, restoreSnapshot, sessionStore } from './app.ts';
+import { actions, dispatch, restoreSnapshot, sessionStore, useApp } from './app.ts';
 
 vi.mock('../lib/morph.ts', () => ({
   morphUpdate: (apply: () => void) => apply(),
@@ -197,4 +197,103 @@ it('answerConsult manda a decisão ao motor; um erro fica na sessão', async () 
   expect(sessionStore('a')?.getState().actionError).toBe(
     'Este pedido já não está à espera de resposta',
   );
+});
+
+const state = (sessionId: string, value: SessionInfo['state']): EngineEvent => ({
+  kind: 'event',
+  type: 'session.state',
+  sessionId,
+  state: value,
+});
+const settled = (id: string, sessionId = 'a'): EngineEvent => ({
+  kind: 'event',
+  type: 'consult.settled',
+  sessionId,
+  requestId: id,
+  outcome: 'allow',
+});
+
+it('um cartão à espera põe a sessão «a trabalhar» em «precisa de ti», e volta quando é decidido', () => {
+  open();
+  const states = () => ({
+    shown: sessionStore('a')?.getState().info.state,
+    engine: sessionStore('a')?.getState().engineState,
+  });
+  expect(states()).toEqual({ shown: 'running', engine: 'running' });
+  dispatch(requested(request()));
+  expect(states()).toEqual({ shown: 'needs-you', engine: 'running' });
+  // Outra sessão não muda.
+  expect(sessionStore('b')?.getState().info.state).toBe('running');
+  dispatch(requested(request({ id: 'c2' })));
+  dispatch(settled('c1'));
+  expect(states().shown).toBe('needs-you');
+  dispatch(settled('c2'));
+  expect(states()).toEqual({ shown: 'running', engine: 'running' });
+});
+
+it('o estado do motor continua a mandar: um pedido de permissão a meio e o fim do turno', () => {
+  open();
+  dispatch(requested(request()));
+  // O motor passa a «precisa de ti» por um pedido de permissão: o mesmo estado, sem se perder.
+  dispatch(state('a', 'needs-you'));
+  expect(sessionStore('a')?.getState().engineState).toBe('needs-you');
+  dispatch(state('a', 'running'));
+  expect(sessionStore('a')?.getState().info.state).toBe('needs-you');
+  // O turno acaba (o pedido foi cancelado pelo motor): sem cartão, vale o estado do motor.
+  dispatch({
+    kind: 'event',
+    type: 'consult.settled',
+    sessionId: 'a',
+    requestId: 'c1',
+    outcome: 'cancelled',
+  });
+  dispatch(state('a', 'idle'));
+  expect(sessionStore('a')?.getState().info.state).toBe('idle');
+  expect(sessionStore('a')?.getState().turnEndedAt).not.toBeNull();
+});
+
+it('o snapshot com um pedido pendente abre a sessão como «precisa de ti»', () => {
+  open([request()]);
+  expect(sessionStore('a')?.getState().info.state).toBe('needs-you');
+  expect(sessionStore('b')?.getState().info.state).toBe('running');
+  // Parada, uma sessão não passa a «precisa de ti» por um pedido que já não existe.
+  open();
+  expect(sessionStore('a')?.getState().info.state).toBe('running');
+});
+
+it('a sessão que o motor abriu para a consulta é adotada pelos eventos dela', async () => {
+  vi.useFakeTimers();
+  try {
+    open();
+    const child = info('kid', {
+      title: 'Pergunta de Claude: x',
+      state: 'running',
+      origin: { kind: 'ask', sessionId: 'a' },
+    });
+    const stranger = info('other', { state: 'running' });
+    const send = vi.fn(async (command: string) => {
+      expect(command).toBe('engine.snapshot');
+      return {
+        version: 1,
+        epoch: 'consult',
+        sequence: 5,
+        sessions: [saved(info('a')), saved(info('b')), saved(child), saved(stranger)],
+        races: [],
+        operations: [],
+        durability: { status: 'saved' },
+      };
+    });
+    vi.stubGlobal('window', { solline: { request: send } });
+    expect(sessionStore('kid')).toBeUndefined();
+    dispatch(state('kid', 'running'));
+    dispatch(state('kid', 'running'));
+    await vi.advanceTimersByTimeAsync(300);
+    // Uma só leitura, e só a consulta entra: uma sessão sem origem de consulta não.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sessionStore('kid')?.getState().info.title).toBe('Pergunta de Claude: x');
+    expect(sessionStore('other')).toBeUndefined();
+    expect(useApp.getState().sessionIds).toContain('kid');
+  } finally {
+    vi.useRealTimers();
+  }
 });

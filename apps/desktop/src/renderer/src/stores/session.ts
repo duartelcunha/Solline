@@ -9,6 +9,7 @@ import {
   type EngineEvent,
   type Quality,
   type SessionInfo,
+  type SessionState,
   type Timeline,
   type Turn,
   type Usage,
@@ -16,7 +17,10 @@ import {
 
 /** Tudo o que a interface sabe de uma sessão. Só muda por eventos do motor. */
 export interface SessionData {
+  /** O estado que a interface mostra: o do motor, mas «precisa de ti» enquanto um cartão espera. */
   info: SessionInfo;
+  /** O estado como o motor o diz (a verdade; `info.state` junta-lhe os cartões de consulta). */
+  engineState: SessionState;
   projectId: string;
   capabilities: AgentCapabilities | null;
   turns: Turn[];
@@ -63,6 +67,7 @@ export function createSessionStore(
 ): SessionStore {
   return createStore<SessionData>(() => ({
     info,
+    engineState: info.state,
     projectId,
     capabilities,
     turns: [],
@@ -85,8 +90,33 @@ export function createSessionStore(
   }));
 }
 
+/**
+ * Um pedido de «Perguntar a…» ou «Delegar» à espera não muda o estado no motor (o turno continua a
+ * correr), mas quem decide és tu: a sessão aparece como «precisa de ti» e conta para a mesa e para
+ * os avisos, como um pedido de permissão. Só vale por cima de «a trabalhar».
+ */
+export function effectiveState(engine: SessionState, pendingConsults: number): SessionState {
+  return engine === 'running' && pendingConsults > 0 ? 'needs-you' : engine;
+}
+
+/** Põe o estado mostrado de acordo com o do motor e com os pedidos de consulta à espera. */
+function settle(data: SessionData): SessionData {
+  const state = effectiveState(data.engineState, data.consults.length);
+  if (data.info.state === state) return data;
+  return { ...data, info: { ...data.info, state }, stateSince: Date.now() };
+}
+
+/** Os pedidos de consulta que o motor tem à espera (por exemplo, no snapshot ao reabrir). */
+export function withConsults(data: SessionData, consults: ConsultRequest[]): SessionData {
+  return settle({ ...data, consults });
+}
+
 /** Aplica um evento do motor ao estado de uma sessão (função pura). */
 export function reduceSession(data: SessionData, event: EngineEvent): SessionData {
+  return settle(reduceEngineEvent(data, event));
+}
+
+function reduceEngineEvent(data: SessionData, event: EngineEvent): SessionData {
   switch (event.type) {
     case 'session.event': {
       const { delta } = event;
@@ -154,15 +184,16 @@ export function reduceSession(data: SessionData, event: EngineEvent): SessionDat
       return { ...data, info: event.handedTo ? { ...info, handedTo: event.handedTo } : info };
     }
     case 'session.state': {
-      if (event.state === data.info.state) return data;
+      if (event.state === data.engineState) return data;
       const now = Date.now();
       return {
         ...data,
         info: { ...data.info, state: event.state },
+        engineState: event.state,
         interrupted: event.state === 'error' ? data.interrupted : false,
         stateSince: now,
         turnEndedAt:
-          (data.info.state === 'running' || data.info.state === 'needs-you') &&
+          (data.engineState === 'running' || data.engineState === 'needs-you') &&
           event.state === 'idle'
             ? now
             : data.turnEndedAt,

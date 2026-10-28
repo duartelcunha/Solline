@@ -7,11 +7,14 @@ import {
   type CommandResult,
 } from '@solline/protocol';
 
+/** Os separadores de um espaço: Regras só existem nos projetos; MCP é o catálogo em Geral e a escolha nos projetos. */
+export type SpacePanel = 'tasks' | 'memory' | 'rules' | 'tools';
+
 export const useSpaces = create<{
   data: SpacesState;
   error: string | null;
   selectedTaskId: string | null;
-  panel: 'tasks' | 'memory';
+  panel: SpacePanel;
 }>(() => ({
   data: emptySpaces(),
   error: null,

@@ -30,6 +30,7 @@ import type { ReviewDraft, UiRecoveryState } from '@solline/protocol/bridge';
 import {
   createSessionStore,
   reduceSession,
+  withConsults,
   type SessionData,
   type SessionStore,
 } from './session.ts';
@@ -188,7 +189,10 @@ export function restoreSnapshot(snapshot: EngineSnapshot, ui: UiRecoveryState): 
     const store = storeFromItem(item);
     const draft = ui.drafts[item.session.id];
     store.setState({
-      consults: (snapshot.consults ?? []).filter((c) => c.sessionId === item.session.id),
+      ...withConsults(
+        store.getState(),
+        (snapshot.consults ?? []).filter((c) => c.sessionId === item.session.id),
+      ),
       composerText: draft?.pendingSend
         ? [draft.pendingSend, draft.text].filter(Boolean).join('\n')
         : (draft?.text ?? ''),
@@ -444,6 +448,41 @@ async function adoptMissingLanes(race: Race): Promise<void> {
   }
 }
 
+/**
+ * As sessões que o motor abre sozinho (a consulta de «Perguntar a…», a delegação) não passam por
+ * nenhum comando da interface: só chegam eventos delas. Adotam-se do snapshot, e só estas (as
+ * pistas e as sessões que a interface está a criar têm o seu próprio caminho).
+ */
+let childAdoption: ReturnType<typeof setTimeout> | undefined;
+function scheduleChildAdoption(): void {
+  if (childAdoption !== undefined || startingSplits > 0) return;
+  childAdoption = setTimeout(() => {
+    childAdoption = undefined;
+    void adoptConsultSessions();
+  }, 150);
+}
+
+export async function adoptConsultSessions(): Promise<void> {
+  try {
+    const snapshot = await request('engine.snapshot', {});
+    const adopted: string[] = [];
+    for (const item of snapshot.sessions) {
+      const id = item.session.id;
+      const kind = item.session.origin?.kind;
+      if ((kind !== 'ask' && kind !== 'delegate') || sessionStores.has(id) || adopting.has(id))
+        continue;
+      adoptStore(id, storeFromItem(item), snapshot.sequence);
+      adopted.push(id);
+    }
+    if (adopted.length > 0)
+      useApp.setState((s) => ({
+        sessionIds: [...s.sessionIds, ...adopted.filter((id) => !s.sessionIds.includes(id))],
+      }));
+  } catch {
+    // O próximo evento dessa sessão volta a tentar.
+  }
+}
+
 /** Todos os eventos do motor entram por aqui. */
 export function dispatch(event: EngineEvent): void {
   if (event.type === 'spaces.changed') {
@@ -508,6 +547,7 @@ export function dispatch(event: EngineEvent): void {
     const early = earlyEvents.get(event.sessionId) ?? [];
     if (early.length < 500) early.push(event);
     earlyEvents.set(event.sessionId, early);
+    scheduleChildAdoption();
     return;
   }
   const apply = () => store.setState(reduceSession(store.getState(), event));

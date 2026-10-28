@@ -15,6 +15,8 @@ import { PermissionCard, PlanCard, QuestionCard } from './asks.tsx';
 import { NoticeView, Spinner, ThinkingView, TodoView, ToolGroup } from './blocks.tsx';
 import { ToolDetail } from './tool-detail.tsx';
 import { QueueList, SteerView } from './queue.tsx';
+import { ConsultCards } from './consult-card.tsx';
+import { SessionChildren } from './session-children.tsx';
 
 function UserTurn({ turn }: { turn: Turn }) {
   const text = turn.blocks.find((b) => b.kind === 'text');
@@ -137,6 +139,7 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   const state = useSession(sessionId, (s) => s.info.state);
   const cwd = useSession(sessionId, (s) => s.info.cwd);
   const error = useSession(sessionId, (s) => s.error);
+  const firstConsultId = useSession(sessionId, (s) => s.consults[0]?.id ?? null);
   const canResume = useSession(sessionId, (s) => s.capabilities?.features.resume !== false);
   const engineOffline = useApp((s) => s.engineOffline);
   const agentLabel = useSessionAgentLabel(sessionId);
@@ -161,6 +164,8 @@ export function Conversation({ sessionId }: { sessionId: string }) {
     }
     return { tools, firstPendingId };
   }, [turns]);
+  // Os cartões de consulta e delegação contam como pedidos: o mesmo cuidado com quem está a ler.
+  const pendingId = firstPendingId ?? firstConsultId;
 
   // Segue o fundo com uma mola enquanto o Duarte não subir para ler; ao abrir, salta lá.
   useLayoutEffect(() => {
@@ -177,8 +182,8 @@ export function Conversation({ sessionId }: { sessionId: string }) {
   // A pending decision never pulls the reader away from older text.
   useEffect(() => {
     const el = scroller.current;
-    if (!el || !firstPendingId) return;
-    const card = el.querySelector(`[data-ask="${CSS.escape(firstPendingId)}"]`);
+    if (!el || !pendingId) return;
+    const card = el.querySelector(`[data-ask="${CSS.escape(pendingId)}"]`);
     if (card) {
       const observer = new IntersectionObserver(
         ([entry]) => {
@@ -201,11 +206,11 @@ export function Conversation({ sessionId }: { sessionId: string }) {
       return () => observer.disconnect();
     }
     return undefined;
-  }, [firstPendingId]);
+  }, [pendingId]);
 
   const signature = `${turns.length}:${turns.at(-1)?.blocks.length ?? 0}`;
   const hasNew = away !== null && away !== signature;
-  const pendingAway = away !== null && firstPendingId !== null && !pendingVisible;
+  const pendingAway = away !== null && pendingId !== null && !pendingVisible;
 
   const openTool = openToolId ? (tools.get(openToolId) ?? null) : null;
   // A linha do tempo marca o <html> com o turno de onde se voltaria: esse e os seguintes
@@ -264,6 +269,12 @@ export function Conversation({ sessionId }: { sessionId: string }) {
                   <Spinner label={`O ${agentLabel} está a trabalhar`} /> A pensar…
                 </div>
               ) : null}
+              <ConsultCards
+                sessionId={sessionId}
+                active={firstPendingId === null}
+                autoFocus={away === null}
+              />
+              <SessionChildren sessionId={sessionId} />
               <QueueList sessionId={sessionId} />
             </div>
           )}
@@ -275,8 +286,8 @@ export function Conversation({ sessionId }: { sessionId: string }) {
             onClick={(event) => {
               const el = scroller.current;
               if (!el) return;
-              if (pendingAway && firstPendingId) {
-                const card = el.querySelector(`[data-ask="${CSS.escape(firstPendingId)}"]`);
+              if (pendingAway && pendingId) {
+                const card = el.querySelector(`[data-ask="${CSS.escape(pendingId)}"]`);
                 if (card) {
                   const margin = Math.max(
                     0,

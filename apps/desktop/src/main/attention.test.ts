@@ -32,6 +32,34 @@ describe('avisos fora da app', () => {
     });
   });
 
+  it('um pedido de perguntar a outro agente ou delegar avisa como um pedido de permissão', () => {
+    const t = tracker();
+    const consult = (sessionId: string): EngineEvent => ({
+      kind: 'event',
+      type: 'consult.request',
+      sessionId,
+      request: {
+        id: 'c1',
+        kind: 'ask',
+        sessionId,
+        from: 'claude',
+        to: 'codex',
+        summary: 'O Claude quer perguntar ao Codex',
+        text: 'Onde está o parser?',
+        createdAt: 1,
+      },
+    });
+    expect(t.observe(consult('s1'), false)).toEqual({
+      sessionId: 's1',
+      title: 'Claude · solline',
+      body: 'Precisa de ti: O Claude quer perguntar ao Codex',
+      urgent: true,
+    });
+    // Com foco o cartão já está à vista; uma sessão desconhecida não avisa.
+    expect(t.observe(consult('s1'), true)).toBeNull();
+    expect(t.observe(consult('outra'), false)).toBeNull();
+  });
+
   it('com a janela em foco, o bot chega: nada de avisos', () => {
     const t = tracker();
     t.observe(state('s1', 'running'), true);

@@ -77,6 +77,7 @@ export class AttentionTracker {
   /** O aviso que este evento merece, ou null. Atualiza sempre o estado guardado. */
   observe(event: EngineEvent, focused: boolean): Attention | null {
     if (event.type === 'session.checks') return this.#checks(event, focused);
+    if (event.type === 'consult.request') return this.#consult(event, focused);
     if (event.type !== 'session.state') return null;
     const session = this.#sessions.get(event.sessionId);
     if (!session) return null;
@@ -94,6 +95,24 @@ export class AttentionTracker {
       return { sessionId: event.sessionId, title, body: 'Caiu', urgent: false };
     }
     return null;
+  }
+
+  /**
+   * Um agente pede para perguntar a outro ou delegar: a sessão fica à espera como num pedido de
+   * permissão, por isso avisa como ele (a frase é a que o motor escreve, sem o texto do agente).
+   */
+  #consult(
+    event: Extract<EngineEvent, { type: 'consult.request' }>,
+    focused: boolean,
+  ): Attention | null {
+    const session = this.#sessions.get(event.sessionId);
+    if (!session || focused) return null;
+    return {
+      sessionId: event.sessionId,
+      title: `${agentLabel(session.agent)} · ${session.project}`,
+      body: `Precisa de ti: ${event.request.summary}`,
+      urgent: true,
+    };
   }
 
   #checks(

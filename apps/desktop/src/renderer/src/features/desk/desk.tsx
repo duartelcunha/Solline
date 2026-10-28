@@ -19,6 +19,7 @@ import { Mark } from '../quality/checks.tsx';
 import { deskOrder, lastAction, pendingAsk } from './desk-order.ts';
 import { sessionStore } from '../../stores/app.ts';
 import { morphUpdate } from '../../lib/morph.ts';
+import { deskCanAllowDirectly } from '../conversation/consult-model.ts';
 
 function Delta({ additions, deletions }: { additions: number; deletions: number }) {
   return (
@@ -42,10 +43,69 @@ async function answerAndMove(sessionId: string, id: string, decision: 'allow-onc
   });
 }
 
+/** Responde a uma consulta ou delegação e desliza para o próximo cartão que precisa de ti. */
+async function answerConsultAndMove(
+  sessionId: string,
+  requestId: string,
+  decision: 'allow' | 'deny',
+) {
+  if (!(await actions.answerConsult(sessionId, requestId, decision))) return;
+  requestAnimationFrame(() => {
+    const desk = document.querySelector<HTMLElement>('[data-testid="desk"]');
+    const next = desk?.querySelector('[data-testid="desk-card"][data-state="needs-you"]');
+    if (desk && next) scrollIntoViewSmooth(desk, next, 'nearest', 16);
+  });
+}
+
+/**
+ * Um agente quer perguntar a outro ou delegar. Perguntar permite-se aqui (é só leitura);
+ * delegar abre a sessão, onde se vê o modo e o texto antes de decidir.
+ */
+function CompactConsult({ sessionId }: { sessionId: string }) {
+  const request = useSession(sessionId, (s) => s.consults[0] ?? null);
+  if (!request) return null;
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  const direct = deskCanAllowDirectly(request.kind);
+  return (
+    <div className="flex items-center gap-2 text-[12px]" onClick={stop} data-testid="card-consult">
+      <span className="min-w-0 flex-1 truncate text-fg" title={request.summary}>
+        {request.summary}
+      </span>
+      {direct ? (
+        <button
+          type="button"
+          onClick={() => void answerConsultAndMove(sessionId, request.id, 'allow')}
+          className={`${smallButton} bg-fg text-bg`}
+          data-testid="card-consult-allow"
+        >
+          Permitir
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => actions.selectSession(sessionId)}
+          className={`${smallButton} bg-fg text-bg`}
+          data-testid="card-consult-open"
+        >
+          Abrir
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => void answerConsultAndMove(sessionId, request.id, 'deny')}
+        className={`${smallButton} border border-line hover:bg-surface-hover`}
+        data-testid="card-consult-deny"
+      >
+        Recusar
+      </button>
+    </div>
+  );
+}
+
 /** O pedido à espera, em pequeno: o título e Permitir / Negar; o resto abre a conversa. */
 function CompactAsk({ sessionId }: { sessionId: string }) {
   const ask = useSession(sessionId, (s) => pendingAsk(s.turns));
-  if (!ask) return null;
+  if (!ask) return <CompactConsult sessionId={sessionId} />;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   if (ask.kind !== 'permission') {
     return (

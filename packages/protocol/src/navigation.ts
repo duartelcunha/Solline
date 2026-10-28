@@ -10,7 +10,7 @@ export const NavigationTarget = z.discriminatedUnion('view', [
       view: z.literal('spaces'),
       projectId: Id.nullable(),
       taskId: Id.optional(),
-      panel: z.enum(['tasks', 'memory']).optional(),
+      panel: z.enum(['tasks', 'memory', 'rules', 'tools']).optional(),
     })
     .strict(),
   z.object({ view: z.literal('session'), sessionId: Id }).strict(),

@@ -48,7 +48,7 @@ function isTyping(target: EventTarget | null): boolean {
 }
 
 /** Atalhos do cartão ativo. O teclado é sempre um segundo caminho: os botões chegam. */
-function useShortcuts(enabled: boolean, keys: Record<string, () => void>): void {
+export function useShortcuts(enabled: boolean, keys: Record<string, () => void>): void {
   const ref = useRef(keys);
   useLayoutEffect(() => {
     ref.current = keys;
@@ -117,7 +117,7 @@ function permissionIcon(status: AskStatus): React.ReactNode {
   return <ShieldQuestion size={12} />;
 }
 
-function Kbd({ children }: { children: React.ReactNode }) {
+export function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd
       aria-hidden
@@ -130,11 +130,11 @@ function Kbd({ children }: { children: React.ReactNode }) {
 
 const button =
   'inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium sl-press disabled:opacity-50';
-const primary = `${button} bg-accent text-on-accent hover:opacity-90`;
-const secondary = `${button} border border-line-strong bg-surface hover:bg-surface-hover`;
-const quiet = `${button} text-muted hover:bg-surface-hover hover:text-fg`;
+export const primary = `${button} bg-accent text-on-accent hover:opacity-90`;
+export const secondary = `${button} border border-line-strong bg-surface hover:bg-surface-hover`;
+export const quiet = `${button} text-muted hover:bg-surface-hover hover:text-fg`;
 
-function Card({
+export function Card({
   id,
   children,
   label,
