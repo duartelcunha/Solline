@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { realpath, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { FileCitation } from './keys.ts';
+import { resolveGit } from '../checkpoints/git.ts';
 
 /** Mais do que isto não se cita (e não se lê para tirar o hash). */
 export const MAX_CITED_BYTES = 1_048_576;
@@ -92,9 +93,11 @@ export function hashCited(text: string, citation: FileCitation): string | undefi
 
 /** O commit existe no repositório da pasta. Falha (sem git, sem repositório) conta como "não existe". */
 export function gitCommitExists(cwd: string, sha: string): Promise<boolean> {
+  const git = resolveGit();
+  if (!git) return Promise.resolve(false);
   return new Promise((resolve) => {
     execFile(
-      'git',
+      git,
       ['cat-file', '-e', `${sha}^{commit}`],
       { cwd, timeout: 5_000, windowsHide: true },
       (error) => resolve(!error),

@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Project } from '@solline/protocol';
 import { digest } from './manager.ts';
+import { resolveGit } from '../checkpoints/git.ts';
 
 export interface ContextSource {
   id: string;
@@ -55,8 +56,10 @@ export async function collectProject(
   const root = await realpath(project.path);
   let names: string[];
   try {
+    const git = resolveGit();
+    if (!git) throw new Error('Git is unavailable');
     const result = await exec(
-      'git',
+      git,
       [
         '-c',
         'core.fsmonitor=false',
