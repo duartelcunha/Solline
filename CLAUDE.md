@@ -1,5 +1,7 @@
 # Solline
 
+@AGENTS.md
+
 Cliente de desktop pessoal para agentes de código (Claude Code, Codex e agentes ACP). Projeto pessoal: nada de trabalho entra aqui.
 A visão e os próximos marcos estão em `docs/visao.md`; o plano multi-agente (feito) em `docs/plano.md`. As decisões estão em
 `DECISIONS.md`.
