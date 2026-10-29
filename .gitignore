@@ -12,3 +12,5 @@ qa-evidence/
 .eslintcache
 .DS_Store
 Thumbs.db
+.aider*
+.claude/worktrees/
