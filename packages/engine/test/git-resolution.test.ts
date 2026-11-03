@@ -5,13 +5,17 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { collectProject } from '../src/spaces/context.ts';
 import { gitCommitExists } from '../src/memory/evidence.ts';
+import { WorktreeManager } from '../src/worktrees/worktrees.ts';
 
 const git = vi.hoisted(() => ({
   resolve: vi.fn(),
   exec: vi.fn(),
   execAsync: vi.fn(),
 }));
-vi.mock('../src/checkpoints/git.ts', () => ({ resolveGit: git.resolve }));
+vi.mock('../src/checkpoints/git.ts', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('../src/checkpoints/git.ts');
+  return { ...actual, resolveGit: git.resolve };
+});
 vi.mock('node:child_process', () => ({
   execFile: Object.assign(git.exec, { [promisify.custom]: git.execAsync }),
 }));
@@ -78,4 +82,29 @@ it('rejects commit evidence without launching a bare git when resolution fails',
 it('rejects commit evidence when the resolved git reports an error', async () => {
   git.exec.mockImplementation((_file, _args, _options, callback) => callback(new Error('missing')));
   await expect(gitCommitExists(root, 'abc1234')).resolves.toBe(false);
+});
+
+it('runs worktree git through the resolved executable', async () => {
+  git.exec.mockImplementation((_file, _args, _options, callback) => callback(null, '', ''));
+  const manager = new WorktreeManager({ root });
+  await manager.repoOf(root);
+  expect(git.exec).toHaveBeenCalledWith(
+    executable,
+    expect.arrayContaining(['rev-parse', '--show-toplevel']),
+    expect.objectContaining({ cwd: root }),
+    expect.any(Function),
+  );
+});
+
+it('does not launch a bare git for worktrees when resolution fails', async () => {
+  git.resolve.mockReturnValue(null);
+  const manager = new WorktreeManager({ root });
+  await expect(manager.repoOf(root)).resolves.toBeNull();
+  expect(git.exec).not.toHaveBeenCalled();
+});
+
+it('does not launch a bare git when a worktree is given a relative executable', async () => {
+  const manager = new WorktreeManager({ root, git: 'git' });
+  await expect(manager.repoOf(root)).resolves.toBeNull();
+  expect(git.exec).not.toHaveBeenCalled();
 });

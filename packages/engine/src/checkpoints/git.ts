@@ -254,11 +254,17 @@ export class ShadowGit {
   }
 }
 
-/** O git existe nesta máquina? Devolve a versão ou null. */
-export async function gitVersion(executable = 'git'): Promise<string | null> {
+/** O git existe nesta máquina? Devolve a versão ou null. Sem caminho, usa resolveGit(); um nome solto não corre. */
+export async function gitVersion(executable?: string): Promise<string | null> {
+  const git = executable ?? resolveGit();
+  if (!git || !path.isAbsolute(git)) return null;
   try {
-    const git = new ShadowGit({ gitDir: process.cwd(), workTree: process.cwd(), executable });
-    return await git.text(['--version'], { bare: true });
+    const shadow = new ShadowGit({
+      gitDir: process.cwd(),
+      workTree: process.cwd(),
+      executable: git,
+    });
+    return await shadow.text(['--version'], { bare: true });
   } catch {
     return null;
   }
