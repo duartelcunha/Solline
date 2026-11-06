@@ -1009,3 +1009,12 @@ import/export` entram.
   o Claude real a ligar os servidores do catálogo por `setMcpServers` antes da primeira mensagem (e o que
   acontece se um falhar); se o Codex guarda a config do `thread/start` (com os segredos e o token do
   cérebro) nos ficheiros dele; o Claude em `plan` com regras "allow" de Bash numa consulta.
+
+## 2026-11-06: as quatro decisões do M6
+
+O Duarte fechou as quatro. O plano das regras está em `docs/PLANO-regras-nativas.md`.
+
+- **Regras.** Sai a importação e a exportação de `CLAUDE.md` e `AGENTS.md`. A Solline não lê esses ficheiros (nem o revisor). O Claude mantém `settingSources` de projeto nos de confiança, para hooks e permissões do `.claude/`, e recebe `settings.claudeMdExcludes` (`**/CLAUDE.md`, `**/CLAUDE.local.md`, `**/AGENTS.md`, `**/.claude/rules/**`). O `~/.claude/CLAUDE.md` também deixa de entrar. O Codex 0.163 leva `project_doc_max_bytes: 0` e `project_doc_fallback_filenames: []` no thread; o `config.toml` continua. As regras vivem no estado da Solline, gerais e por projeto, com o interruptor, até 30 desfazer e `rules.preview`. Uma importação antiga (v1 com `importedFrom`) migra com o texto intacto e as regras desse projeto desligadas, porque o estado não distinguia a regra do ficheiro da que foi escrita na app a seguir.
+- **Bash nas consultas.** `READ_ONLY_DISALLOWED` inclui `Bash`. O SDK trata `disallowedTools` como bloqueio da ferramenta, não só do cartão. O teste do adaptador confirma a opção numa sessão `readOnly`. Não houve smoke com o Claude real: neste ambiente o binário não tem sessão. Não se passou a `settingSources: []`, que tiraria também os hooks e as permissões do utilizador.
+- **Testemunho.** `handoff` recusa uma consulta. «Passar a…» não aparece. Bifurcar fica como estava: a interface já o desliga e o motor falha sem checkpoint.
+- **Memórias externas.** `memory.approve` com mais de um id e alguma externa falha antes de mudar o que quer que seja. Uma de cada vez continua.

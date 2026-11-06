@@ -5,6 +5,7 @@ import { withTimeout } from '../adapters/shared/turns.ts';
 import { openCodexAccount } from '../adapters/codex/account.ts';
 import { REVIEWED_CODEX_VERSION, resolveCodexExecutable } from '../adapters/codex/executable.ts';
 import { assertNoMcp, noMcpConfig } from '../adapters/codex/no-mcp.ts';
+import { NO_PROJECT_DOC } from '../adapters/codex/project-doc.ts';
 import { initializeCodex, spawnCodex, type CodexTransport } from '../adapters/codex/transport.ts';
 import type { CodexExecutable } from '../adapters/codex/executable.ts';
 import type { GetAccountResponse } from '../adapters/codex/protocol/v2/GetAccountResponse';
@@ -187,7 +188,7 @@ export function codexReviewer(options: CodexReviewerOptions): Reviewer {
           developerInstructions: RULES,
           ephemeral: true,
           // Sem MCP do utilizador: o sandbox não os limita e um diff podia mandar chamá-los.
-          config: await noMcpConfig(peer, input.cwd),
+          config: { ...(await noMcpConfig(peer, input.cwd)), ...NO_PROJECT_DOC },
         };
         const started = await peer.request<ThreadStartResponse>(
           'thread/start',

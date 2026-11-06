@@ -85,7 +85,7 @@ describe('servidores MCP por sessão', () => {
       origin: { kind: 'ask', sessionId: parent.id },
     });
     expect(fakes[1]!.rawOptions().disallowedTools).toEqual(
-      expect.arrayContaining(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']),
+      expect.arrayContaining(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash']),
     );
     expect(fakes[0]!.rawOptions().disallowedTools).toBeUndefined();
     await m.disposeAll();
@@ -275,6 +275,8 @@ describe('servidores MCP por sessão no Codex', () => {
     const start = server.received.find((msg) => msg.method === 'thread/start');
     const config = (start?.params as { config?: Record<string, unknown> }).config;
     expect(config).toEqual({
+      project_doc_max_bytes: 0,
+      project_doc_fallback_filenames: [],
       'mcp_servers.docs': {
         command: 'C:/node/node.exe',
         args: ['runner.mjs'],
@@ -295,7 +297,9 @@ describe('servidores MCP por sessão no Codex', () => {
     const { m, server } = codexManager();
     await m.create(codex);
     const start = server.received.find((msg) => msg.method === 'thread/start');
-    expect(start?.params).not.toHaveProperty('config');
+    expect(start?.params).toMatchObject({
+      config: { project_doc_max_bytes: 0, project_doc_fallback_filenames: [] },
+    });
     await m.disposeAll();
   });
 

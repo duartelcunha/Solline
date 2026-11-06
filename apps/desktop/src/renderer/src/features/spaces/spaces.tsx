@@ -107,16 +107,14 @@ export function Spaces() {
               </span>
             ) : null}
           </button>
-          {projectId !== null ? (
-            <button
-              type="button"
-              aria-pressed={panel === 'rules'}
-              onClick={() => setPanel('rules')}
-              data-testid="space-tab-rules"
-            >
-              Regras
-            </button>
-          ) : null}
+          <button
+            type="button"
+            aria-pressed={panel === 'rules'}
+            onClick={() => setPanel('rules')}
+            data-testid="space-tab-rules"
+          >
+            Regras
+          </button>
           <button
             type="button"
             aria-pressed={panel === 'tools'}
@@ -134,8 +132,8 @@ export function Spaces() {
       ) : null}
       {panel === 'memory' ? (
         <SpaceMemories projectId={projectId} />
-      ) : panel === 'rules' && projectId !== null ? (
-        <RulesEditor key={projectId} projectId={projectId} />
+      ) : panel === 'rules' ? (
+        <RulesEditor key={projectId ?? 'global'} projectId={projectId} />
       ) : panel === 'tools' ? (
         projectId === null ? (
           <McpCatalog />

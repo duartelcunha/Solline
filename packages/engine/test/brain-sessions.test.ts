@@ -310,7 +310,12 @@ describe('o cérebro nas sessões: Codex e ACP, pelo shim', () => {
         params: { config: Record<string, unknown> };
       }
     ).params.config;
-    expect(Object.keys(config)).toEqual(['mcp_servers.docs', 'mcp_servers.solline']);
+    expect(Object.keys(config)).toEqual([
+      'project_doc_max_bytes',
+      'project_doc_fallback_filenames',
+      'mcp_servers.docs',
+      'mcp_servers.solline',
+    ]);
     expect(session.mcpServers).toEqual(['docs']);
   });
 

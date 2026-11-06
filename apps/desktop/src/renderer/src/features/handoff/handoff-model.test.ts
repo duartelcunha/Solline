@@ -107,11 +107,17 @@ describe('diálogo "Passar a…"', () => {
 
 describe('quando se pode passar o testemunho', () => {
   it('parada, sim; a trabalhar ou já passada, não', () => {
-    expect(handoffGate({ state: 'idle' })).toEqual({ enabled: true, reason: null });
+    expect(handoffGate({ state: 'idle' })).toEqual({ enabled: true, hidden: false, reason: null });
     expect(handoffGate({ state: 'running' }).reason).toBe('O agente ainda está a trabalhar');
+    expect(handoffGate({ state: 'running' }).hidden).toBe(false);
     expect(handoffGate({ state: 'idle', handedTo: 'b' }).reason).toBe(
       'Esta sessão já passou o testemunho',
     );
+    expect(handoffGate({ state: 'idle', origin: { kind: 'ask', sessionId: 'a' } })).toEqual({
+      enabled: false,
+      hidden: true,
+      reason: 'Uma consulta não passa o testemunho.',
+    });
   });
 });
 

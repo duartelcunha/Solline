@@ -142,16 +142,27 @@ export function draftNote(
   return parts.length ? parts.join(' ') : null;
 }
 
-/** Pode passar-se o testemunho desta sessão agora? Senão, porquê. */
-export function handoffGate(session: Pick<SessionInfo, 'state' | 'handedTo'>): {
+/** Pode passar-se o testemunho desta sessão agora? Senão, porquê. Uma consulta não passa. */
+export function handoffGate(
+  session: Pick<SessionInfo, 'state' | 'handedTo' | 'origin'>,
+): {
   enabled: boolean;
+  /** A consulta não mostra o gesto. */
+  hidden: boolean;
   reason: string | null;
 } {
-  if (session.handedTo) return { enabled: false, reason: 'Esta sessão já passou o testemunho' };
+  if (session.origin?.kind === 'ask')
+    return {
+      enabled: false,
+      hidden: true,
+      reason: 'Uma consulta não passa o testemunho.',
+    };
+  if (session.handedTo)
+    return { enabled: false, hidden: false, reason: 'Esta sessão já passou o testemunho' };
   const busy: SessionState[] = ['starting', 'running', 'needs-you'];
   if (busy.includes(session.state))
-    return { enabled: false, reason: 'O agente ainda está a trabalhar' };
-  return { enabled: true, reason: null };
+    return { enabled: false, hidden: false, reason: 'O agente ainda está a trabalhar' };
+  return { enabled: true, hidden: false, reason: null };
 }
 
 export interface LineageLine {

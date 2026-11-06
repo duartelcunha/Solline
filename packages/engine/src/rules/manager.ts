@@ -1,104 +1,123 @@
 import { randomUUID } from 'node:crypto';
 import {
+  RULES_HISTORY,
   RULES_PER_PROJECT,
-  RULE_MAX_TEXT,
   RulesState,
   emptyRules,
   type CommandPayload,
-  type NativeRuleFile,
   type ProjectRule,
-  type ProjectRules,
   type ProjectRulesView,
-  type RulesImportResult,
+  type RulesPreview,
+  type RulesState as RulesStateType,
   type RulesWarning,
 } from '@solline/protocol';
-import type { NativeFile } from './files.ts';
-import { INDEX_TITLE, lengthWarning, nativeWarning } from './render.ts';
-import { splitSections } from './sections.ts';
+import { CRAFT_RULES } from '../quality/craft.ts';
+import { lengthWarning, renderStart } from './render.ts';
 
 interface Options {
   /** Guarda o estado novo (no motor, vai para o diário). Se falhar, o estado não muda. */
-  save(state: RulesState): void;
+  save(state: RulesStateType): void;
 }
 
-/** Duas regras iguais a menos de maiúsculas e espaços são a mesma. */
-function fingerprint(title: string, text: string): string {
-  const flat = (value: string) => value.replace(/\s+/g, ' ').trim().toLowerCase();
-  return `${flat(title)}\0${flat(text)}`;
+interface Snapshot {
+  global: ProjectRule[];
+  projects: Record<string, ProjectRule[]>;
 }
 
-/** Só `@ficheiro` (importações do Claude Code): não é uma regra. */
-function onlyImports(text: string): boolean {
-  return text.split('\n').every((line) => line.trim() === '' || /^@\S+$/.test(line.trim()));
-}
-
-function warningsOf(project: Pick<ProjectRules, 'rules' | 'importedFrom'>): RulesWarning[] {
-  return [lengthWarning(project.rules), nativeWarning(project.importedFrom)].filter(
-    (warning): warning is RulesWarning => warning !== undefined,
-  );
+function warningsOf(rules: readonly ProjectRule[]): RulesWarning[] {
+  const warning = lengthWarning(rules);
+  return warning ? [warning] : [];
 }
 
 /**
- * As regras de cada projeto. Escritas pelo utilizador; este gestor nunca inventa conteúdo. O estado
- * inteiro viaja como o dos Espaços (um evento com tudo) e fica no diário de recuperação.
+ * Regras gerais e de cada projeto. Escritas pelo utilizador; este gestor nunca inventa conteúdo.
+ * O estado inteiro viaja num evento e fica no diário, fora da pasta do projeto.
  */
 export class RulesManager {
   readonly #options: Options;
-  #state: RulesState = emptyRules();
+  #state: RulesStateType = emptyRules();
 
   constructor(options: Options) {
     this.#options = options;
   }
 
-  snapshot(): RulesState {
+  snapshot(): RulesStateType {
     return structuredClone(this.#state);
   }
 
-  restore(saved: RulesState | undefined): void {
-    this.#state = saved ? RulesState.parse(structuredClone(saved)) : emptyRules();
+  restore(saved: unknown): void {
+    this.#state = saved ? RulesState.parse(saved) : emptyRules();
+    this.#recompute();
   }
 
-  #commit(next: RulesState, projectId: string): void {
-    const project = next.projects[projectId];
-    if (project) project.warnings = warningsOf(project);
+  #recompute(): void {
+    this.#state.global.warnings = warningsOf(this.#state.global.rules);
+    for (const project of Object.values(this.#state.projects))
+      project.warnings = warningsOf(project.rules);
+  }
+
+  #bucket(next: RulesStateType, projectId: string | null) {
+    if (projectId === null) return next.global;
+    return (next.projects[projectId] ??= { rules: [], warnings: [] });
+  }
+
+  #commit(next: RulesStateType): void {
+    next.global.warnings = warningsOf(next.global.rules);
+    for (const project of Object.values(next.projects)) project.warnings = warningsOf(project.rules);
     next.revision = this.#state.revision + 1;
     const parsed = RulesState.parse(next);
     this.#options.save(parsed);
     this.#state = parsed;
   }
 
-  #project(next: RulesState, projectId: string): ProjectRules {
-    return (next.projects[projectId] ??= { rules: [], importedFrom: [], warnings: [] });
+  #remember(next: RulesStateType): void {
+    const entry: Snapshot = {
+      global: structuredClone(this.#state.global.rules),
+      projects: Object.fromEntries(
+        Object.entries(this.#state.projects).map(([id, bucket]) => [id, structuredClone(bucket.rules)]),
+      ),
+    };
+    next.history = [...this.#state.history, entry].slice(-RULES_HISTORY);
   }
 
-  view(projectId: string): ProjectRulesView {
-    const project = this.#state.projects[projectId];
-    return structuredClone({
+  view(projectId: string | null): ProjectRulesView {
+    const bucket = projectId === null ? this.#state.global : this.#state.projects[projectId];
+    return {
       projectId,
-      rules: project?.rules ?? [],
-      importedFrom: project?.importedFrom ?? [],
-      warnings: project?.warnings ?? [],
-    });
+      rules: structuredClone(bucket?.rules ?? []),
+      warnings: structuredClone(bucket?.warnings ?? []),
+      canUndo: this.#state.history.length > 0,
+    };
   }
 
-  /** As regras ativas do projeto (o que os agentes recebem). */
+  /** Regras ativas que um agente deste projeto recebe: gerais primeiro, depois as do projeto. */
+  deliver(projectId: string | null): ProjectRule[] {
+    const global = this.#state.global.rules.filter((rule) => rule.enabled);
+    const own =
+      projectId === null
+        ? []
+        : (this.#state.projects[projectId]?.rules ?? []).filter((rule) => rule.enabled);
+    return structuredClone([...global, ...own]);
+  }
+
+  /** As ativas do projeto e as gerais (a ferramenta de listar). */
   enabled(projectId: string): ProjectRule[] {
-    return structuredClone(
-      (this.#state.projects[projectId]?.rules ?? []).filter((rule) => rule.enabled),
-    );
+    return this.deliver(projectId);
   }
 
   get(projectId: string, id: string): ProjectRule | undefined {
-    const rule = this.#state.projects[projectId]?.rules.find((item) => item.id === id);
+    const own = this.#state.projects[projectId]?.rules.find((rule) => rule.id === id);
+    const global = this.#state.global.rules.find((rule) => rule.id === id);
+    const rule = own ?? global;
     return rule ? structuredClone(rule) : undefined;
   }
 
   save(input: CommandPayload<'rules.save'>): ProjectRulesView {
     const next = this.snapshot();
-    const project = this.#project(next, input.projectId);
-    const existing = input.id ? project.rules.find((rule) => rule.id === input.id) : undefined;
+    const bucket = this.#bucket(next, input.projectId);
+    const existing = input.id ? bucket.rules.find((rule) => rule.id === input.id) : undefined;
     if (input.id && !existing) throw new Error('Esta regra já não existe.');
-    if (!existing && project.rules.length >= RULES_PER_PROJECT)
+    if (!existing && bucket.rules.length >= RULES_PER_PROJECT)
       throw new Error(`Um projeto aceita até ${RULES_PER_PROJECT} regras.`);
     const now = Date.now();
     if (existing) {
@@ -110,8 +129,8 @@ export class RulesManager {
         updatedAt: now,
       });
     } else {
-      project.rules.push({
-        id: this.#newId(project),
+      bucket.rules.push({
+        id: this.#newId(next),
         projectId: input.projectId,
         title: input.title,
         text: input.text,
@@ -121,95 +140,51 @@ export class RulesManager {
         updatedAt: now,
       });
     }
-    this.#commit(next, input.projectId);
+    this.#remember(next);
+    this.#commit(next);
     return this.view(input.projectId);
   }
 
-  delete(projectId: string, id: string): ProjectRulesView {
+  delete(projectId: string | null, id: string): ProjectRulesView {
     const next = this.snapshot();
-    const project = this.#project(next, projectId);
-    if (!project.rules.some((rule) => rule.id === id)) return this.view(projectId);
-    project.rules = project.rules.filter((rule) => rule.id !== id);
-    this.#commit(next, projectId);
+    const bucket = this.#bucket(next, projectId);
+    if (!bucket.rules.some((rule) => rule.id === id)) return this.view(projectId);
+    bucket.rules = bucket.rules.filter((rule) => rule.id !== id);
+    this.#remember(next);
+    this.#commit(next);
     return this.view(projectId);
   }
 
-  /** Importa as secções dos ficheiros lidos: uma regra por `##`, sem repetir as que já existem. */
-  importFiles(projectId: string, files: readonly NativeFile[]): RulesImportResult {
+  undo(projectId: string | null): ProjectRulesView {
+    const entry = this.#state.history.at(-1);
+    if (!entry) return this.view(projectId);
     const next = this.snapshot();
-    const project = this.#project(next, projectId);
-    const known = new Set(project.rules.map((rule) => fingerprint(rule.title, rule.text)));
-    const imported: ProjectRule[] = [];
-    const skipped: RulesImportResult['skipped'] = [];
-    const handWritten = new Set<NativeRuleFile>(project.importedFrom);
-    const now = Date.now();
-    for (const file of files) {
-      if (file.state !== 'read' || file.text === undefined) continue;
-      let contributed = false;
-      for (const section of splitSections(file.text, file.name)) {
-        if (section.title === INDEX_TITLE) continue;
-        if (!section.text || onlyImports(section.text)) {
-          skipped.push({ title: section.title, reason: 'empty' });
-          continue;
-        }
-        if (section.text.length > RULE_MAX_TEXT) {
-          skipped.push({ title: section.title, reason: 'too-long' });
-          continue;
-        }
-        const key = fingerprint(section.title, section.text);
-        if (known.has(key)) {
-          skipped.push({ title: section.title, reason: 'duplicate' });
-          contributed = true;
-          continue;
-        }
-        if (project.rules.length >= RULES_PER_PROJECT) {
-          skipped.push({ title: section.title, reason: 'limit' });
-          continue;
-        }
-        known.add(key);
-        contributed = true;
-        const rule: ProjectRule = {
-          id: this.#newId(project),
-          projectId,
-          title: section.title,
-          text: section.text,
-          globs: [],
-          enabled: true,
-          createdAt: now,
-          updatedAt: now,
-        };
-        project.rules.push(rule);
-        imported.push(rule);
-      }
-      if (contributed && file.handWritten) handWritten.add(file.name);
-    }
-    project.importedFrom = [...handWritten].sort();
-    const changed =
-      imported.length > 0 || project.importedFrom.length !== this.#importedCount(projectId);
-    if (changed) this.#commit(next, projectId);
-    return {
-      imported: structuredClone(imported),
-      skipped,
-      files: files.map((file) => ({ name: file.name, state: file.state })),
-    };
+    next.history = this.#state.history.slice(0, -1);
+    next.global = { rules: structuredClone(entry.global), warnings: [] };
+    next.projects = Object.fromEntries(
+      Object.entries(entry.projects).map(([id, rules]) => [id, { rules: structuredClone(rules), warnings: [] }]),
+    );
+    this.#commit(next);
+    return this.view(projectId);
   }
 
-  #importedCount(projectId: string): number {
-    return this.#state.projects[projectId]?.importedFrom.length ?? 0;
+  /** O texto que o arranque manda, o mesmo que a sessão usa. */
+  preview(projectId: string | null): RulesPreview {
+    const rules = this.deliver(projectId);
+    const instructions = renderStart(rules, { target: 'instructions', readTool: true });
+    const context = renderStart(rules, { target: 'context', readTool: false });
+    const withCraft = instructions ? `${CRAFT_RULES}\n\n${instructions}` : CRAFT_RULES;
+    return { claude: withCraft, codex: withCraft, acp: context ?? '' };
   }
 
-  /** Depois de exportar, os ficheiros da pasta são os da Solline: o aviso de duplicação acaba. */
-  exported(projectId: string): void {
-    if (this.#importedCount(projectId) === 0) return;
-    const next = this.snapshot();
-    this.#project(next, projectId).importedFrom = [];
-    this.#commit(next, projectId);
-  }
-
-  #newId(project: ProjectRules): string {
+  #newId(state: RulesStateType): string {
+    const ids = new Set([
+      ...state.global.rules.map((rule) => rule.id),
+      ...Object.values(state.projects).flatMap((bucket) => bucket.rules.map((rule) => rule.id)),
+    ]);
     for (;;) {
       const id = randomUUID().slice(0, 8);
-      if (!project.rules.some((rule) => rule.id === id)) return id;
+      if (!ids.has(id)) return id;
     }
   }
 }

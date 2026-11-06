@@ -90,8 +90,10 @@ export function cerebroRules(projectId: string): RulesState {
     updatedAt: at,
   });
   return RulesState.parse({
-    version: 1,
+    version: 2,
     revision: 1,
+    global: { rules: [], warnings: [] },
+    history: [],
     projects: {
       [projectId]: {
         rules: [
@@ -119,13 +121,7 @@ export function cerebroRules(projectId: string): RulesState {
             false,
           ),
         ],
-        importedFrom: ['CLAUDE.md'],
-        warnings: [
-          {
-            kind: 'native',
-            text: 'Importaste regras de CLAUDE.md. Se o ficheiro continuar na pasta, o agente pode ver as regras duas vezes.',
-          },
-        ],
+        warnings: [],
       },
     },
   });

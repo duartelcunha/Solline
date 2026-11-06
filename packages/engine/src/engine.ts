@@ -1,4 +1,3 @@
-import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -47,7 +46,6 @@ import { Brain, sourceShimPath, type BrainOptions } from './brain/brain.ts';
 import { contextTool } from './brain/tools/context.ts';
 import { ConsultManager } from './consult/manager.ts';
 import { consultTools } from './consult/tools.ts';
-import { exportRules, readNativeFiles } from './rules/files.ts';
 import { RulesManager } from './rules/manager.ts';
 import { rulesTools } from './rules/tools.ts';
 import { MemoryService } from './memory/manager.ts';
@@ -499,18 +497,8 @@ export class Engine {
       'rules.list': async (p) => this.rules.view(p.projectId),
       'rules.save': async (p) => this.rules.save(p),
       'rules.delete': async (p) => this.rules.delete(p.projectId, p.id),
-      'rules.importNow': async (p) => {
-        await assertFolder(p.cwd);
-        return this.rules.importFiles(p.projectId, await readNativeFiles(p.cwd, p.path));
-      },
-      'rules.exportNow': async (p) => {
-        await assertFolder(p.cwd);
-        const rules = this.rules.enabled(p.projectId);
-        if (rules.length === 0) throw new Error('Não há regras ativas para exportar.');
-        const result = await exportRules(p.cwd, rules);
-        if ('written' in result) this.rules.exported(p.projectId);
-        return result;
-      },
+      'rules.undo': async (p) => this.rules.undo(p.projectId),
+      'rules.preview': async (p) => this.rules.preview(p.projectId),
       'engine.snapshot': async () => {
         // Os pedidos de consulta à espera só vão a quem liga agora; nunca para o diário.
         const consults = this.consult.pending();
@@ -898,19 +886,9 @@ export class Engine {
   }
 }
 
-/** A pasta do projeto vem do main, mas só se escreve numa pasta absoluta que existe. */
-async function assertFolder(cwd: string): Promise<void> {
-  const isFolder =
-    path.isAbsolute(cwd) &&
-    (await stat(cwd).then(
-      (s) => s.isDirectory(),
-      () => false,
-    ));
-  if (!isFolder) throw new Error('A pasta do projeto já não existe.');
-}
-
 const READ_ONLY = new Set<EngineCommandName>([
   'rules.list',
+  'rules.preview',
   'spaces.snapshot',
   'spaces.syncProjects',
   'engine.ping',

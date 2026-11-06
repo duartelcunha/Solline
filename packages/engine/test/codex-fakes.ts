@@ -283,10 +283,27 @@ export function fakeCodexServer(options: FakeCodexOptions = {}) {
 }
 
 /**
- * Reproduz uma gravação real: espera pelo que o adaptador manda (pela ordem gravada) e devolve
- * o que o Codex respondeu, trocando os ids dos pedidos pelos do adaptador.
+ * As gravações foram feitas no Windows e incluem `windowsSandbox/readiness`. Fora do Windows o
+ * adaptador não pede isso; deixar o par na gravação prende o replay à espera de um pedido que
+ * não chega.
  */
+function forThisPlatform(records: CodexRecord[]): CodexRecord[] {
+  if (process.platform === 'win32') return records;
+  const dropped = new Set<unknown>();
+  for (const record of records) {
+    if (record.dir === 'out' && record.msg.method === 'windowsSandbox/readiness')
+      dropped.add(record.msg.id);
+  }
+  if (dropped.size === 0) return records;
+  return records.filter((record) => {
+    if (record.msg.method === 'windowsSandbox/readiness') return false;
+    return !(record.dir === 'in' && record.msg.method === undefined && dropped.has(record.msg.id));
+  });
+}
+
+/** Espera pelo que o adaptador manda, pela ordem gravada, e devolve o que o Codex respondeu. */
 export function replayCodex(records: CodexRecord[]) {
+  const script = forThisPlatform(records);
   const fromServer = new PassThrough();
   const toServer = new PassThrough();
   const received: Record<string, unknown>[] = [];
@@ -297,8 +314,8 @@ export function replayCodex(records: CodexRecord[]) {
   let pending: Record<string, unknown>[] = [];
 
   function advance(): void {
-    while (cursor < records.length) {
-      const record = records[cursor]!;
+    while (cursor < script.length) {
+      const record = script[cursor]!;
       if (record.dir === 'out') {
         const want = record.msg;
         const index = pending.findIndex((msg) =>
@@ -335,7 +352,7 @@ export function replayCodex(records: CodexRecord[]) {
   return {
     transport: () => transport,
     received,
-    done: () => cursor >= records.length,
+    done: () => cursor >= script.length,
     reset: () => {
       pending = [];
     },

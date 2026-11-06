@@ -607,19 +607,19 @@ describe('segunda opinião no fim de cada turno', { timeout: 60_000 }, () => {
       expect(quality(id)!.review.trigger).toBe('bring');
     });
 
-    it('as regras do projeto só vão para o revisor em projetos de confiança', async () => {
+    it('o revisor não lê o CLAUDE.md da pasta, com ou sem confiança', async () => {
       await writeFile(path.join(project, 'CLAUDE.md'), 'Commits em pt-PT.\n');
       const seen: Parameters<Reviewer>[0][] = [];
       makeManager(true, async (input) => (seen.push(input), []));
       const id = await startSession();
       await turn(id, 'escreve auth.txt=v1');
       await waitFor(() => quality(id)?.review.state === 'done', 10_000);
-      expect(seen[0]!.rules).toContain('Commits em pt-PT.');
+      expect(seen[0]!.rules ?? '').not.toContain('Commits em pt-PT.');
 
       manager.setProjectTrust('p', false);
       await turn(id, 'escreve auth.txt=v2');
       await waitFor(() => seen.length === 2, 10_000);
-      expect(seen[1]!.rules).toBeUndefined();
+      expect(seen[1]!.rules ?? '').not.toContain('Commits em pt-PT.');
     });
 
     it('cada sessão é revista pelo revisor que o escolhedor der ao agente dela', async () => {

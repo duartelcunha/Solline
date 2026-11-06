@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ShadowGit, resolveGit } from '../src/checkpoints/git.ts';
+import { ShadowGit, gitVersion, resolveGit } from '../src/checkpoints/git.ts';
 import { CheckpointStore } from '../src/checkpoints/store.ts';
 import type { SessionCheckpoints } from '../src/checkpoints/session-checkpoints.ts';
 import { headerPath } from '../src/checkpoints/unified-diff.ts';
@@ -482,5 +482,9 @@ describe('qual git corre', () => {
 
   it('sem git no PATH não inventa um', () => {
     expect(resolveGit({ PATH: '' }, () => false)).toBeNull();
+  });
+
+  it('gitVersion não corre um git pelo nome', async () => {
+    await expect(gitVersion('git')).resolves.toBeNull();
   });
 });

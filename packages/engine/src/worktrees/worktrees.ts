@@ -81,11 +81,13 @@ function gitEnv(): NodeJS.ProcessEnv {
 
 export class WorktreeManager {
   readonly #root: string;
-  readonly #git: string;
+  /** Caminho absoluto de resolveGit(), ou null. Nunca o nome solto `git`. */
+  readonly #git: string | null;
 
   constructor(options: { root: string; git?: string }) {
     this.#root = options.root;
-    this.#git = options.git ?? resolveGit() ?? 'git';
+    const git = options.git ?? resolveGit();
+    this.#git = git && path.isAbsolute(git) ? git : null;
   }
 
   get root(): string {
@@ -98,9 +100,12 @@ export class WorktreeManager {
     allowFail = false,
     extraEnv: Record<string, string> = {},
   ): Promise<{ code: number; out: string }> {
+    const git = this.#git;
+    if (!git)
+      return Promise.reject(new Error('Não encontrei o git: instala o Git para ter worktrees'));
     return new Promise((resolve, reject) => {
       execFile(
-        this.#git,
+        git,
         ['-c', 'core.quotepath=false', ...args],
         {
           cwd,
@@ -314,9 +319,12 @@ export class WorktreeManager {
 
   /** Como #run, mas devolve os bytes (o patch volta ao git tal como saiu). */
   async #runBuffer(cwd: string, args: string[], extraEnv: Record<string, string>): Promise<Buffer> {
+    const git = this.#git;
+    if (!git)
+      return Promise.reject(new Error('Não encontrei o git: instala o Git para ter worktrees'));
     return new Promise((resolve, reject) => {
       execFile(
-        this.#git,
+        git,
         ['-c', 'core.quotepath=false', ...args],
         {
           cwd,

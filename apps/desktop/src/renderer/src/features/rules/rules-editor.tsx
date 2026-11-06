@@ -1,24 +1,14 @@
 import { useEffect, useState } from 'react';
-import * as Menu from '@radix-ui/react-dropdown-menu';
-import { ChevronDown, FileDown, FileUp, Info, Pencil, Plus, ScrollText } from 'lucide-react';
-import type {
-  NativeRuleFile,
-  ProjectRule,
-  RulesConflict,
-  RulesImportResult,
-} from '@solline/protocol';
+import { Info, Pencil, Plus, ScrollText, Undo2 } from 'lucide-react';
+import type { ProjectRule, RulesPreview } from '@solline/protocol';
 import { actions } from '../../stores/app.ts';
 import { rulesOf, useRules } from '../../stores/rules.ts';
-import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import {
-  CONFLICT_REASON,
   SIZE_WARN_CHARS,
   SIZE_WARN_LINES,
   alwaysOnSize,
-  conflictFile,
   firstLine,
   globsText,
-  importSummary,
   parseGlobs,
 } from './rules-model.ts';
 
@@ -78,7 +68,7 @@ function RuleForm({
   initial,
   onClose,
 }: {
-  projectId: string;
+  projectId: string | null;
   initial: Draft;
   onClose: () => void;
 }) {
@@ -216,7 +206,7 @@ function RuleRow({ rule, onEdit }: { rule: ProjectRule; onEdit: () => void }) {
     <li
       data-testid="rule-row"
       data-enabled={rule.enabled}
-      className="flex items-start gap-3 border-t border-line py-4 first:border-t-0"
+      className="flex items-start gap-3 rounded-md border border-line bg-surface px-3.5 py-3 shadow-[0_1px_2px_#0000000a]"
     >
       <div className="pt-0.5">
         <Switch
@@ -238,238 +228,215 @@ function RuleRow({ rule, onEdit }: { rule: ProjectRule; onEdit: () => void }) {
         type="button"
         onClick={onEdit}
         aria-label={`Editar a regra ${rule.title}`}
-        className={`min-w-0 flex-1 rounded-sm text-left ${rule.enabled ? '' : 'opacity-60'}`}
+        className="min-w-0 flex-1 rounded-sm text-left"
       >
-        <span className="block truncate text-[13px] font-medium">{rule.title}</span>
-        <span className="mt-0.5 block truncate text-[12.5px] text-muted">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span
+            className={`truncate text-[13.5px] font-medium tracking-[-0.01em] ${rule.enabled ? '' : 'text-muted'}`}
+          >
+            {rule.title}
+          </span>
+          {rule.enabled ? null : (
+            <span className="shrink-0 text-[11px] text-subtle">Desligada</span>
+          )}
+        </span>
+        <span
+          className={`mt-1 block truncate text-[12.5px] leading-snug ${rule.enabled ? 'text-muted' : 'text-subtle'}`}
+        >
           {firstLine(rule.text)}
         </span>
         <span className="mt-2 flex flex-wrap items-center gap-1.5">
           {rule.globs.length === 0 ? (
-            <span className="text-[11px] text-subtle">Vale sempre</span>
+            <span className="rounded-sm bg-surface-sunken px-1.5 py-px text-[11px] text-subtle">
+              Vale sempre
+            </span>
           ) : (
             rule.globs.map((glob) => (
               <code
                 key={glob}
-                className="rounded-sm border border-line bg-surface-sunken px-1.5 py-px font-mono text-[11px]"
+                className="rounded-sm border border-line bg-surface-sunken px-1.5 py-px font-mono text-[11px] text-muted"
               >
                 {glob}
               </code>
             ))
           )}
-          {rule.enabled ? null : <span className="text-[11px] text-subtle">· Desligada</span>}
         </span>
       </button>
-      {/* A linha inteira já edita: o lápis é o sinal visível e fica fora da ordem do teclado. */}
-      <button type="button" className="space-control" aria-hidden tabIndex={-1} onClick={onEdit}>
+      <button
+        type="button"
+        className="space-control space-quiet"
+        aria-hidden
+        tabIndex={-1}
+        onClick={onEdit}
+      >
         <Pencil size={14} />
       </button>
     </li>
   );
 }
 
-export function RulesEditor({ projectId }: { projectId: string }) {
+export function RulesEditor({ projectId }: { projectId: string | null }) {
   const data = useRules((s) => s.data);
   const view = rulesOf(data, projectId);
+  const global = projectId === null ? null : rulesOf(data, null);
   const [editing, setEditing] = useState<string | 'new' | null>(null);
-  const [imported, setImported] = useState<RulesImportResult | null>(null);
-  const [exported, setExported] = useState<string[] | null>(null);
-  const [conflict, setConflict] = useState<RulesConflict | null>(null);
-  const [busy, setBusy] = useState<'import' | 'export' | null>(null);
-  const size = alwaysOnSize(view.rules);
+  const [scope, setScope] = useState<string | null>(projectId);
+  const [preview, setPreview] = useState<RulesPreview | null>(null);
+  const size = alwaysOnSize([...(global?.rules ?? []), ...view.rules]);
 
-  async function importFrom(path?: NativeRuleFile) {
-    setBusy('import');
-    setExported(null);
-    setConflict(null);
-    const result = await actions.importRules(projectId, path);
-    setBusy(null);
-    if (result) setImported(result);
+  async function showPreview() {
+    const text = await actions.previewRules(projectId);
+    if (text) setPreview(text);
   }
 
-  async function exportNow() {
-    setBusy('export');
-    setImported(null);
-    const result = await actions.exportRules(projectId);
-    setBusy(null);
-    if (!result) return;
-    if ('conflict' in result) {
-      setConflict(result.conflict);
-      setExported(null);
-    } else {
-      setConflict(null);
-      // Sem ficheiros escritos, recusaste a confirmação: não há nada a dizer.
-      setExported(result.written.length ? result.written : null);
-    }
-  }
-
-  const draftOf = (rule: ProjectRule): Draft => ({
+  const draftOf = (rule: ProjectRule) => ({
     id: rule.id,
     title: rule.title,
     text: rule.text,
     globs: globsText(rule.globs),
     enabled: rule.enabled,
   });
-  const summary = imported ? importSummary(imported) : null;
-  const conflictName = conflict ? conflictFile(conflict) : null;
+
+  const list = (rules: ProjectRule[], level: string | null) => (
+    <ul className="grid gap-2" data-testid={level === null ? 'rules-global' : 'rules-list'}>
+      {rules.map((rule) =>
+        editing === rule.id ? (
+          <li key={rule.id}>
+            <RuleForm projectId={level} initial={draftOf(rule)} onClose={() => setEditing(null)} />
+          </li>
+        ) : (
+          <RuleRow key={rule.id} rule={rule} onEdit={() => setEditing(rule.id)} />
+        ),
+      )}
+    </ul>
+  );
+
+  const section = (label: string, count: number) => (
+    <div className="mt-6 mb-2 flex items-baseline justify-between gap-3">
+      <h3 className="text-[11px] font-medium tracking-[0.04em] text-subtle uppercase">{label}</h3>
+      <span className="text-[11px] tabular-nums text-subtle">{count}</span>
+    </div>
+  );
+
   return (
-    <section className="space-rules-view max-w-[800px]" aria-label="Regras do projeto">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <section className="space-rules-view max-w-[800px]" aria-label="Regras">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
         <div className="min-w-0">
-          <h2 className="text-sm font-medium">Regras do projeto</h2>
-          <p className="mt-1 text-[12px] text-muted">
-            Curtas e escritas por ti. Chegam a todos os agentes, cada um no seu formato.
+          <h2 className="text-[15px] font-semibold tracking-[-0.015em]">
+            {projectId === null ? 'Regras de todos os projetos' : 'Regras do projeto'}
+          </h2>
+          <p className="mt-1 max-w-[38ch] text-[12.5px] leading-snug text-muted">
+            Escritas por ti e guardadas na Solline. Um commit não as altera.
+          </p>
+          <p
+            className="mt-2 text-[11px] tabular-nums text-subtle"
+            data-testid="rules-size"
+            title={`Acima de ${SIZE_WARN_LINES} linhas ou ${SIZE_WARN_CHARS} caracteres os agentes seguem pior`}
+          >
+            Sempre à vista: {size.lines} linhas · {size.chars} caracteres
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <MenuShell
-            title="Importar de"
-            side="bottom"
-            align="end"
-            trigger={
-              <Menu.Trigger
-                className="space-control"
-                disabled={busy !== null}
-                data-testid="rules-import"
-              >
-                <FileDown size={14} />
-                Importar
-                <ChevronDown size={13} className="text-subtle" />
-              </Menu.Trigger>
-            }
-          >
-            <ActionItem
-              title="CLAUDE.md e AGENTS.md"
-              description="Uma regra por título de segundo nível"
-              onSelect={() => void importFrom()}
-              testId="rules-import-both"
-            />
-            <ActionItem
-              title="Só o CLAUDE.md"
-              onSelect={() => void importFrom('CLAUDE.md')}
-              testId="rules-import-claude"
-            />
-            <ActionItem
-              title="Só o AGENTS.md"
-              onSelect={() => void importFrom('AGENTS.md')}
-              testId="rules-import-agents"
-            />
-          </MenuShell>
+        <div className="flex items-center gap-1 rounded-lg border border-line bg-surface-sunken p-1">
           <button
             type="button"
-            className="space-control"
-            disabled={busy !== null || view.rules.length === 0}
-            onClick={() => void exportNow()}
-            title="Escreve o AGENTS.md e o CLAUDE.md na pasta do projeto"
-            data-testid="rules-export"
+            className="space-control space-quiet"
+            disabled={!view.canUndo}
+            onClick={() => void actions.undoRules(projectId)}
+            data-testid="rules-undo"
           >
-            <FileUp size={14} />
-            Exportar
+            <Undo2 size={14} />
+            Desfazer
+          </button>
+          <button
+            type="button"
+            className="space-control space-quiet"
+            onClick={() => void (preview ? setPreview(null) : showPreview())}
+            data-testid="rules-preview"
+          >
+            {preview ? 'Fechar' : 'O que o agente recebe'}
           </button>
           <button
             type="button"
             className="space-control space-primary"
-            onClick={() => setEditing('new')}
+            onClick={() => {
+              setScope(projectId);
+              setEditing('new');
+            }}
             data-testid="rule-new"
           >
             <Plus size={14} />
             Regra
           </button>
         </div>
-      </div>
+      </header>
 
       <div className="mt-5 grid gap-2.5">
         {view.warnings.map((warning) => (
-          <Notice key={`${warning.kind}-${warning.text}`} testId={`rules-warning-${warning.kind}`}>
+          <Notice key={warning.text} testId="rules-warning-length">
             {warning.text}
           </Notice>
         ))}
-        {summary ? (
-          <div
-            role="status"
-            data-testid="rules-import-result"
-            className="rounded-control border border-line bg-surface px-3 py-2.5 text-[12.5px]"
-          >
-            <p className="font-medium">{summary.headline}</p>
-            {summary.details.length ? (
-              <ul className="mt-1 space-y-0.5 text-muted">
-                {summary.details.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
-        {exported ? (
-          <p
-            role="status"
-            data-testid="rules-export-result"
-            className="rounded-control border border-line bg-surface px-3 py-2.5 text-[12.5px]"
-          >
-            Escrevi {exported.map((path) => path.split(/[\\/]/).at(-1)).join(' e ')} na pasta do
-            projeto.
-          </p>
-        ) : null}
-        {conflict ? (
-          <div
-            role="alert"
-            data-testid="rules-conflict"
-            className="rounded-control border border-danger px-3 py-2.5 text-[12.5px]"
-          >
-            <p className="font-medium text-danger">Não escrevi nada.</p>
-            <p className="mt-1 text-muted">{CONFLICT_REASON[conflict.reason]}</p>
-            <p className="mt-1 font-mono text-[11.5px] break-all text-muted">{conflict.path}</p>
-            {conflictName && conflict.reason !== 'unsafe' ? (
-              <button
-                type="button"
-                className="space-control mt-2.5"
-                onClick={() => void importFrom(conflictName)}
-                data-testid="rules-conflict-import"
-              >
-                Importar o que está no {conflictName}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </div>
 
-      {editing === 'new' ? (
-        <div className="mt-5">
-          <RuleForm projectId={projectId} initial={blank} onClose={() => setEditing(null)} />
+      {preview ? (
+        <div className="mt-4 grid gap-2" data-testid="rules-preview-text">
+          {(
+            [
+              ['Claude', preview.claude],
+              ['Codex', preview.codex],
+              ['ACP', preview.acp],
+            ] as const
+          ).map(([name, text]) => (
+            <div key={name} className="rounded-md border border-line bg-surface">
+              <p className="border-b border-line px-3 py-1.5 text-[11px] font-medium tracking-[0.04em] text-subtle uppercase">
+                {name}
+              </p>
+              <pre className="max-h-48 overflow-auto px-3 py-2.5 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap text-muted">
+                {text || '(nada no arranque)'}
+              </pre>
+            </div>
+          ))}
         </div>
       ) : null}
 
-      {view.rules.length === 0 && editing !== 'new' ? (
-        <div className="space-empty" data-testid="rules-empty">
+      {editing === 'new' ? (
+        <div className="mt-5">
+          <RuleForm
+            projectId={scope}
+            initial={blank}
+            onClose={() => setEditing(null)}
+          />
+        </div>
+      ) : null}
+
+      {global && global.rules.length > 0 ? (
+        <div>
+          {section('Em todos os projetos', global.rules.length)}
+          {list(global.rules, null)}
+        </div>
+      ) : null}
+
+      {projectId !== null ? (
+        view.rules.length === 0 && editing !== 'new' && !global?.rules.length ? (
+          <div className="space-empty mt-6 rounded-md border border-dashed border-line" data-testid="rules-empty">
+            <ScrollText size={30} strokeWidth={1} aria-hidden />
+            <p>Ainda sem regras.</p>
+            <span>Uma regra curta, escrita por ti, vale mais do que um ficheiro comprido.</span>
+          </div>
+        ) : (
+          <div>
+            {section('Neste projeto', view.rules.length)}
+            {list(view.rules, projectId)}
+          </div>
+        )
+      ) : view.rules.length === 0 && editing !== 'new' ? (
+        <div className="space-empty mt-6 rounded-md border border-dashed border-line" data-testid="rules-empty">
           <ScrollText size={30} strokeWidth={1} aria-hidden />
-          <p>Ainda sem regras.</p>
-          <span>Uma regra curta, escrita por ti, vale mais do que um ficheiro comprido.</span>
+          <p>Ainda sem regras gerais.</p>
+          <span>Valem em todos os projetos, até as desligares.</span>
         </div>
       ) : (
-        <>
-          <ul className="mt-5" data-testid="rules-list">
-            {view.rules.map((rule) =>
-              editing === rule.id ? (
-                <li key={rule.id} className="py-3">
-                  <RuleForm
-                    projectId={projectId}
-                    initial={draftOf(rule)}
-                    onClose={() => setEditing(null)}
-                  />
-                </li>
-              ) : (
-                <RuleRow key={rule.id} rule={rule} onEdit={() => setEditing(rule.id)} />
-              ),
-            )}
-          </ul>
-          <p
-            className="mt-4 text-[11.5px] text-subtle tabular-nums"
-            data-testid="rules-size"
-            title={`Acima de ${SIZE_WARN_LINES} linhas ou ${SIZE_WARN_CHARS} caracteres os agentes seguem pior`}
-          >
-            Sempre à vista dos agentes: {size.lines} linhas · {size.chars} caracteres
-          </p>
-        </>
+        list(view.rules, null)
       )}
     </section>
   );

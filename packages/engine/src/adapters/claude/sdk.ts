@@ -101,8 +101,19 @@ export function toEffortLevel(id: string): EffortLevel {
 
 const CONTROL_TIMEOUT_MS = 15_000;
 const START_TIMEOUT_MS = 90_000;
-/** As ferramentas que só escrevem ficheiros: fora de uma sessão só de leitura. */
-export const READ_ONLY_DISALLOWED = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const;
+/** As ferramentas que só escrevem ficheiros, e o Bash: fora de uma sessão só de leitura. */
+export const READ_ONLY_DISALLOWED = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash'] as const;
+
+/**
+ * Memória da pasta (CLAUDE.md, AGENTS.md, regras em .claude/rules) não entra nas sessões.
+ * Os hooks e as permissões do .claude/ ficam, porque settingSources continua a carregar o projeto.
+ */
+export const CLAUDE_MD_EXCLUDES = [
+  '**/CLAUDE.md',
+  '**/CLAUDE.local.md',
+  '**/AGENTS.md',
+  '**/.claude/rules/**',
+] as const;
 const STDERR_LIMIT = 4_000;
 
 export const CRASH_MESSAGE = 'A ligação ao Claude caiu. A conversa está guardada: podes retomar.';
@@ -538,6 +549,9 @@ export class ClaudeSdkAdapter implements AgentAdapter {
           : options.projectTrusted
             ? ['user', 'project', 'local']
             : ['user'],
+      ...(options.loadSettings === false
+        ? {}
+        : { settings: { claudeMdExcludes: [...CLAUDE_MD_EXCLUDES] } }),
       canUseTool: this.#canUseTool,
       // disallowedTools ganha às regras "allow" das definições, que nunca chegam ao canUseTool.
       ...(options.readOnly ? { disallowedTools: [...READ_ONLY_DISALLOWED] } : {}),

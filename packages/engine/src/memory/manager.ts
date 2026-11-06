@@ -346,15 +346,18 @@ export class MemoryService {
       if (!ids.includes(key))
         throw new Error('Há uma edição para uma memória que não está na lista.');
     const evidence = new Map<string, MemoryEvidence[]>();
-    for (const id of ids) {
+    const memories = ids.map((id) => {
       const memory = state.memories.find((m) => m.id === id);
       if (!memory) throw new Error('Memória desconhecida.');
       if (!allowed.includes(memory.state))
         throw new Error('Esta memória não está num estado que se possa aprovar assim.');
       if (input.scope === 'project' && memory.projectId === null && !memory.origin?.projectId)
         throw new Error('Esta memória é geral e não sei de que projeto veio.');
-      evidence.set(id, await this.#refresh(memory));
-    }
+      return memory;
+    });
+    if (ids.length > 1 && memories.some((memory) => memory.external))
+      throw new Error('Uma memória de origem externa aprova-se uma a uma.');
+    for (const memory of memories) evidence.set(memory.id, await this.#refresh(memory));
     const now = this.#now();
     this.#store.change((next) => {
       for (const id of ids) {

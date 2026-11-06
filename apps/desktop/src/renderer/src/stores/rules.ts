@@ -8,13 +8,13 @@ export function receiveRules(data: RulesState): void {
   useRules.setState((current) => (data.revision >= current.data.revision ? { data } : {}));
 }
 
-/** A vista de um projeto (lista, avisos), vazia se ainda não tem regras. */
-export function rulesOf(data: RulesState, projectId: string): ProjectRulesView {
-  const project = data.projects[projectId];
+/** A vista de um nível (null = geral). */
+export function rulesOf(data: RulesState, projectId: string | null): ProjectRulesView {
+  const bucket = projectId === null ? data.global : data.projects[projectId];
   return {
     projectId,
-    rules: project?.rules ?? [],
-    importedFrom: project?.importedFrom ?? [],
-    warnings: project?.warnings ?? [],
+    rules: bucket?.rules ?? [],
+    warnings: bucket?.warnings ?? [],
+    canUndo: data.history.length > 0,
   };
 }

@@ -20,6 +20,7 @@ import type {
 } from '../types.ts';
 import { CODEX_MODES, DEFAULT_CODEX_MODE, threadPolicy, turnOverrides } from './modes.ts';
 import { mcpApprovalResponse, mcpServersConfig, mcpToolApproval } from './mcp.ts';
+import { NO_PROJECT_DOC } from './project-doc.ts';
 import { CodexNormalizer, displayCommand } from './normalizer.ts';
 import { initializeCodex, spawnCodex, type CodexTransport } from './transport.ts';
 import type { ReviewDecision } from './protocol/ReviewDecision';
@@ -228,8 +229,8 @@ export class CodexAppServerAdapter implements AgentAdapter {
       const model =
         this.#settings.model ?? visible.find((m) => m.isDefault)?.id ?? visible[0]?.id ?? null;
       const policy = threadPolicy(this.#settings.mode);
-      // Os servidores MCP desta sessão vão na config do thread, nunca no config.toml.
-      const config = mcpServersConfig(this.#options.mcpServers ?? []);
+      // MCP desta sessão na config do thread, e o AGENTS.md da pasta fica de fora.
+      const config = { ...NO_PROJECT_DOC, ...(mcpServersConfig(this.#options.mcpServers ?? []) ?? {}) };
       const params = {
         cwd: this.#options.cwd,
         ...(model ? { model } : {}),
@@ -238,7 +239,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
         developerInstructions: this.#options.instructions
           ? `${CRAFT_RULES}\n\n${this.#options.instructions}`
           : CRAFT_RULES,
-        ...(config ? { config } : {}),
+        config,
       };
       const fork = this.#options.fork ? parseCodexPoint(this.#options.fork) : null;
       const started = fork

@@ -7,12 +7,14 @@ import { handoffGate } from './handoff-model.ts';
 function usePassToGate(sessionId: string) {
   const state = useSession(sessionId, (s) => s.info.state);
   const handedTo = useSession(sessionId, (s) => s.info.handedTo);
-  return handoffGate({ state, ...(handedTo ? { handedTo } : {}) });
+  const origin = useSession(sessionId, (s) => s.info.origin);
+  return handoffGate({ state, ...(handedTo ? { handedTo } : {}), ...(origin ? { origin } : {}) });
 }
 
 /** "Passar a…": um botão pequeno que abre o diálogo (no painel de rever). */
 export function PassToButton({ sessionId }: { sessionId: string }) {
   const gate = usePassToGate(sessionId);
+  if (gate.hidden) return null;
   return (
     <button
       type="button"
@@ -47,17 +49,26 @@ export function SessionMenu({ sessionId }: { sessionId: string }) {
         </Menu.Trigger>
       }
     >
-      <ActionItem
-        title="Passar a…"
-        description={gate.reason ?? 'Continuar noutro agente, na mesma pasta'}
-        icon={<Handshake size={14} />}
-        disabled={!gate.enabled}
-        onSelect={() => actions.openHandoff(sessionId)}
-        testId="session-pass-to"
-      />
+      {gate.hidden ? (
+        <div className="mx-1 mb-1 rounded-md bg-surface-sunken px-2.5 py-2">
+          <p className="text-[12.5px] font-medium">Consulta</p>
+          <p className="mt-0.5 text-[11.5px] leading-snug text-muted">
+            Só leitura. O testemunho não se passa daqui.
+          </p>
+        </div>
+      ) : (
+        <ActionItem
+          title="Passar a…"
+          description={gate.reason ?? 'Continuar noutro agente, na mesma pasta'}
+          icon={<Handshake size={14} />}
+          disabled={!gate.enabled}
+          onSelect={() => actions.openHandoff(sessionId)}
+          testId="session-pass-to"
+        />
+      )}
       <ActionItem
         title="Mapa"
-        description="Ver as sessões ligadas deste projeto"
+        description="Sessões ligadas deste projeto"
         icon={<Network size={14} />}
         onSelect={() => actions.openMap()}
         testId="session-map"

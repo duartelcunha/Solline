@@ -51,7 +51,6 @@ test.describe('regras do projeto', () => {
     await go(page, 'cerebro');
     await openProject(page, 'space-tab-rules');
     await expect(page.getByTestId('rule-row')).toHaveCount(4);
-    await expect(page.getByTestId('rules-warning-native')).toContainText('CLAUDE.md');
     await expect(page.getByTestId('rules-size')).toContainText('linhas');
 
     await page.getByTestId('rule-new').click();
@@ -89,39 +88,24 @@ test.describe('regras do projeto', () => {
     await expect(page.getByTestId('rule-row')).toHaveCount(4);
   });
 
-  test('importar e exportar; a Solline não gera regras', async ({ page }) => {
+  test('desfazer e ver o texto que o agente recebe', async ({ page }) => {
     await go(page, 'cerebro');
     await openProject(page, 'space-tab-rules');
     await expect(page.getByRole('button', { name: /gerar/i })).toHaveCount(0);
-    await page.getByTestId('rules-import').click();
-    await page.getByTestId('rules-import-both').click();
-    await expect(page.getByTestId('rules-import-result')).toContainText('Importei 1 regra.');
-    await expect(page.getByTestId('rule-row')).toHaveCount(5);
-    await expect(page.getByTestId('rules-import-both')).toHaveCount(0);
-    await page.getByTestId('rules-import').click();
-    await page.getByTestId('rules-import-both').click();
-    await expect(page.getByTestId('rules-import-result')).toContainText('já existia');
-    await page.getByTestId('rules-export').click();
-    await expect(page.getByTestId('rules-export-result')).toContainText('AGENTS.md e CLAUDE.md');
+    await expect(page.getByTestId('rules-import')).toHaveCount(0);
+    await page.getByTestId('rules-preview').click();
+    await expect(page.getByTestId('rules-preview-text')).toContainText('Claude');
+    await page.getByTestId('rule-new').click();
+    await page.getByLabel('Título', { exact: true }).fill('Nova');
+    await page.getByLabel('Regra', { exact: true }).fill('Uma regra curta.');
+    await page.getByTestId('rule-save').click();
+    await page.getByTestId('rules-undo').click();
   });
 
-  test('exportar com o ficheiro editado à mão mostra o conflito e não escreve', async ({
-    page,
-  }) => {
-    await go(page, 'rules-conflict');
-    await openProject(page, 'space-tab-rules');
-    await page.getByTestId('rules-export').click();
-    await expect(page.getByTestId('rules-conflict')).toContainText('Não escrevi nada.');
-    await expect(page.getByTestId('rules-conflict')).toContainText('editou');
-    await expect(page.getByTestId('rules-export-result')).toHaveCount(0);
-    await page.getByTestId('rules-conflict-import').click();
-    await expect(page.getByTestId('rules-import-result')).toBeVisible();
-  });
-
-  test('o separador Regras só existe nos projetos', async ({ page }) => {
+  test('o separador Regras existe no Geral', async ({ page }) => {
     await go(page, 'cerebro');
     await page.getByTestId('open-general').click();
-    await expect(page.getByTestId('space-tab-rules')).toHaveCount(0);
+    await expect(page.getByTestId('space-tab-rules')).toBeVisible();
   });
 
   for (const theme of ['light', 'dark'] as const)
