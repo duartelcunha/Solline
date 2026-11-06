@@ -51,6 +51,10 @@ export class SpaceManager {
   projectPath(id: string): string | undefined {
     return this.#projects.get(id)?.path;
   }
+  /** O projeto sincronizado, com a pasta e a confiança. */
+  project(id: string): Project | undefined {
+    return this.#projects.get(id);
+  }
   projects(): Project[] {
     return this.#state.settings.projectIds.flatMap((id) => {
       const p = this.#projects.get(id);

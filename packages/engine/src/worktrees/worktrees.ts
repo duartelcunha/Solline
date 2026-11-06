@@ -516,6 +516,23 @@ export class WorktreeManager {
     if (staged.code !== 0) await this.#commit(wt.path, message);
   }
 
+  /**
+   * O commit que o utilizador pediu, com a mensagem dele. Corre os hooks do projeto.
+   * Sem email no git, pára e pede a identidade: não inventa uma. Não faz merge nem push.
+   */
+  async commitMessage(wt: Worktree, message: string): Promise<{ sha: string | null }> {
+    const email = await this.#run(wt.path, ['config', 'user.email'], true);
+    if (email.code !== 0 || !email.out.trim()) {
+      throw new Error('O git não tem o teu email. Define user.email e grava outra vez.');
+    }
+    await this.#run(wt.path, ['add', '-A']);
+    const staged = await this.#run(wt.path, ['diff', '--cached', '--quiet'], true);
+    if (staged.code === 0) return { sha: null };
+    await this.#run(wt.path, ['commit', '-m', message]);
+    const sha = (await this.#run(wt.path, ['rev-parse', 'HEAD'])).out.trim();
+    return { sha };
+  }
+
   /** Destes nomes (relativos a `dir`), os que o git do projeto versiona. */
   async tracked(dir: string, names: readonly string[]): Promise<Set<string>> {
     if (names.length === 0) return new Set();

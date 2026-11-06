@@ -24,6 +24,7 @@ import type {
   ReviewAction,
   ReviewComment,
   EngineSnapshot,
+  IssueList,
   RecoveryOperation,
 } from '@solline/protocol';
 import type { ReviewDraft, UiRecoveryState } from '@solline/protocol/bridge';
@@ -88,6 +89,10 @@ interface AppState {
   handoffFor: string | null;
   /** A sessão cujo "Trazer" espera pela confirmação (com a revisão antes de trazer). */
   bringFor: string | null;
+  /** A sessão cujo "Gravar commit" espera pela mensagem e pelo segundo clique. */
+  commitFor: string | null;
+  /** O projeto cuja lista de issues está aberta. */
+  issuesFor: string | null;
   /** O Mapa das sessões ligadas está aberto. */
   mapOpen: boolean;
   /** A vista principal: a mesa com todas as sessões, ou a conversa da sessão ativa. */
@@ -123,6 +128,8 @@ export const useApp = create<AppState>(() => ({
   closing: null,
   handoffFor: null,
   bringFor: null,
+  commitFor: null,
+  issuesFor: null,
   mapOpen: false,
   view: 'desk',
   spaceProjectId: null,
@@ -1170,6 +1177,65 @@ export const actions = {
 
   closeBring(): void {
     useApp.setState({ bringFor: null });
+  },
+
+  askCommit(sessionId: string): void {
+    useApp.setState({ commitFor: sessionId });
+  },
+
+  closeCommit(): void {
+    useApp.setState({ commitFor: null });
+  },
+
+  /** Grava a worktree. sha null: não havia nada. O erro volta para o diálogo, que fica aberto. */
+  async saveCommit(
+    sessionId: string,
+    text: string,
+  ): Promise<{ sha: string | null } | { error: string }> {
+    try {
+      const saved = await request('commit.save', { sessionId, message: text });
+      if (saved.sha) useApp.setState({ commitFor: null });
+      return saved;
+    } catch (error) {
+      return { error: message(error) };
+    }
+  },
+
+  openIssues(projectId: string): void {
+    useApp.setState({ issuesFor: projectId });
+  },
+
+  listIssues(projectId: string): Promise<IssueList> {
+    return request('issues.list', { projectId });
+  },
+
+  closeIssues(): void {
+    useApp.setState({ issuesFor: null });
+  },
+
+  /** Abre a issue numa worktree. A sessão normal, pelo menu do agente, não passa por aqui. */
+  async openIssue(projectId: string, issueId: string): Promise<void> {
+    useApp.setState({ creatingIn: projectId, notice: null });
+    try {
+      const { sessionId } = await request('issues.open', { projectId, issueId });
+      const snapshot = await request('engine.snapshot', {});
+      const item = snapshot.sessions.find((entry) => entry.session.id === sessionId);
+      if (!item) throw new Error('A sessão não apareceu.');
+      const store = storeFromItem(item);
+      adoptStore(sessionId, store, snapshot.sequence);
+      useApp.setState((s) => ({
+        sessionIds: [sessionId, ...s.sessionIds.filter((id) => id !== sessionId)],
+        activeSessionId: sessionId,
+        activeProjectId: projectId,
+        view: 'session',
+        issuesFor: null,
+      }));
+      loadSessionExtras(sessionId, store);
+    } catch (error) {
+      useApp.setState({ notice: message(error) });
+    } finally {
+      useApp.setState({ creatingIn: null });
+    }
   },
 
   /** Pede ao agente para resolver os conflitos do último "Trazer" no seu branch. */

@@ -38,6 +38,7 @@ import { claudePlanner, type Planner } from './races/planner.ts';
 import { reviewPlan } from './races/split-review.ts';
 import { claudeDrafter, draftHandoff, type Drafter } from './handoff/drafter.ts';
 import { summaryOf } from './review.ts';
+import { IssueService, openListedIssue } from './pull/issues.ts';
 import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
@@ -112,6 +113,8 @@ export interface EngineOptions {
   settings?: AgentSettings;
   /** Para testes: o ambiente onde se procuram nomes de segredos. */
   env?: NodeJS.ProcessEnv;
+  /** A lista de issues. Nos testes, um `gh` injectado; sem isto, o `gh` do PATH. */
+  issues?: IssueService;
 }
 
 /** Quem dá a segunda opinião: um só para tudo, ou um por fabricante (o oposto do agente da sessão). */
@@ -155,6 +158,7 @@ export class Engine {
   readonly consult: ConsultManager;
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
+  readonly issues: IssueService;
   /** O catálogo de servidores MCP do utilizador (aprovação, sonda e escolha por projeto). */
   readonly mcp: UserMcpCatalog;
   readonly races: RaceManager;
@@ -214,6 +218,7 @@ export class Engine {
       options.settings ??
       (options.dataDir ? fileAgentSettings(options.dataDir) : memoryAgentSettings());
     const env = options.env ?? process.env;
+    this.issues = options.issues ?? new IssueService();
     // As corridas seguem as sessões pelos eventos delas (o estado de cada pista).
     const box: { races?: RaceManager; splits?: SplitManager } = {};
     const emitAll = (event: EngineEvent) => {
@@ -724,10 +729,25 @@ export class Engine {
           text: p.text,
         }),
       'handoff.resume': (p) => s.resumeHere(p.sessionId),
-      // M1 do M7: o contrato existe. O trabalho (git, gh) ainda não.
-      'issues.list': notYet,
-      'issues.open': notYet,
-      'commit.save': notYet,
+      'issues.list': async (p) => {
+        const project = this.spaces.project(p.projectId);
+        if (!project) throw new Error('Projeto desconhecido');
+        return this.issues.list(project.path, project.id);
+      },
+      'issues.open': async (p) => {
+        const project = this.spaces.project(p.projectId);
+        if (!project) throw new Error('Projeto desconhecido');
+        const list = await this.issues.list(project.path, project.id);
+        return openListedIssue({
+          project,
+          issueId: p.issueId,
+          list,
+          start: (payload) => s.create(payload).then((created) => created.session.id),
+          send: (sessionId, text) => s.send(sessionId, text).then(() => undefined),
+        });
+      },
+      'commit.save': (p) => s.saveCommit(p.sessionId, p.message),
+      // M4: o PR e a CI ficam para o marco seguinte.
       'pr.open': notYet,
       'ci.read': notYet,
     };

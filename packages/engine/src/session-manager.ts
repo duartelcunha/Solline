@@ -161,6 +161,8 @@ interface Memory {
   worktree: Worktree | undefined;
   /** O branch já tem o nome da primeira mensagem. */
   named: boolean;
+  /** Nasceu com título (uma issue): a primeira mensagem não o substitui. */
+  bornTitled: boolean;
   /** A mudança de nome e metadados termina antes de trazer ou remover a worktree. */
   naming: Promise<void> | undefined;
   /** Um "Trazer" a meio: fechar espera por ele. */
@@ -382,6 +384,7 @@ export class SessionManager {
           : undefined,
       worktree: place.worktree,
       named: forked?.named === true,
+      bornTitled: Boolean(payload.title),
       naming: undefined,
       bringing: undefined,
       preparing: undefined,
@@ -970,6 +973,7 @@ export class SessionManager {
         quality: undefined,
         worktree: record.worktree,
         named: record.named,
+        bornTitled: false,
         naming: undefined,
         bringing: undefined,
         preparing: undefined,
@@ -1396,6 +1400,22 @@ export class SessionManager {
       env: info.port !== undefined ? PortAllocator.env(info.port) : {},
       run: this.#checksOptions?.run,
     };
+  }
+
+  /**
+   * Grava a worktree com a mensagem do utilizador. Os hooks do projeto correm.
+   * Não faz merge nem push. Sem email no git, falha e pede a identidade.
+   */
+  async saveCommit(sessionId: string, message: string): Promise<{ sha: string | null }> {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    this.#requireActive(entry);
+    this.#requireIdle(entry, memory, 'gravar');
+    const worktree = memory.worktree;
+    if (!worktree || !this.#worktrees) throw new Error('Gravar só numa worktree.');
+    const saved = await this.#worktrees.commitMessage(worktree, message);
+    await this.#emitWorkspace(sessionId);
+    return saved;
   }
 
   /** Traz o trabalho da worktree para o branch atual do projeto. */
@@ -2524,7 +2544,8 @@ export class SessionManager {
         delta.type === 'turn.start' &&
         delta.turn.role === 'user' &&
         memory.turns.length === 0 &&
-        !keepsTitle(info)
+        !keepsTitle(info) &&
+        !memory.bornTitled
       ) {
         const text = delta.turn.blocks.find((block) => block.kind === 'text');
         if (text?.kind === 'text')

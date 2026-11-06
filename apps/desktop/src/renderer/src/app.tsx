@@ -11,6 +11,8 @@ import { QualityChip } from './features/quality/quality.tsx';
 import { ChecksRow } from './features/quality/checks.tsx';
 import { CloseDialog, WorkspaceChip } from './features/workspace/workspace.tsx';
 import { BringDialog } from './features/workspace/bring-dialog.tsx';
+import { CommitDialog } from './features/workspace/commit-dialog.tsx';
+import { IssuesDialog } from './features/issues/issues-dialog.tsx';
 import { HandoffDialog } from './features/handoff/handoff-dialog.tsx';
 import { SessionMenu } from './features/handoff/pass-to.tsx';
 import { HandedBanner, SessionOriginLink } from './features/handoff/session-lineage.tsx';
@@ -431,6 +433,8 @@ export function App() {
         <AgentsPanel />
         <CloseDialog />
         <BringDialog />
+        <CommitDialog />
+        <IssuesDialog />
         <HandoffDialog />
         <MapDialog />
 

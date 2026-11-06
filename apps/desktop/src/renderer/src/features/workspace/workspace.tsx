@@ -1,6 +1,16 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Folders, GitBranch, GitMerge, Hammer, RotateCw, Send, Sparkles, X } from 'lucide-react';
+import {
+  Folders,
+  GitBranch,
+  GitCommitHorizontal,
+  GitMerge,
+  Hammer,
+  RotateCw,
+  Send,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
@@ -122,6 +132,14 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
           testId="workspace-resolve"
         />
       ) : null}
+      <ActionItem
+        title="Gravar commit"
+        description="Na worktree, sem merge nem push"
+        icon={<GitCommitHorizontal size={14} />}
+        disabled={busy}
+        onSelect={() => actions.askCommit(sessionId)}
+        testId="workspace-commit"
+      />
       <ActionItem
         title="Trazer para o projeto"
         description={

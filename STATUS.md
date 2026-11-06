@@ -2,20 +2,20 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** 🟢 M6 no `main` (`9a85f61`). O plano do M7 está escrito; a implementação espera o Duarte.
+**Estado:** 🟢 M6 no `main` (`9a85f61`). M7: contrato, commit local e issue do GitHub. A seguir, o PR.
 
 **Última atualização:** 2026-11-06, por Duarte
 
 ## Onde está
 
-- `main` inclui o M6 (squash `9a85f61`). O plano do M7 está em `docs/M7-plano.md`.
+- `main` inclui o M6 (squash `9a85f61`). O M7 vai em `docs/M7-plano.md`: M1 a M3 feitos, M4 por fazer.
 - Regras nativas, fora da pasta: gerais e por projeto, com desfazer e pré-visualização. A Solline não lê `CLAUDE.md` nem `AGENTS.md`.
 - Consulta do Claude sem Bash (`disallowedTools`). Uma consulta não passa o testemunho. Memórias externas não se aprovam em lote.
 - O git das worktrees só corre pelo caminho de `resolveGit()`.
 
 ## Próximo passo
 
-M1 do M7 (contrato) está no protocolo. A seguir, em paralelo: commit local (M2) e issue do GitHub (M3). Plano em `docs/M7-plano.md`.
+M2 grava o commit na worktree, com a mensagem e os hooks, sem merge nem push. M3 abre uma issue do GitHub numa worktree. A seguir: M4, o PR e a CI. Plano em `docs/M7-plano.md`.
 
 ## Comandos
 

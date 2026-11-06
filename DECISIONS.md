@@ -1018,3 +1018,7 @@ O Duarte fechou as quatro. O plano das regras está em `docs/PLANO-regras-nativa
 - **Bash nas consultas.** `READ_ONLY_DISALLOWED` inclui `Bash`. O SDK trata `disallowedTools` como bloqueio da ferramenta, não só do cartão. O teste do adaptador confirma a opção numa sessão `readOnly`. Não houve smoke com o Claude real: neste ambiente o binário não tem sessão. Não se passou a `settingSources: []`, que tiraria também os hooks e as permissões do utilizador.
 - **Testemunho.** `handoff` recusa uma consulta. «Passar a…» não aparece. Bifurcar fica como estava: a interface já o desliga e o motor falha sem checkpoint.
 - **Memórias externas.** `memory.approve` com mais de um id e alguma externa falha antes de mudar o que quer que seja. Uma de cada vez continua.
+
+## 2026-11-06: Linear no M7
+
+A API do Linear pede uma chave. A Solline não a guarda. O M7 segue só com o GitHub, pela sessão local do `gh`.

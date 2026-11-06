@@ -1501,6 +1501,28 @@ ${goal}
         emit({ kind: 'event', type: 'mcp.changed', mcp });
         return structuredClone(mcp);
       }
+      case 'issues.list': {
+        const projectId = String(payload.projectId);
+        if (scene === 'issues-missing') return { issues: [], unavailable: 'missing' };
+        if (scene === 'issues-empty') return { issues: [], unavailable: null };
+        return {
+          issues: [
+            {
+              id: 'gh-42',
+              projectId,
+              provider: 'github',
+              key: '42',
+              title: 'O parser rejeita o caminho relativo',
+              body: 'Abrir a sessão já com este texto.',
+            },
+          ],
+          unavailable: null,
+        };
+      }
+      case 'issues.open':
+        return { sessionId: 'session-1' };
+      case 'commit.save':
+        return { sha: 'abc1234' };
       default:
         throw new Error(`QA: comando sem cenário: ${command}`);
     }

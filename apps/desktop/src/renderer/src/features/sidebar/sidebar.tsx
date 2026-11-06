@@ -1,5 +1,15 @@
 import { Logo } from '../../components/logo.tsx';
-import { Folder, Globe2, LayoutGrid, Network, Plus, ShieldCheck, ShieldOff, X } from 'lucide-react';
+import {
+  CircleDot,
+  Folder,
+  Globe2,
+  LayoutGrid,
+  Network,
+  Plus,
+  ShieldCheck,
+  ShieldOff,
+  X,
+} from 'lucide-react';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { useNeedsYouCount } from '../desk/desk.tsx';
 import { APP_NAME } from '@solline/protocol/app';
@@ -133,6 +143,18 @@ function ProjectGroup({ project, sessionIds }: { project: Project; sessionIds: s
               <ShieldOff size={14} strokeWidth={1.9} />
             )}
           </IconSwap>
+        </button>
+        <button
+          type="button"
+          onClick={() => actions.openIssues(project.id)}
+          aria-label={`Issues de ${project.name}`}
+          title="Issues"
+          data-testid="project-issues"
+          className={`grid size-6 shrink-0 place-items-center rounded-sm text-subtle sl-press hover:bg-surface-hover hover:text-fg ${
+            activeProject ? '' : reveal
+          }`}
+        >
+          <CircleDot size={14} strokeWidth={1.75} />
         </button>
         <span className={`flex shrink-0 ${activeProject ? '' : reveal}`}>
           <NewSessionButton project={project} variant="icon" />

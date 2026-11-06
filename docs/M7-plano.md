@@ -16,15 +16,15 @@ O marco, em `docs/visao.md`: uma sessão nasce de uma issue, com o branch e o co
 
 ## Primeiro
 
-O contrato (M1). Sem ele nada se liga. A seguir, em paralelo: o commit local (M2), que serve sem GitHub, e a issue do GitHub (M3). O PR (M4) espera pelos dois. Arquivar (M5) espera pelo PR.
+O contrato (M1), o commit local (M2) e a issue do GitHub (M3) estão feitos. O PR (M4) é o seguinte. Arquivar (M5) espera pelo PR.
 
 ## Marcos
 
 **M1. Contrato** (`packages/protocol/src/pull.ts`). Ids e estado, zod estrito: issue, PR, resultado de CI. Comandos: `issues.list`, `issues.open`, `commit.save`, `pr.open`, `ci.read`. A interface manda ids e o texto que escreveu. Não manda URL, dono do repositório, nem comando. O motor recusa estes comandos até ao marco que os faz.
 
-**M2. Commit com a tua mensagem.** Grava a worktree, com a mensagem escrita na app, pelos hooks do projeto. Não faz merge nem push. Segundo clique, como Trazer. Sem `user.email`, falha e pede a identidade: não copia o `Solline <solline@localhost>`. Git só por `resolveGit()`.
+**M2. Commit com a tua mensagem.** Feito. Grava a worktree, com a mensagem escrita na app, pelos hooks do projeto. Não faz merge nem push. Segundo clique, como Trazer. Sem `user.email`, falha e pede a identidade: não copia o `Solline <solline@localhost>`. Git só por `resolveGit()`.
 
-**M3. Issue do GitHub.** O motor lista com o `gh` absoluto. Escolher uma abre uma sessão com `worktree: 'always'`, título da issue e primeira mensagem com número, título e corpo cortado. Sem `gh`, a lista diz porquê e a sessão normal continua. Linear usa o mesmo contrato e só entra com login local, sem chave na Solline. Se a única via for API key, fica uma linha no `DECISIONS.md` e o M7 segue só com o GitHub. Não bloqueia o resto.
+**M3. Issue do GitHub.** Feito. O motor lista com o `gh` absoluto. Escolher uma abre uma sessão com `worktree: 'always'`, título da issue e primeira mensagem com número, título e corpo cortado. Sem `gh`, a lista diz porquê e a sessão normal continua. Linear usa o mesmo contrato e só entra com login local, sem chave na Solline. A API pede chave: uma linha no `DECISIONS.md`, e o M7 segue só com o GitHub.
 
 **M4. PR e CI.** Push do branch da worktree e `gh pr create`, título e corpo editáveis. Confirmação nativa no main, com o repositório e o branch, antes do push. Não faz merge. «Trazer» mantém-se: é o merge local. Ler os checks é só leitura. Um botão manda o texto do check que falhou para a fila da sessão, como mensagem tua, uma vez por clique. Não é um ciclo e não troca de agente.
 

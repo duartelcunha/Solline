@@ -401,5 +401,7 @@ export const scenes = [
   'consult-same-vendor',
   'consult-delegate',
   'mcp-skipped',
+  'issues-missing',
+  'issues-empty',
 ] as const;
 export type Scene = (typeof scenes)[number];
