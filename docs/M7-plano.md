@@ -20,7 +20,7 @@ O contrato (M1). Sem ele nada se liga. A seguir, em paralelo: o commit local (M2
 
 ## Marcos
 
-**M1. Contrato** (`packages/protocol`). Ids e estado, zod estrito: issue, PR, resultado de CI. Comandos: listar issues do projeto aberto, abrir sessão a partir de uma, gravar commit, abrir PR, ler CI. A interface manda ids. Não manda URL, dono do repositório, nem comando.
+**M1. Contrato** (`packages/protocol/src/pull.ts`). Ids e estado, zod estrito: issue, PR, resultado de CI. Comandos: `issues.list`, `issues.open`, `commit.save`, `pr.open`, `ci.read`. A interface manda ids e o texto que escreveu. Não manda URL, dono do repositório, nem comando. O motor recusa estes comandos até ao marco que os faz.
 
 **M2. Commit com a tua mensagem.** Grava a worktree, com a mensagem escrita na app, pelos hooks do projeto. Não faz merge nem push. Segundo clique, como Trazer. Sem `user.email`, falha e pede a identidade: não copia o `Solline <solline@localhost>`. Git só por `resolveGit()`.
 

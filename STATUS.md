@@ -15,7 +15,7 @@
 
 ## Próximo passo
 
-Implementar o M7 pela ordem de `docs/M7-plano.md`: contrato, commit local, issue do GitHub, PR e CI, arquivar quando o PR entra.
+M1 do M7 (contrato) está no protocolo. A seguir, em paralelo: commit local (M2) e issue do GitHub (M3). Plano em `docs/M7-plano.md`.
 
 ## Comandos
 

@@ -29,6 +29,7 @@ import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
 import { DelegateTask, memoryCommandSchemas, spacesCommandSchemas } from './spaces.ts';
 import { rulesCommandSchemas, rulesInternalSchemas } from './rules.ts';
+import { pullCommandSchemas } from './pull.ts';
 import { mcpCommandSchemas, mcpInternalSchemas } from './mcp-catalog.ts';
 
 /**
@@ -120,6 +121,7 @@ export const commandSchemas = {
   ...spacesCommandSchemas,
   ...memoryCommandSchemas,
   ...rulesCommandSchemas,
+  ...pullCommandSchemas,
   ...mcpCommandSchemas,
   'engine.snapshot': { payload: Empty, result: EngineSnapshot },
   'engine.flush': { payload: Empty, result: Empty },

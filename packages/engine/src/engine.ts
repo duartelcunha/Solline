@@ -456,6 +456,9 @@ export class Engine {
     };
     const s = this.sessions;
     const ok = {} as Record<string, never>;
+    const notYet = async (): Promise<never> => {
+      throw new Error('Ainda não está feito.');
+    };
     this.#handlers = {
       'spaces.syncProjects': async (p) => {
         const before = JSON.stringify(this.spaces.projects());
@@ -721,6 +724,12 @@ export class Engine {
           text: p.text,
         }),
       'handoff.resume': (p) => s.resumeHere(p.sessionId),
+      // M1 do M7: o contrato existe. O trabalho (git, gh) ainda não.
+      'issues.list': notYet,
+      'issues.open': notYet,
+      'commit.save': notYet,
+      'pr.open': notYet,
+      'ci.read': notYet,
     };
   }
 
@@ -889,6 +898,8 @@ export class Engine {
 const READ_ONLY = new Set<EngineCommandName>([
   'rules.list',
   'rules.preview',
+  'issues.list',
+  'ci.read',
   'spaces.snapshot',
   'spaces.syncProjects',
   'engine.ping',
