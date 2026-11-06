@@ -187,7 +187,8 @@ Inspiração: `/goal` do Codex e do Claude, auto-review do Codex, tokscale e ccu
 
 Estado (06/11/2026): as quatro decisões estão fechadas. O M8.0 fixa a verdade: esta página, o
 README e o STATUS alinhados com o M6 e o M7, a matriz em `packages/engine/src/pilot/matrix.ts`, o corpus do piloto
-e o harness da linha de base. Ainda não há medição com clientes reais. M8.1 em diante não começou.
+e o harness da linha de base. Ainda não há medição com clientes reais. O M8.1 deixa o próximo passo, o título e o
+resumo da prova visíveis.
 
 ### Depois
 

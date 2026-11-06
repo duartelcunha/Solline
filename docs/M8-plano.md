@@ -31,6 +31,20 @@ Nesta máquina não há cliente de modelo. A corrida de 2026-11-06 deixa aceita�
 
 M8.2 (livro de custo e orçamento), M8.3 (ciclo check, corrigir, check), M8.4 (juiz em sombra) e M8.5 (escolha de modelo) não se fazem nesta ronda. A decisão do Duarte é parar depois do M8.1. Cada uma, se voltar, escreve o seu plano aqui antes de se construir.
 
+## M8.1 — Clareza
+
+Ver o estado e o próximo passo sem procurar, e tirar da frente o que não se decide agora.
+
+**Entra.** O título da sessão e do cartão pode ocupar duas linhas. Por baixo do estado fica uma frase com o próximo passo, sempre visível. Modelo, esforço e modo ficam no mesmo grupo e o nome do esforço não desaparece. A corrida diz «Corrida», não «1×». O cartão da mesa deixa de mostrar custo, porta e medidor de contexto; ficam o estado, o pedido, a fila, as verificações que falharam e o que mudou. Junto ao compositor, uma linha diz quantos ficheiros mudaram e se as verificações passaram. O painel Rever, quando está aberto, fica mais largo. O contraste do texto atual já passa 4,5:1; não se mexe nas cores.
+
+**Não entra.** Rebrand, livro de custo, orçamento, ciclo de correção, juiz e troca de modelo. O painel Rever não abre sozinho.
+
+**Prova.** Capturas antes e depois, tema claro e escuro, janela larga e estreita.
+
+## Feito no M8.1
+
+O cabeçalho mostra o título em duas linhas e o próximo passo. Modelo, esforço e modo estão no mesmo grupo, com o nome do esforço sempre visível. A corrida diz «Corrida». A mesa deixa de mostrar custo, porta e medidor. O compositor resume ficheiros por rever e verificações. O painel Rever, aberto, ocupa mais da sessão. As cores não mudaram: o texto secundário já passa 4,5:1.
+
 ## A seguir
 
-M8.1, clareza visual. O plano dessa fatia escreve-se aqui antes do código.
+Nada nesta ronda. M8.2 em diante está na secção Adiado.
