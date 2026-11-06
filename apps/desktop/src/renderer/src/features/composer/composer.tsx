@@ -116,6 +116,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
 
   const checks = useSession(sessionId, (s) => s.checks);
   // Passou o testemunho: só se lê. O compositor diz porquê em vez de falhar ao enviar.
+  const archived = useSession(sessionId, (s) => s.info.archived === true);
   const handedTo = useSession(sessionId, (s) => s.info.handedTo);
   const handedTarget = useApp((s) =>
     handedTo && s.sessionIds.includes(handedTo) ? handedTo : undefined,
@@ -167,6 +168,21 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
 
   // O botão muda de papel: enviar, parar (a trabalhar sem texto) ou pôr na fila.
   const role: 'send' | 'stop' | 'queue' = !busy ? 'send' : hasText ? 'queue' : 'stop';
+
+  if (archived) {
+    return (
+      <div className="shrink-0 pb-5">
+        <div className="mx-auto w-full max-w-3xl px-8">
+          <p
+            data-testid="archived-note"
+            className="rounded-xl border border-line bg-surface px-4 py-3 text-[13px] text-muted"
+          >
+            O PR entrou. A sessão fica para ler.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="shrink-0 pb-5">

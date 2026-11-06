@@ -1,6 +1,17 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { Folders, GitBranch, GitMerge, Hammer, RotateCw, Send, Sparkles, X } from 'lucide-react';
+import {
+  Folders,
+  GitBranch,
+  GitCommitHorizontal,
+  GitMerge,
+  GitPullRequest,
+  Hammer,
+  RotateCw,
+  Send,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { IconSwap } from '@solline/ui/icon-swap';
 import { ActionItem, MenuShell } from '../../components/menu.tsx';
 import { actions, useApp, useSession } from '../../stores/app.ts';
@@ -24,6 +35,7 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
   const setup = useSession(sessionId, (s) => s.info.setup);
   const port = useSession(sessionId, (s) => s.info.port);
   const busy = useSession(sessionId, (s) => s.info.state !== 'idle' && s.info.state !== 'error');
+  const archived = useSession(sessionId, (s) => s.info.archived === true);
 
   if (workspace?.kind === 'shared') {
     return (
@@ -123,6 +135,22 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
         />
       ) : null}
       <ActionItem
+        title="Abrir PR"
+        description="Envia o branch. Não faz merge"
+        icon={<GitPullRequest size={14} />}
+        disabled={busy || archived}
+        onSelect={() => actions.askPull(sessionId)}
+        testId="workspace-pull"
+      />
+      <ActionItem
+        title="Gravar commit"
+        description="Na worktree, sem merge nem push"
+        icon={<GitCommitHorizontal size={14} />}
+        disabled={busy || archived}
+        onSelect={() => actions.askCommit(sessionId)}
+        testId="workspace-commit"
+      />
+      <ActionItem
         title="Trazer para o projeto"
         description={
           stats.files > 0
@@ -130,7 +158,7 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
             : 'Nada por trazer'
         }
         icon={<GitMerge size={14} />}
-        disabled={busy || stats.files === 0}
+        disabled={busy || archived || stats.files === 0}
         onSelect={() => actions.askBring(sessionId)}
         testId="workspace-bring"
       />

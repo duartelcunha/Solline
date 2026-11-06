@@ -29,6 +29,7 @@ import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
 import { DelegateTask, memoryCommandSchemas, spacesCommandSchemas } from './spaces.ts';
 import { rulesCommandSchemas, rulesInternalSchemas } from './rules.ts';
+import { PullRequest, pullCommandSchemas } from './pull.ts';
 import { mcpCommandSchemas, mcpInternalSchemas } from './mcp-catalog.ts';
 
 /**
@@ -120,6 +121,7 @@ export const commandSchemas = {
   ...spacesCommandSchemas,
   ...memoryCommandSchemas,
   ...rulesCommandSchemas,
+  ...pullCommandSchemas,
   ...mcpCommandSchemas,
   'engine.snapshot': { payload: Empty, result: EngineSnapshot },
   'engine.flush': { payload: Empty, result: Empty },
@@ -387,6 +389,7 @@ export const MAIN_COMMANDS = [
   'split.start',
   'split.resolve',
   'session.create',
+  'pr.open',
   'session.close',
   'worktrees.discard',
   'mcp.add',
@@ -525,6 +528,21 @@ export const internalCommandSchemas = {
       .object({ projectId: z.string().min(1).max(64), checks: CheckList.nullable() })
       .strict(),
     result: Empty,
+  },
+  /** Repositório e branch da worktree, para a confirmação. Não envia nada. */
+  'pr.preview': {
+    payload: z.object({ sessionId: z.string().min(1).max(128) }).strict(),
+    result: z
+      .object({
+        repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+        branch: z.string().regex(/^solline\/[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/),
+      })
+      .strict(),
+  },
+  /** Push do branch e `gh pr create`. O main já confirmou. */
+  'pr.create': {
+    payload: pullCommandSchemas['pr.open'].payload,
+    result: PullRequest,
   },
 } as const;
 

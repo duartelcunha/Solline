@@ -117,6 +117,13 @@ export type SessionQueue = z.infer<typeof SessionQueueEvent>['queue'];
  * Passagem de testemunho: a sessão passou o trabalho a outra (`handedTo`) e deixa de enviar, ou
  * (null) voltou a poder enviar. Quem tem a pasta é sempre a sessão sem `handedTo`.
  */
+/** O PR entrou. A sessão passa a ser só de leitura. Uma vez. */
+export const SessionArchivedEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.archived'),
+  sessionId: z.string(),
+});
+
 export const SessionHandoffEvent = z.object({
   kind: z.literal('event'),
   type: z.literal('session.handoff'),
@@ -174,6 +181,7 @@ export const EngineEvent = z
     SessionWorkspaceEvent,
     SessionQueueEvent,
     SessionHandoffEvent,
+    SessionArchivedEvent,
     SessionSetupEvent,
     RaceStateEvent,
     EngineErrorEvent,

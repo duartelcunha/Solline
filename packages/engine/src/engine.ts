@@ -38,6 +38,8 @@ import { claudePlanner, type Planner } from './races/planner.ts';
 import { reviewPlan } from './races/split-review.ts';
 import { claudeDrafter, draftHandoff, type Drafter } from './handoff/drafter.ts';
 import { summaryOf } from './review.ts';
+import { IssueService, openListedIssue } from './pull/issues.ts';
+import { PullService } from './pull/pull.ts';
 import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
@@ -112,6 +114,10 @@ export interface EngineOptions {
   settings?: AgentSettings;
   /** Para testes: o ambiente onde se procuram nomes de segredos. */
   env?: NodeJS.ProcessEnv;
+  /** A lista de issues. Nos testes, um `gh` injectado; sem isto, o `gh` do PATH. */
+  issues?: IssueService;
+  /** O PR e a CI. Nos testes, um `gh` injectado. */
+  pulls?: PullService;
 }
 
 /** Quem dá a segunda opinião: um só para tudo, ou um por fabricante (o oposto do agente da sessão). */
@@ -155,6 +161,8 @@ export class Engine {
   readonly consult: ConsultManager;
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
+  readonly issues: IssueService;
+  readonly pulls: PullService;
   /** O catálogo de servidores MCP do utilizador (aprovação, sonda e escolha por projeto). */
   readonly mcp: UserMcpCatalog;
   readonly races: RaceManager;
@@ -214,6 +222,8 @@ export class Engine {
       options.settings ??
       (options.dataDir ? fileAgentSettings(options.dataDir) : memoryAgentSettings());
     const env = options.env ?? process.env;
+    this.issues = options.issues ?? new IssueService();
+    this.pulls = options.pulls ?? new PullService();
     // As corridas seguem as sessões pelos eventos delas (o estado de cada pista).
     const box: { races?: RaceManager; splits?: SplitManager } = {};
     const emitAll = (event: EngineEvent) => {
@@ -228,7 +238,8 @@ export class Engine {
           (!this.#recordedSessions.has(sessionId) ||
             event.type === 'session.timeline' ||
             event.type === 'session.workspace' ||
-            event.type === 'session.handoff');
+            event.type === 'session.handoff' ||
+            event.type === 'session.archived');
         const session = capture
           ? this.sessions?.recovery().find((saved) => saved.view.session.id === sessionId)
           : undefined;
@@ -721,6 +732,43 @@ export class Engine {
           text: p.text,
         }),
       'handoff.resume': (p) => s.resumeHere(p.sessionId),
+      'issues.list': async (p) => {
+        const project = this.spaces.project(p.projectId);
+        if (!project) throw new Error('Projeto desconhecido');
+        return this.issues.list(project.path, project.id);
+      },
+      'issues.open': async (p) => {
+        const project = this.spaces.project(p.projectId);
+        if (!project) throw new Error('Projeto desconhecido');
+        const list = await this.issues.list(project.path, project.id);
+        return openListedIssue({
+          project,
+          issueId: p.issueId,
+          list,
+          start: (payload) => s.create(payload).then((created) => created.session.id),
+          send: (sessionId, text) => s.send(sessionId, text).then(() => undefined),
+        });
+      },
+      'commit.save': (p) => s.saveCommit(p.sessionId, p.message),
+      'pr.preview': (p) => s.pullTarget(p.sessionId),
+      'pr.create': async (p) => {
+        const pushed = await s.pushPull(p.sessionId);
+        return this.pulls.open({
+          cwd: pushed.cwd,
+          branch: pushed.branch,
+          sessionId: p.sessionId,
+          title: p.title,
+          body: p.body,
+        });
+      },
+      'ci.read': async (p) => {
+        const state = await this.pulls.state(p.prId);
+        if (state === 'merged') {
+          const sessionId = this.pulls.sessionOf(p.prId);
+          if (sessionId) s.archive(sessionId);
+        }
+        return this.pulls.checks(p.prId);
+      },
     };
   }
 
@@ -889,6 +937,9 @@ export class Engine {
 const READ_ONLY = new Set<EngineCommandName>([
   'rules.list',
   'rules.preview',
+  'issues.list',
+  'ci.read',
+  'pr.preview',
   'spaces.snapshot',
   'spaces.syncProjects',
   'engine.ping',

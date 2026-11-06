@@ -13,12 +13,13 @@ const RANK: Record<SessionState, number> = {
  * Ordena por urgência. Dentro do mesmo estado mantém a ordem de chegada (a mais recente
  * primeiro), para os cartões não andarem às voltas sem razão.
  */
-export function deskOrder<T extends { id: string; state: SessionState }>(
+export function deskOrder<T extends { id: string; state: SessionState; archived?: boolean }>(
   sessions: readonly T[],
 ): T[] {
+  const rank = (session: T) => (session.archived ? 4 : RANK[session.state]);
   return sessions
     .map((s, index) => ({ s, index }))
-    .sort((a, b) => RANK[a.s.state] - RANK[b.s.state] || a.index - b.index)
+    .sort((a, b) => rank(a.s) - rank(b.s) || a.index - b.index)
     .map(({ s }) => s);
 }
 

@@ -777,6 +777,7 @@ ${goal}
           projectId: project.id,
           cwd: project.path,
           agent: String(payload.agent),
+          ...(scene === 'archived' ? { archived: true } : {}),
           title: 'Navegação com contexto',
           state: 'starting',
           agentSessionId: 'qa-agent',
@@ -823,6 +824,14 @@ ${goal}
             scene === 'review-targeted' ? structuredClone(targetedReview) : [structuredClone(diff)],
         });
         seed(session.id); // Deliberately before the response: tests the real early-event buffer.
+        if (scene === 'celebrate') {
+          const id = session.id;
+          setTimeout(() => {
+            const current = sessions.get(id);
+            if (current) current.archived = true;
+            emit({ kind: 'event', type: 'session.archived', sessionId: id });
+          }, 300);
+        }
         return { session: { ...session }, capabilities };
       }
       case 'handoff.draft': {
@@ -1501,6 +1510,49 @@ ${goal}
         emit({ kind: 'event', type: 'mcp.changed', mcp });
         return structuredClone(mcp);
       }
+      case 'issues.list': {
+        const projectId = String(payload.projectId);
+        if (scene === 'issues-missing') return { issues: [], unavailable: 'missing' };
+        if (scene === 'issues-empty') return { issues: [], unavailable: null };
+        return {
+          issues: [
+            {
+              id: 'gh-42',
+              projectId,
+              provider: 'github',
+              key: '42',
+              title: 'O parser rejeita o caminho relativo',
+              body: 'Abrir a sessão já com este texto.',
+            },
+          ],
+          unavailable: null,
+        };
+      }
+      case 'issues.open':
+        return { sessionId: 'session-1' };
+      case 'commit.save':
+        return { sha: 'abc1234' };
+      case 'pr.open':
+        return {
+          id: 'gh-pr-7',
+          sessionId: String(payload.sessionId),
+          key: '7',
+          title: String(payload.title),
+          state: 'open',
+        };
+      case 'ci.read':
+        return {
+          prId: String(payload.prId),
+          checks: [
+            {
+              id: 'ci-typecheck',
+              name: 'typecheck',
+              state: 'failed',
+              summary: 'src/a.ts:1 erro',
+            },
+            { id: 'ci-lint', name: 'lint', state: 'passed', summary: '' },
+          ],
+        };
       default:
         throw new Error(`QA: comando sem cenário: ${command}`);
     }

@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/
 import path from 'node:path';
 import type { WorktreeStats } from '@solline/protocol';
 import { resolveGit } from '../checkpoints/git.ts';
+import { repoFromRemote, worktreeBranch } from '../pull/repo.ts';
 import { parseRaw } from '../checkpoints/session-checkpoints.ts';
 import { parseNumstat, parsePatch, type RawFile } from '../checkpoints/unified-diff.ts';
 
@@ -514,6 +515,39 @@ export class WorktreeManager {
     await this.#run(wt.path, ['add', '-A']);
     const staged = await this.#run(wt.path, ['diff', '--cached', '--quiet'], true);
     if (staged.code !== 0) await this.#commit(wt.path, message);
+  }
+
+  /**
+   * O commit que o utilizador pediu, com a mensagem dele. Corre os hooks do projeto.
+   * Sem email no git, pára e pede a identidade: não inventa uma. Não faz merge nem push.
+   */
+  async commitMessage(wt: Worktree, message: string): Promise<{ sha: string | null }> {
+    const email = await this.#run(wt.path, ['config', 'user.email'], true);
+    if (email.code !== 0 || !email.out.trim()) {
+      throw new Error('O git não tem o teu email. Define user.email e grava outra vez.');
+    }
+    await this.#run(wt.path, ['add', '-A']);
+    const staged = await this.#run(wt.path, ['diff', '--cached', '--quiet'], true);
+    if (staged.code === 0) return { sha: null };
+    await this.#run(wt.path, ['commit', '-m', message]);
+    const sha = (await this.#run(wt.path, ['rev-parse', 'HEAD'])).out.trim();
+    return { sha };
+  }
+
+  /** O repositório do origin, `owner/repo`. Sem URL e sem token. */
+  async remoteRepo(wt: Worktree): Promise<string> {
+    const remote = await this.#run(wt.path, ['remote', 'get-url', 'origin'], true);
+    const repo = remote.code === 0 ? repoFromRemote(remote.out) : null;
+    if (!repo) throw new Error('Não reconheci o repositório do origin.');
+    return repo;
+  }
+
+  /**
+   * Envia o branch da worktree para o origin. Não faz merge, nem push do branch do projeto.
+   */
+  async pushBranch(wt: Worktree): Promise<void> {
+    if (!worktreeBranch(wt.branch)) throw new Error('Só envio o branch da worktree.');
+    await this.#run(wt.path, ['push', '--set-upstream', 'origin', wt.branch]);
   }
 
   /** Destes nomes (relativos a `dir`), os que o git do projeto versiona. */
