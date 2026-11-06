@@ -25,6 +25,7 @@ import type {
   ReviewComment,
   EngineSnapshot,
   IssueList,
+  PullRequest,
   RecoveryOperation,
 } from '@solline/protocol';
 import type { ReviewDraft, UiRecoveryState } from '@solline/protocol/bridge';
@@ -91,6 +92,8 @@ interface AppState {
   bringFor: string | null;
   /** A sessão cujo "Gravar commit" espera pela mensagem e pelo segundo clique. */
   commitFor: string | null;
+  /** A sessão cujo PR está aberto (formulário ou checks). */
+  pullFor: string | null;
   /** O projeto cuja lista de issues está aberta. */
   issuesFor: string | null;
   /** O Mapa das sessões ligadas está aberto. */
@@ -129,6 +132,7 @@ export const useApp = create<AppState>(() => ({
   handoffFor: null,
   bringFor: null,
   commitFor: null,
+  pullFor: null,
   issuesFor: null,
   mapOpen: false,
   view: 'desk',
@@ -1185,6 +1189,41 @@ export const actions = {
 
   closeCommit(): void {
     useApp.setState({ commitFor: null });
+  },
+
+  askPull(sessionId: string): void {
+    useApp.setState({ pullFor: sessionId });
+  },
+
+  closePull(): void {
+    useApp.setState({ pullFor: null });
+  },
+
+  /** Abre o PR. O main confirma o repositório e o branch antes do push. */
+  async openPull(
+    sessionId: string,
+    title: string,
+    body: string,
+  ): Promise<{ pull: PullRequest } | { error: string }> {
+    try {
+      const pull = await request('pr.open', { sessionId, title, body });
+      sessionStores.get(sessionId)?.setState({ pull, ci: null });
+      return { pull };
+    } catch (error) {
+      return { error: message(error) };
+    }
+  },
+
+  async readCi(sessionId: string): Promise<{ error?: string }> {
+    const pull = sessionStores.get(sessionId)?.getState().pull;
+    if (!pull) return { error: 'Ainda não há PR.' };
+    try {
+      const ci = await request('ci.read', { prId: pull.id });
+      sessionStores.get(sessionId)?.setState({ ci });
+      return {};
+    } catch (error) {
+      return { error: message(error) };
+    }
   },
 
   /** Grava a worktree. sha null: não havia nada. O erro volta para o diálogo, que fica aberto. */

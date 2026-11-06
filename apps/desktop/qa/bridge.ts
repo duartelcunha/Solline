@@ -1523,6 +1523,27 @@ ${goal}
         return { sessionId: 'session-1' };
       case 'commit.save':
         return { sha: 'abc1234' };
+      case 'pr.open':
+        return {
+          id: 'gh-pr-7',
+          sessionId: String(payload.sessionId),
+          key: '7',
+          title: String(payload.title),
+          state: 'open',
+        };
+      case 'ci.read':
+        return {
+          prId: String(payload.prId),
+          checks: [
+            {
+              id: 'ci-typecheck',
+              name: 'typecheck',
+              state: 'failed',
+              summary: 'src/a.ts:1 erro',
+            },
+            { id: 'ci-lint', name: 'lint', state: 'passed', summary: '' },
+          ],
+        };
       default:
         throw new Error(`QA: comando sem cenário: ${command}`);
     }

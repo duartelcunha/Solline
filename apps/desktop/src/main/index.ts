@@ -33,6 +33,7 @@ import { EngineHost } from './engine-host.ts';
 import { ProjectStore, newCommands } from './projects.ts';
 import { resolveSessionStart } from './session-policy.ts';
 import { reconcilePolicy } from './recovered-policy.ts';
+import { openPullRequest } from './pull-confirm.ts';
 import { createSecretStore } from './credential-store.ts';
 import { applyValues, approvalPrompt, newServerId } from './mcp-main.ts';
 import { UiRecoveryStore } from './ui-recovery.ts';
@@ -472,6 +473,15 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       attention.track(created.session, project?.name ?? basename(start.cwd));
       return created;
     }
+    case 'pr.open': {
+      // A interface manda o texto. O repositório e o branch vêm da worktree, e o push espera o sim.
+      const request = payload as CommandPayload<'pr.open'>;
+      return openPullRequest({
+        preview: () => engine.request('pr.preview', { sessionId: request.sessionId }),
+        confirm: (data) => confirm(data),
+        create: () => engine.request('pr.create', request),
+      });
+    }
   }
 }
 
@@ -596,7 +606,8 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
         command === 'session.close' ||
         command === 'worktrees.discard' ||
         command === 'race.close' ||
-        command === 'split.resolve'
+        command === 'split.resolve' ||
+        command === 'pr.open'
       )
         await reconcilePolicy(engine, policyProjects, command, input);
       const result = commandSchemas[command].result.parse(await handleMain(command, input));

@@ -8,6 +8,8 @@ import type { AdapterSink, AgentAdapter, AgentStartOptions, SendOptions } from '
 import { Engine } from '../src/engine.ts';
 import { resolveGh, runGh } from '../src/pull/gh.ts';
 import { IssueService, issuePrompt, listGithubIssues, openListedIssue } from '../src/pull/issues.ts';
+import { PullService, mapChecks } from '../src/pull/pull.ts';
+import { repoFromRemote } from '../src/pull/repo.ts';
 import { SessionManager } from '../src/session-manager.ts';
 import { WorktreeManager } from '../src/worktrees/worktrees.ts';
 import { testRegistry } from './helpers.ts';
@@ -300,10 +302,117 @@ describe('abrir uma issue', () => {
     const refused = await engine.handle({
       kind: 'request',
       id: '2',
-      command: 'pr.open',
-      payload: { sessionId: 'sessao-1', title: 't', body: '' },
+      command: 'ci.read',
+      payload: { prId: 'gh-pr-7' },
     });
     expect(refused.ok).toBe(false);
     await engine.dispose();
+  });
+});
+
+describe('PR e CI', () => {
+  it('lê o repositório sem o token e sem URL', () => {
+    const repo = repoFromRemote('https://user:ghp_secret@github.com/duartelcunha/atelier.git');
+    expect(repo).toBe('duartelcunha/atelier');
+    expect(repo).not.toContain('ghp_secret');
+    expect(repoFromRemote('git@github.com:duartelcunha/atelier.git')).toBe('duartelcunha/atelier');
+    expect(repoFromRemote('/tmp/origin.git')).toBeNull();
+  });
+
+  it('envia só o branch da worktree, sem merge', async () => {
+    const { project, git, log, run, root } = await gitHarness();
+    const bare = path.join(root, 'origin.git');
+    run(project, 'init', '--bare', '-q', bare);
+    run(project, 'remote', 'add', 'origin', bare);
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const made = await worktrees.create(project, 'atelier');
+    if (!made) throw new Error('sem worktree');
+    await writeFile(log, '');
+    await worktrees.pushBranch(made);
+    const trace = await readFile(log, 'utf8');
+    expect(trace).toContain(`push --set-upstream origin ${made.branch}`);
+    expect(trace).not.toMatch(/\bmerge\b/);
+    expect(trace).not.toContain('--force');
+  });
+
+  it('abre o PR com o gh absoluto e lê o check falhado, sem rede nem URL', async () => {
+    const calls: string[][] = [];
+    let ran = false;
+    const pulls = new PullService({
+      gh: '/tmp/gh',
+      run: (_executable, args) => {
+        calls.push(args);
+        if (args[1] === 'create') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'https://github.com/duartelcunha/atelier/pull/7\n',
+            stderr: '',
+          });
+        }
+        return Promise.resolve({
+          code: 1,
+          stdout: JSON.stringify([
+            {
+              name: 'typecheck',
+              state: 'FAILURE',
+              bucket: 'fail',
+              description: 'src/a.ts:1 erro',
+              link: 'https://github.com/duartelcunha/atelier/runs/1',
+            },
+          ]),
+          stderr: '',
+        });
+      },
+    });
+    const pr = await pulls.open({
+      cwd: '/tmp/atelier',
+      branch: 'solline/parser-ab12',
+      sessionId: 'sessao-1',
+      title: 'Corrige o parser',
+      body: 'O corpo.',
+    });
+    expect(pr).toEqual({
+      id: 'gh-pr-7',
+      sessionId: 'sessao-1',
+      key: '7',
+      title: 'Corrige o parser',
+      state: 'open',
+    });
+    expect(JSON.stringify(pr)).not.toContain('http');
+    expect(calls[0]).toEqual([
+      'pr',
+      'create',
+      '--title',
+      'Corrige o parser',
+      '--body',
+      'O corpo.',
+      '--head',
+      'solline/parser-ab12',
+    ]);
+    const ci = await pulls.checks('gh-pr-7');
+    expect(ci.checks).toEqual([
+      { id: 'ci-typecheck', name: 'typecheck', state: 'failed', summary: 'src/a.ts:1 erro' },
+    ]);
+    expect(JSON.stringify(ci)).not.toContain('http');
+    const missing = new PullService({
+      gh: 'gh',
+      run: () => {
+        ran = true;
+        return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+      },
+    });
+    await expect(
+      missing.open({
+        cwd: '/tmp/atelier',
+        branch: 'solline/parser-ab12',
+        sessionId: 'sessao-1',
+        title: 't',
+        body: '',
+      }),
+    ).rejects.toThrow('Não encontrei o gh.');
+    expect(ran).toBe(false);
+    expect(mapChecks([{ name: 'lint', bucket: 'pass', state: 'SUCCESS', description: '' }])[0]?.state).toBe(
+      'passed',
+    );
   });
 });

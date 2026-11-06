@@ -1418,6 +1418,29 @@ export class SessionManager {
     return saved;
   }
 
+  /** Repositório e branch, para a confirmação. Não envia nada. */
+  async pullTarget(sessionId: string): Promise<{ repo: string; branch: string }> {
+    const worktree = this.#pullWorktree(sessionId);
+    return { repo: await this.#requireWorktrees().remoteRepo(worktree), branch: worktree.branch };
+  }
+
+  /** Envia o branch da worktree. O PR abre-se depois, e só se a confirmação já passou. */
+  async pushPull(sessionId: string): Promise<{ cwd: string; branch: string }> {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    this.#requireActive(entry);
+    this.#requireIdle(entry, memory, 'enviar o branch');
+    const worktree = this.#pullWorktree(sessionId);
+    await this.#requireWorktrees().pushBranch(worktree);
+    return { cwd: worktree.path, branch: worktree.branch };
+  }
+
+  #pullWorktree(sessionId: string): Worktree {
+    const worktree = this.#memoryOf(sessionId).worktree;
+    if (!worktree) throw new Error('Abrir o PR só numa worktree.');
+    return worktree;
+  }
+
   /** Traz o trabalho da worktree para o branch atual do projeto. */
   async bring(sessionId: string): Promise<{ merged: boolean; conflicts: string[]; into: string }> {
     const entry = this.#get(sessionId);

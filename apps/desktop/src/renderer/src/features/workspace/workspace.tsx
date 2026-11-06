@@ -5,6 +5,7 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitMerge,
+  GitPullRequest,
   Hammer,
   RotateCw,
   Send,
@@ -132,6 +133,14 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
           testId="workspace-resolve"
         />
       ) : null}
+      <ActionItem
+        title="Abrir PR"
+        description="Envia o branch. Não faz merge"
+        icon={<GitPullRequest size={14} />}
+        disabled={busy}
+        onSelect={() => actions.askPull(sessionId)}
+        testId="workspace-pull"
+      />
       <ActionItem
         title="Gravar commit"
         description="Na worktree, sem merge nem push"

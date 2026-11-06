@@ -39,6 +39,7 @@ import { reviewPlan } from './races/split-review.ts';
 import { claudeDrafter, draftHandoff, type Drafter } from './handoff/drafter.ts';
 import { summaryOf } from './review.ts';
 import { IssueService, openListedIssue } from './pull/issues.ts';
+import { PullService } from './pull/pull.ts';
 import { detectChecks } from './checks/detect.ts';
 import { detectSetup } from './workspace/setup.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
@@ -115,6 +116,8 @@ export interface EngineOptions {
   env?: NodeJS.ProcessEnv;
   /** A lista de issues. Nos testes, um `gh` injectado; sem isto, o `gh` do PATH. */
   issues?: IssueService;
+  /** O PR e a CI. Nos testes, um `gh` injectado. */
+  pulls?: PullService;
 }
 
 /** Quem dá a segunda opinião: um só para tudo, ou um por fabricante (o oposto do agente da sessão). */
@@ -159,6 +162,7 @@ export class Engine {
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
   readonly issues: IssueService;
+  readonly pulls: PullService;
   /** O catálogo de servidores MCP do utilizador (aprovação, sonda e escolha por projeto). */
   readonly mcp: UserMcpCatalog;
   readonly races: RaceManager;
@@ -219,6 +223,7 @@ export class Engine {
       (options.dataDir ? fileAgentSettings(options.dataDir) : memoryAgentSettings());
     const env = options.env ?? process.env;
     this.issues = options.issues ?? new IssueService();
+    this.pulls = options.pulls ?? new PullService();
     // As corridas seguem as sessões pelos eventos delas (o estado de cada pista).
     const box: { races?: RaceManager; splits?: SplitManager } = {};
     const emitAll = (event: EngineEvent) => {
@@ -461,9 +466,6 @@ export class Engine {
     };
     const s = this.sessions;
     const ok = {} as Record<string, never>;
-    const notYet = async (): Promise<never> => {
-      throw new Error('Ainda não está feito.');
-    };
     this.#handlers = {
       'spaces.syncProjects': async (p) => {
         const before = JSON.stringify(this.spaces.projects());
@@ -747,9 +749,18 @@ export class Engine {
         });
       },
       'commit.save': (p) => s.saveCommit(p.sessionId, p.message),
-      // M4: o PR e a CI ficam para o marco seguinte.
-      'pr.open': notYet,
-      'ci.read': notYet,
+      'pr.preview': (p) => s.pullTarget(p.sessionId),
+      'pr.create': async (p) => {
+        const pushed = await s.pushPull(p.sessionId);
+        return this.pulls.open({
+          cwd: pushed.cwd,
+          branch: pushed.branch,
+          sessionId: p.sessionId,
+          title: p.title,
+          body: p.body,
+        });
+      },
+      'ci.read': (p) => this.pulls.checks(p.prId),
     };
   }
 
@@ -920,6 +931,7 @@ const READ_ONLY = new Set<EngineCommandName>([
   'rules.preview',
   'issues.list',
   'ci.read',
+  'pr.preview',
   'spaces.snapshot',
   'spaces.syncProjects',
   'engine.ping',

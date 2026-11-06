@@ -16,7 +16,7 @@ O marco, em `docs/visao.md`: uma sessão nasce de uma issue, com o branch e o co
 
 ## Primeiro
 
-O contrato (M1), o commit local (M2) e a issue do GitHub (M3) estão feitos. O PR (M4) é o seguinte. Arquivar (M5) espera pelo PR.
+O contrato (M1), o commit local (M2), a issue (M3) e o PR com a CI (M4) estão feitos. Arquivar (M5) é o seguinte.
 
 ## Marcos
 
@@ -26,7 +26,7 @@ O contrato (M1), o commit local (M2) e a issue do GitHub (M3) estão feitos. O P
 
 **M3. Issue do GitHub.** Feito. O motor lista com o `gh` absoluto. Escolher uma abre uma sessão com `worktree: 'always'`, título da issue e primeira mensagem com número, título e corpo cortado. Sem `gh`, a lista diz porquê e a sessão normal continua. Linear usa o mesmo contrato e só entra com login local, sem chave na Solline. A API pede chave: uma linha no `DECISIONS.md`, e o M7 segue só com o GitHub.
 
-**M4. PR e CI.** Push do branch da worktree e `gh pr create`, título e corpo editáveis. Confirmação nativa no main, com o repositório e o branch, antes do push. Não faz merge. «Trazer» mantém-se: é o merge local. Ler os checks é só leitura. Um botão manda o texto do check que falhou para a fila da sessão, como mensagem tua, uma vez por clique. Não é um ciclo e não troca de agente.
+**M4. PR e CI.** Feito. Push do branch da worktree e `gh pr create`, título e corpo editáveis. Confirmação nativa no main, com o repositório e o branch, antes do push. Não faz merge. «Trazer» mantém-se: é o merge local. Ler os checks é só leitura. Um botão manda o texto do check que falhou para a fila da sessão, como mensagem tua, uma vez por clique. Não é um ciclo e não troca de agente.
 
 **M5. PR entrado.** Com o PR em `merged`, a sessão fica arquivada: lê-se, não se escreve, e a mesa trata-a como fechada. A celebração é uma, curta, nesse momento, com os tokens de `packages/ui`. Movimento reduzido troca o movimento por opacidade.
 

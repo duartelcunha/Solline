@@ -4,7 +4,9 @@ import {
   applyDelta,
   type AgentCapabilities,
   type Checks,
+  type CiResult,
   type ConsultRequest,
+  type PullRequest,
   type SessionQueue,
   type EngineEvent,
   type Quality,
@@ -43,6 +45,10 @@ export interface SessionData {
   checks: Checks | null;
   /** O último "Trazer" deu conflitos nestes ficheiros (para pedir ao agente que os resolva). */
   conflicts: { files: string[]; into: string } | null;
+  /** O PR desta sessão, se já foi aberto. */
+  pull: PullRequest | null;
+  /** Os checks desse PR. */
+  ci: CiResult | null;
   /**
    * Os pedidos de perguntar a outro agente ou delegar que esta sessão fez e esperam por ti (o mais
    * antigo primeiro). Caem com o motor: depois de reiniciar já não há agente à espera.
@@ -83,6 +89,8 @@ export function createSessionStore(
     quality: null,
     checks: null,
     conflicts: null,
+    pull: null,
+    ci: null,
     consults: [],
     queue: null,
     stateSince: Date.now(),
