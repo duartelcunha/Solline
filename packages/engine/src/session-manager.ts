@@ -511,6 +511,7 @@ export class SessionManager {
   /** Abre de novo uma sessão que caiu, com resume no agente e as mesmas definições. */
   async resume(sessionId: string): Promise<SessionResult> {
     const entry = this.#get(sessionId);
+    this.#requireWritable(entry);
     await this.#checkCwd(entry.info.cwd);
     if (!entry.adapter.capabilities().features.resume)
       throw new Error('Este agente não permite retomar esta sessão. O histórico foi preservado.');
@@ -769,6 +770,24 @@ export class SessionManager {
     };
   }
 
+  /**
+   * O PR entrou. A sessão fica para ler. Uma segunda vez não volta a avisar.
+   * A fila não segue e um turno a correr é interrompido.
+   */
+  archive(sessionId: string): boolean {
+    const entry = this.#sessions.get(sessionId);
+    if (!entry || entry.info.archived) return false;
+    entry.info.archived = true;
+    const memory = this.#memory.get(sessionId);
+    memory?.cycle.hold();
+    memory?.cycle.interrupted();
+    if (entry.info.state === 'running' || entry.info.state === 'needs-you') {
+      void entry.adapter.interrupt().catch(() => undefined);
+    }
+    this.#emit({ kind: 'event', type: 'session.archived', sessionId });
+    return true;
+  }
+
   interrupt(sessionId: string): Promise<void> {
     const entry = this.#get(sessionId);
     this.#memory.get(sessionId)?.cycle.interrupted();
@@ -779,7 +798,9 @@ export class SessionManager {
 
   /** Modo, modelo e effort só passam se o agente os anunciou nas capacidades. */
   async setMode(sessionId: string, mode: string): Promise<void> {
-    const { adapter, mcp, info } = this.#get(sessionId);
+    const entry = this.#get(sessionId);
+    this.#requireWritable(entry);
+    const { adapter, mcp, info } = entry;
     if (isConsult(info)) throw new Error('Esta é uma consulta só de leitura: o modo não muda.');
     const modes = restrict(
       adapter.capabilities(),
@@ -792,7 +813,9 @@ export class SessionManager {
   }
 
   async setModel(sessionId: string, model: string): Promise<void> {
-    const { adapter } = this.#get(sessionId);
+    const entry = this.#get(sessionId);
+    this.#requireWritable(entry);
+    const { adapter } = entry;
     if (!findModel(adapter.capabilities().models, model)) {
       throw new Error(`Modelo desconhecido para este agente: ${model}`);
     }
@@ -800,7 +823,9 @@ export class SessionManager {
   }
 
   async setEffort(sessionId: string, effort: string): Promise<void> {
-    const { adapter, info } = this.#get(sessionId);
+    const entry = this.#get(sessionId);
+    this.#requireWritable(entry);
+    const { adapter, info } = entry;
     const capabilities = adapter.capabilities();
     if (!adapter.setEffort || !capabilities.effort) {
       throw new Error('Este agente não tem níveis de effort');
@@ -814,7 +839,9 @@ export class SessionManager {
   }
 
   answer(sessionId: string, requestId: string, answer: PermissionAnswer): void {
-    const answered = this.#get(sessionId).adapter.answerPermission(requestId, answer);
+    const entry = this.#get(sessionId);
+    this.#requireWritable(entry);
+    const answered = entry.adapter.answerPermission(requestId, answer);
     if (!answered) throw new Error('Este pedido já não está à espera de resposta');
   }
 
@@ -1737,7 +1764,7 @@ export class SessionManager {
     } finally {
       if (memory.preparing === abort) memory.preparing = undefined;
       // Pronta ou não, a fila segue: uma falha vê-se e repete-se, não bloqueia.
-      if (!abort.signal.aborted) memory.cycle.release();
+      if (!abort.signal.aborted && !entry.info.archived) memory.cycle.release();
     }
   }
 
@@ -1825,7 +1852,12 @@ export class SessionManager {
    * Uma sessão que passou o testemunho (ou está a passá-lo) só se lê: nada lhe envia nem mexe na
    * pasta, que agora é de outra. "Retomar aqui" devolve-lha.
    */
+  #requireWritable(entry: Entry): void {
+    if (entry.info.archived) throw new Error('O PR entrou. Esta sessão fica para ler.');
+  }
+
   #requireActive(entry: Entry): void {
+    this.#requireWritable(entry);
     const to = entry.info.handedTo;
     if (to) {
       const title = this.#sessions.get(to)?.info.title ?? 'outra sessão';
@@ -2163,6 +2195,7 @@ export class SessionManager {
 
   /** Mexer no disco ou na conversa só com o agente parado e nada a meio. */
   #requireIdle(entry: Entry, memory: Memory, what: string): void {
+    this.#requireWritable(entry);
     const state = entry.info.state;
     if (
       memory.cycle.busy ||

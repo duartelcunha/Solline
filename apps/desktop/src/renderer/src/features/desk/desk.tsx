@@ -159,8 +159,9 @@ function SessionCard({ sessionId }: { sessionId: string }) {
   const queued = useSession(sessionId, (s) => s.queue?.items.length ?? 0);
   const preparing = useSession(sessionId, (s) => s.info.setup?.state === 'running');
   const port = useSession(sessionId, (s) => s.info.port);
+  const archived = useSession(sessionId, (s) => s.info.archived === true);
   const project = useApp((s) => s.projects.find((p) => p.id === projectId)?.name);
-  const needsYou = state === 'needs-you';
+  const needsYou = !archived && state === 'needs-you';
   const idle = state === 'idle';
   const mark = useRef<HTMLSpanElement>(null);
   // Ao abrir pelo rato, o capuz do cartão voa para o bot do cabeçalho (o mesmo nome de
@@ -210,9 +211,10 @@ function SessionCard({ sessionId }: { sessionId: string }) {
       data-testid="desk-card"
       data-session={sessionId}
       data-state={state}
+      data-archived={archived ? 'true' : undefined}
       data-flip={sessionId}
       className={`sl-enter sl-motion sl-press flex cursor-pointer flex-col gap-3 rounded-xl border bg-surface p-4 text-left outline-none transition-[border-color] duration-200 hover:border-line-strong focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] ${
-        needsYou ? 'border-accent' : 'border-line'
+        archived ? 'border-line opacity-80' : needsYou ? 'border-accent' : 'border-line'
       }`}
     >
       <div className="flex items-start gap-3">
@@ -229,11 +231,13 @@ function SessionCard({ sessionId }: { sessionId: string }) {
         <CompactAsk sessionId={sessionId} />
       ) : (
         <div className="min-h-[1.25rem] truncate text-[12px] text-muted" data-testid="card-action">
-          {state === 'error'
-            ? (error ?? 'Caiu')
-            : preparing
-              ? 'A preparar a worktree…'
-              : (action ?? (idle ? 'À espera da primeira mensagem' : ''))}
+          {archived
+            ? 'PR entrou'
+            : state === 'error'
+              ? (error ?? 'Caiu')
+              : preparing
+                ? 'A preparar a worktree…'
+                : (action ?? (idle ? 'À espera da primeira mensagem' : ''))}
         </div>
       )}
 
@@ -376,7 +380,12 @@ function useSessionStates(ids: readonly string[]): string {
     [ids],
   );
   return useSyncExternalStore(subscribe, () =>
-    ids.map((id) => `${id}:${sessionStore(id)?.getState().info.state ?? 'idle'}`).join('|'),
+    ids
+      .map((id) => {
+        const info = sessionStore(id)?.getState().info;
+        return `${id}:${info?.state ?? 'idle'}:${info?.archived ? '1' : '0'}`;
+      })
+      .join('|'),
   );
 }
 
@@ -401,8 +410,8 @@ export function Desk() {
       .split('|')
       .filter(Boolean)
       .map((pair) => {
-        const [id, state] = pair.split(':') as [string, 'idle'];
-        return { id, state };
+        const [id, state, archived] = pair.split(':') as [string, 'idle', string];
+        return { id, state, archived: archived === '1' };
       }),
   );
   const raceList = Object.values(races).filter((r) => r.phase !== 'closed');

@@ -403,5 +403,7 @@ export const scenes = [
   'mcp-skipped',
   'issues-missing',
   'issues-empty',
+  'archived',
+  'celebrate',
 ] as const;
 export type Scene = (typeof scenes)[number];

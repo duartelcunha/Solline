@@ -59,6 +59,39 @@ export class PullService {
     return pr;
   }
 
+  sessionOf(prId: string): string | undefined {
+    return this.#opened.get(prId)?.sessionId;
+  }
+
+  /** O estado do PR. Só lê. Não guarda token nem URL. */
+  async state(prId: string): Promise<PullState> {
+    const known = this.#opened.get(prId);
+    if (!known) throw new Error('Este PR não está nesta sessão.');
+    const gh = this.#gh();
+    if (!gh) throw new Error('Não encontrei o gh.');
+    const run = this.options.run ?? runGh;
+    const viewed = await run(
+      gh,
+      ['pr', 'view', String(known.number), '--json', 'state'],
+      known.cwd,
+    );
+    const text = `${viewed.stderr}\n${viewed.stdout}`;
+    if (/auth login|not logged|gh auth|HTTP 401|authentication/i.test(text)) {
+      throw new Error('O gh não tem sessão.');
+    }
+    if (viewed.code !== 0) throw new Error(viewed.stderr.trim() || 'O gh não leu o PR.');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(viewed.stdout);
+    } catch {
+      throw new Error('O gh devolveu um PR inválido.');
+    }
+    if (!parsed || typeof parsed !== 'object' || typeof (parsed as { state?: unknown }).state !== 'string') {
+      throw new Error('O gh devolveu um PR inválido.');
+    }
+    return pullState((parsed as { state: string }).state);
+  }
+
   async checks(prId: string): Promise<CiResult> {
     const known = this.#opened.get(prId);
     if (!known) throw new Error('Este PR não está nesta sessão.');

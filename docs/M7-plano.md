@@ -16,7 +16,7 @@ O marco, em `docs/visao.md`: uma sessão nasce de uma issue, com o branch e o co
 
 ## Primeiro
 
-O contrato (M1), o commit local (M2), a issue (M3) e o PR com a CI (M4) estão feitos. Arquivar (M5) é o seguinte.
+O M7 está feito: contrato, commit, issue, PR com CI, e a sessão arquivada quando o PR entra. O M8 não começou.
 
 ## Marcos
 
@@ -28,7 +28,7 @@ O contrato (M1), o commit local (M2), a issue (M3) e o PR com a CI (M4) estão f
 
 **M4. PR e CI.** Feito. Push do branch da worktree e `gh pr create`, título e corpo editáveis. Confirmação nativa no main, com o repositório e o branch, antes do push. Não faz merge. «Trazer» mantém-se: é o merge local. Ler os checks é só leitura. Um botão manda o texto do check que falhou para a fila da sessão, como mensagem tua, uma vez por clique. Não é um ciclo e não troca de agente.
 
-**M5. PR entrado.** Com o PR em `merged`, a sessão fica arquivada: lê-se, não se escreve, e a mesa trata-a como fechada. A celebração é uma, curta, nesse momento, com os tokens de `packages/ui`. Movimento reduzido troca o movimento por opacidade.
+**M5. PR entrado.** Feito. Com o PR em `merged`, a sessão fica arquivada: lê-se, não se escreve, e a mesa trata-a como fechada. A celebração é uma, curta, nesse momento, com os tokens de `packages/ui`. Movimento reduzido troca o movimento por opacidade.
 
 ```
 M1 → M2, M3

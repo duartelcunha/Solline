@@ -13,6 +13,7 @@ import { CloseDialog, WorkspaceChip } from './features/workspace/workspace.tsx';
 import { BringDialog } from './features/workspace/bring-dialog.tsx';
 import { CommitDialog } from './features/workspace/commit-dialog.tsx';
 import { PullDialog } from './features/pull/pull-dialog.tsx';
+import { Celebration } from './features/pull/celebration.tsx';
 import { IssuesDialog } from './features/issues/issues-dialog.tsx';
 import { HandoffDialog } from './features/handoff/handoff-dialog.tsx';
 import { SessionMenu } from './features/handoff/pass-to.tsx';
@@ -436,6 +437,7 @@ export function App() {
         <BringDialog />
         <CommitDialog />
         <PullDialog />
+        <Celebration />
         <IssuesDialog />
         <HandoffDialog />
         <MapDialog />

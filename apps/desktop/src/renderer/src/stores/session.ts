@@ -187,6 +187,8 @@ function reduceEngineEvent(data: SessionData, event: EngineEvent): SessionData {
       return { ...data, queue: event.queue };
     case 'session.workspace':
       return { ...data, info: { ...data.info, workspace: event.workspace } };
+    case 'session.archived':
+      return { ...data, info: { ...data.info, archived: true } };
     case 'session.handoff': {
       const { handedTo: _previous, ...info } = data.info;
       return { ...data, info: event.handedTo ? { ...info, handedTo: event.handedTo } : info };

@@ -30,6 +30,7 @@ export function PullDialog() {
 function PullBody({ sessionId }: { sessionId: string }) {
   const title = useSession(sessionId, (s) => s.info.title);
   const pull = useSession(sessionId, (s) => s.pull);
+  const archived = useSession(sessionId, (s) => s.info.archived === true);
   const ci = useSession(sessionId, (s) => s.ci);
   const [heading, setHeading] = useState(title);
   const [body, setBody] = useState('');
@@ -105,7 +106,7 @@ function PullBody({ sessionId }: { sessionId: string }) {
                         {check.state === 'failed' ? (
                           <button
                             type="button"
-                            disabled={sending !== null}
+                            disabled={sending !== null || archived}
                             onClick={() => sendFailed(check)}
                             className={`${button} mt-2 border border-line hover:bg-surface-hover`}
                             data-testid="ci-send"

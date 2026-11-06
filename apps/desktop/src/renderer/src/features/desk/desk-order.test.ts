@@ -12,6 +12,11 @@ describe('a mesa', () => {
       { id: 'e', state: 'running' as const },
     ]);
     expect(order.map((s) => s.id)).toEqual(['c', 'b', 'e', 'd', 'a']);
+    const withClosed = deskOrder([
+      { id: 'live', state: 'idle' as const },
+      { id: 'done', state: 'running' as const, archived: true },
+    ]);
+    expect(withClosed.map((s) => s.id)).toEqual(['live', 'done']);
   });
 
   it('a última ação é a ferramenta mais recente ou a primeira linha do texto', () => {

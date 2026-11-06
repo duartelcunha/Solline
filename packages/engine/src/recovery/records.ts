@@ -90,6 +90,9 @@ export function replay(records: readonly RecoveryRecord[], initial: RecoveryStat
         if (event.handedTo) view.session.handedTo = event.handedTo;
         else delete view.session.handedTo;
         break;
+      case 'session.archived':
+        view.session.archived = true;
+        break;
     }
   }
   state.snapshot.sessions = state.sessions.map((session) => session.view);

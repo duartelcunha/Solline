@@ -238,7 +238,8 @@ export class Engine {
           (!this.#recordedSessions.has(sessionId) ||
             event.type === 'session.timeline' ||
             event.type === 'session.workspace' ||
-            event.type === 'session.handoff');
+            event.type === 'session.handoff' ||
+            event.type === 'session.archived');
         const session = capture
           ? this.sessions?.recovery().find((saved) => saved.view.session.id === sessionId)
           : undefined;
@@ -760,7 +761,14 @@ export class Engine {
           body: p.body,
         });
       },
-      'ci.read': (p) => this.pulls.checks(p.prId),
+      'ci.read': async (p) => {
+        const state = await this.pulls.state(p.prId);
+        if (state === 'merged') {
+          const sessionId = this.pulls.sessionOf(p.prId);
+          if (sessionId) s.archive(sessionId);
+        }
+        return this.pulls.checks(p.prId);
+      },
     };
   }
 

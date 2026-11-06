@@ -96,6 +96,8 @@ interface AppState {
   pullFor: string | null;
   /** O projeto cuja lista de issues está aberta. */
   issuesFor: string | null;
+  /** A sessão cujo PR acabou de entrar. A celebração é uma. */
+  celebrate: string | null;
   /** O Mapa das sessões ligadas está aberto. */
   mapOpen: boolean;
   /** A vista principal: a mesa com todas as sessões, ou a conversa da sessão ativa. */
@@ -134,6 +136,7 @@ export const useApp = create<AppState>(() => ({
   commitFor: null,
   pullFor: null,
   issuesFor: null,
+  celebrate: null,
   mapOpen: false,
   view: 'desk',
   spaceProjectId: null,
@@ -540,6 +543,14 @@ export function dispatch(event: EngineEvent): void {
         );
       }, false);
     }
+    return;
+  }
+  if (event.type === 'session.archived') {
+    const store = sessionStores.get(event.sessionId);
+    if (!store) return;
+    const already = store.getState().info.archived === true;
+    store.setState(reduceSession(store.getState(), event));
+    if (!already) useApp.setState({ celebrate: event.sessionId });
     return;
   }
   if (event.type === 'engine.ready') {
@@ -1197,6 +1208,10 @@ export const actions = {
 
   closePull(): void {
     useApp.setState({ pullFor: null });
+  },
+
+  clearCelebration(): void {
+    useApp.setState({ celebrate: null });
   },
 
   /** Abre o PR. O main confirma o repositório e o branch antes do push. */

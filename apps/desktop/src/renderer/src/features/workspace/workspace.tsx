@@ -35,6 +35,7 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
   const setup = useSession(sessionId, (s) => s.info.setup);
   const port = useSession(sessionId, (s) => s.info.port);
   const busy = useSession(sessionId, (s) => s.info.state !== 'idle' && s.info.state !== 'error');
+  const archived = useSession(sessionId, (s) => s.info.archived === true);
 
   if (workspace?.kind === 'shared') {
     return (
@@ -137,7 +138,7 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
         title="Abrir PR"
         description="Envia o branch. Não faz merge"
         icon={<GitPullRequest size={14} />}
-        disabled={busy}
+        disabled={busy || archived}
         onSelect={() => actions.askPull(sessionId)}
         testId="workspace-pull"
       />
@@ -145,7 +146,7 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
         title="Gravar commit"
         description="Na worktree, sem merge nem push"
         icon={<GitCommitHorizontal size={14} />}
-        disabled={busy}
+        disabled={busy || archived}
         onSelect={() => actions.askCommit(sessionId)}
         testId="workspace-commit"
       />
@@ -157,7 +158,7 @@ export function WorkspaceChip({ sessionId }: { sessionId: string }) {
             : 'Nada por trazer'
         }
         icon={<GitMerge size={14} />}
-        disabled={busy || stats.files === 0}
+        disabled={busy || archived || stats.files === 0}
         onSelect={() => actions.askBring(sessionId)}
         testId="workspace-bring"
       />

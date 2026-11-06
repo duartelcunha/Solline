@@ -416,3 +416,88 @@ describe('PR e CI', () => {
     );
   });
 });
+
+describe('PR entrado', () => {
+  it('lê o estado pelo gh absoluto e arquiva a sessão, sem rede', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'solline-archive-'));
+    roots.push(dir);
+    const calls: string[][] = [];
+    const pulls = new PullService({
+      gh: '/tmp/gh',
+      run: (_executable, args) => {
+        calls.push(args);
+        if (args[1] === 'create') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'https://github.com/duartelcunha/atelier/pull/9\n',
+            stderr: '',
+          });
+        }
+        if (args[1] === 'view') {
+          return Promise.resolve({ code: 0, stdout: '{"state":"MERGED"}', stderr: '' });
+        }
+        return Promise.resolve({ code: 0, stdout: '[]', stderr: '' });
+      },
+    });
+    const engine = new Engine({
+      isolated: true,
+      checkpoints: false,
+      checks: false,
+      reviewer: false,
+      worktrees: false,
+      registry: testRegistry({
+        claude: (_options, sink) => new Talker(sink),
+      }),
+      pulls,
+    });
+    closers.push(() => engine.dispose());
+    const started = await engine.handle({
+      kind: 'request',
+      id: 'start',
+      command: 'session.start',
+      payload: { projectId: 'atelier', agent: 'claude', cwd: dir, trusted: true },
+    });
+    if (!started.ok) throw new Error(started.error.message);
+    const sessionId = (started.result as { session: { id: string } }).session.id;
+    await pulls.open({
+      cwd: dir,
+      branch: 'solline/parser-ab12',
+      sessionId,
+      title: 'Corrige o parser',
+      body: '',
+    });
+    const read = await engine.handle({
+      kind: 'request',
+      id: 'ci',
+      command: 'ci.read',
+      payload: { prId: 'gh-pr-9' },
+    });
+    expect(read.ok).toBe(true);
+    expect(calls.some((args) => args.join(' ') === 'pr view 9 --json state')).toBe(true);
+    const snap = await engine.handle({
+      kind: 'request',
+      id: 'snap',
+      command: 'engine.snapshot',
+      payload: {},
+    });
+    if (!snap.ok) throw new Error('snapshot');
+    const sessions = (snap.result as { sessions: { session: { archived?: boolean } }[] }).sessions;
+    expect(sessions[0]?.session.archived).toBe(true);
+    const sent = await engine.handle({
+      kind: 'request',
+      id: 'send',
+      command: 'session.send',
+      payload: { sessionId, text: 'mais uma' },
+    });
+    expect(sent.ok).toBe(false);
+    if (!sent.ok) expect(sent.error.message).toContain('para ler');
+    const again = await engine.handle({
+      kind: 'request',
+      id: 'ci-2',
+      command: 'ci.read',
+      payload: { prId: 'gh-pr-9' },
+    });
+    expect(again.ok).toBe(true);
+    expect(sessions[0]?.session.archived).toBe(true);
+  });
+});

@@ -777,6 +777,7 @@ ${goal}
           projectId: project.id,
           cwd: project.path,
           agent: String(payload.agent),
+          ...(scene === 'archived' ? { archived: true } : {}),
           title: 'Navegação com contexto',
           state: 'starting',
           agentSessionId: 'qa-agent',
@@ -823,6 +824,14 @@ ${goal}
             scene === 'review-targeted' ? structuredClone(targetedReview) : [structuredClone(diff)],
         });
         seed(session.id); // Deliberately before the response: tests the real early-event buffer.
+        if (scene === 'celebrate') {
+          const id = session.id;
+          setTimeout(() => {
+            const current = sessions.get(id);
+            if (current) current.archived = true;
+            emit({ kind: 'event', type: 'session.archived', sessionId: id });
+          }, 300);
+        }
         return { session: { ...session }, capabilities };
       }
       case 'handoff.draft': {

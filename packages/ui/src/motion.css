@@ -75,6 +75,21 @@
   transition-duration: var(--sl-dur-exit);
 }
 
+/* Uma celebração curta. O movimento reduzido põe --sl-rise a zero: fica só a opacidade. */
+.sl-celebrate {
+  animation: sl-celebrate var(--sl-dur-slow) var(--sl-ease-out) both;
+}
+@keyframes sl-celebrate {
+  from {
+    opacity: 0;
+    transform: translateY(var(--sl-rise));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Um painel que entra pela direita e sai por onde entrou. */
 .sl-panel {
   transition:
