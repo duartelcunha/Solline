@@ -55,7 +55,7 @@ export function ReviewPanel({ sessionId }: { sessionId: string }) {
       }}
       data-state={state}
       aria-label="Rever alterações"
-      className="sl-panel sl-motion flex w-[32rem] max-w-[45vw] min-w-[22rem] shrink-0 flex-col border-l border-line bg-bg"
+      className="sl-panel sl-motion flex w-[62%] max-w-[46rem] min-w-[22rem] shrink-0 flex-col border-l border-line bg-bg"
       data-testid="review-panel"
     >
       <ReviewBody sessionId={sessionId} />

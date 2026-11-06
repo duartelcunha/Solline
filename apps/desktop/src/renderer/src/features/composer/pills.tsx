@@ -12,9 +12,9 @@ import { IconSwap } from '@solline/ui/icon-swap';
 import { lastInputWasKeyboard } from '@solline/ui/motion';
 import { Item, MenuShell } from '../../components/menu.tsx';
 
-/** Pastilha dentro da caixa do compositor: controlo de 28 px, raio de controlo, borda leve. */
+/** Um controlo só: modelo, esforço e modo, com o nome sempre à vista. */
 const pillClass =
-  'pill inline-flex h-7 shrink-0 items-center gap-1.5 rounded-control border border-line px-2.5 text-[12px] whitespace-nowrap text-muted outline-none sl-press hover:border-line-strong hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] disabled:opacity-50 data-[state=open]:border-line-strong data-[state=open]:bg-surface-hover data-[state=open]:text-fg';
+  'pill inline-flex h-auto min-h-7 shrink-0 items-center gap-1.5 px-2.5 py-1 text-[12px] text-muted outline-none sl-press hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] disabled:opacity-50 data-[state=open]:bg-surface-hover data-[state=open]:text-fg';
 
 /** "Opus 5.5 · Best for..." -> "Opus 5.5"; se não houver versão, o nome do menu. */
 export function shortModelName(model: ModelOption | undefined, current: string | null): string {
@@ -49,9 +49,9 @@ export function SettingsPills({
   const [helpDismissed, setHelpDismissed] = useState(false);
   return (
     <div
-      className="flex min-w-0 flex-wrap items-center gap-1.5"
+      className="inline-flex min-w-0 flex-wrap items-stretch rounded-control border border-line"
       role="group"
-      aria-label="Modelo, effort e modo"
+      aria-label="Modelo, esforço e modo"
     >
       <MenuShell
         title="Modelo"
@@ -61,10 +61,12 @@ export function SettingsPills({
             data-testid="pill-model"
             aria-label={`Modelo: ${modelName}. Mudar`}
             title={modelName}
-            className={`${pillClass} max-w-[min(12rem,100%)]`}
+            className={`${pillClass} max-w-[14rem] ${showEffort || showMode ? 'border-r border-line' : ''}`}
           >
             <Cpu aria-hidden size={13} strokeWidth={1.9} className="shrink-0" />
-            <span className="min-w-0 truncate">{modelName}</span>
+            <span className="line-clamp-2 min-w-0 text-left leading-4 whitespace-normal">
+              {modelName}
+            </span>
             <ChevronDown aria-hidden size={12} strokeWidth={2} className="shrink-0 opacity-60" />
           </Menu.Trigger>
         }
@@ -87,7 +89,7 @@ export function SettingsPills({
           title="Esforço"
           trigger={
             <span
-              className="effort-help-group"
+              className={`effort-help-group ${showMode ? 'border-r border-line' : ''}`}
               data-help-dismissed={helpDismissed}
               onPointerEnter={() => setHelpDismissed(false)}
               onFocus={() => setHelpDismissed(false)}
@@ -103,14 +105,8 @@ export function SettingsPills({
                 className={pillClass}
               >
                 <Gauge aria-hidden size={13} strokeWidth={1.9} />
-                {/* Estreito (painel de rever aberto): só o ícone; o nome fica no tooltip. */}
-                <span className="@max-[30rem]:hidden">{settings.effort ?? 'esforço padrão'}</span>
-                <ChevronDown
-                  aria-hidden
-                  size={12}
-                  strokeWidth={2}
-                  className="opacity-60 @max-[30rem]:hidden"
-                />
+                <span>{settings.effort ?? 'esforço padrão'}</span>
+                <ChevronDown aria-hidden size={12} strokeWidth={2} className="opacity-60" />
               </Menu.Trigger>
               <span
                 id={effortHelpId}
@@ -140,7 +136,7 @@ export function SettingsPills({
               data-testid="pill-mode"
               aria-label={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}. Mudar`}
               title={`Modo: ${mode?.label ?? settings.mode ?? 'padrão'}`}
-              className={`${pillClass} max-w-full !h-auto min-h-7 py-1`}
+              className={`${pillClass} max-w-48`}
             >
               <IconSwap
                 swapKey={mode?.id ?? settings.mode ?? 'ask'}
@@ -152,12 +148,7 @@ export function SettingsPills({
               <span className="max-w-48 min-w-0 text-left leading-4 whitespace-normal break-words">
                 {mode?.label ?? settings.mode ?? 'Modo'}
               </span>
-              <ChevronDown
-                aria-hidden
-                size={12}
-                strokeWidth={2}
-                className="opacity-60 @max-[30rem]:hidden"
-              />
+              <ChevronDown aria-hidden size={12} strokeWidth={2} className="opacity-60" />
             </Menu.Trigger>
           }
         >

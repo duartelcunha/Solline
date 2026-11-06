@@ -5,6 +5,7 @@ import { IconSwap } from '@solline/ui/icon-swap';
 import { actions, flushDrafts, useApp, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { SettingsPills } from './pills.tsx';
+import { checkCounts, proofLine } from '../session/glance.ts';
 import { RacePill } from '../race/race-pill.tsx';
 import { handedBanner, handedReason } from '../handoff/handoff-model.ts';
 import { useSplitFlow } from '../split/split-flow.tsx';
@@ -115,6 +116,8 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
   }, []);
 
   const checks = useSession(sessionId, (s) => s.checks);
+  const pendingFiles = useSession(sessionId, (s) => s.timeline?.pending?.files ?? 0);
+  const proof = proofLine({ pendingFiles, ...checkCounts(checks?.results) });
   // Passou o testemunho: só se lê. O compositor diz porquê em vez de falhar ao enviar.
   const archived = useSession(sessionId, (s) => s.info.archived === true);
   const handedTo = useSession(sessionId, (s) => s.info.handedTo);
@@ -189,6 +192,11 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
       {/* A mesma largura e margem da conversa: as duas colunas alinham. */}
       <div className="mx-auto w-full max-w-3xl px-8">
         {above}
+        {proof ? (
+          <p data-testid="turn-summary" className="mb-2 px-1 text-[12px] leading-snug text-muted">
+            {proof}
+          </p>
+        ) : null}
         {actionError ? (
           <p
             role="alert"
@@ -204,7 +212,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             data-testid="check-suggestion"
             className="sl-enter mb-2 flex items-center gap-1.5 px-1 text-[12px] text-muted"
           >
-            <span className="min-w-0 truncate">{failing.label} falhou ·</span>
+            <span className="min-w-0">{failing.label} falhou ·</span>
             <button
               type="button"
               onClick={() => void actions.fixCheck(sessionId, failing.id)}

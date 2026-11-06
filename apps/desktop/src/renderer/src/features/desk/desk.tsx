@@ -14,7 +14,6 @@ import { scrollIntoViewSmooth, useDragScroll } from '@solline/ui/scroll';
 import { actions, useApp, useSession } from '../../stores/app.ts';
 import { SessionBot } from '../agents/bots.tsx';
 import { RaceCard } from '../race/race.tsx';
-import { ContextMeter, money } from '../composer/composer.tsx';
 import { Mark } from '../quality/checks.tsx';
 import { deskOrder, lastAction, pendingAsk } from './desk-order.ts';
 import { sessionStore } from '../../stores/app.ts';
@@ -146,19 +145,17 @@ function CompactAsk({ sessionId }: { sessionId: string }) {
   );
 }
 
-/** Um cartão por sessão: quem é, o que está a fazer, quanto gastou e se precisa de ti. */
+/** Um cartão por sessão: quem é, o que está a fazer e se precisa de ti. */
 function SessionCard({ sessionId }: { sessionId: string }) {
   const title = useSession(sessionId, (s) => s.info.title);
   const state = useSession(sessionId, (s) => s.info.state);
   const projectId = useSession(sessionId, (s) => s.projectId);
   const workspace = useSession(sessionId, (s) => s.info.workspace);
-  const usage = useSession(sessionId, (s) => s.usage);
   const action = useSession(sessionId, (s) => lastAction(s.turns));
   const checks = useSession(sessionId, (s) => s.checks);
   const error = useSession(sessionId, (s) => s.error);
   const queued = useSession(sessionId, (s) => s.queue?.items.length ?? 0);
   const preparing = useSession(sessionId, (s) => s.info.setup?.state === 'running');
-  const port = useSession(sessionId, (s) => s.info.port);
   const archived = useSession(sessionId, (s) => s.info.archived === true);
   const project = useApp((s) => s.projects.find((p) => p.id === projectId)?.name);
   const needsYou = !archived && state === 'needs-you';
@@ -222,7 +219,9 @@ function SessionCard({ sessionId }: { sessionId: string }) {
           <SessionBot sessionId={sessionId} size={48} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold tracking-[-0.01em]">{title}</div>
+          <div className="line-clamp-2 text-[13px] leading-snug font-semibold tracking-[-0.01em]">
+            {title}
+          </div>
           <div className="truncate text-[11.5px] text-subtle">{project ?? ''}</div>
         </div>
       </div>
@@ -230,7 +229,10 @@ function SessionCard({ sessionId }: { sessionId: string }) {
       {needsYou ? (
         <CompactAsk sessionId={sessionId} />
       ) : (
-        <div className="min-h-[1.25rem] truncate text-[12px] text-muted" data-testid="card-action">
+        <div
+          className="line-clamp-2 min-h-[1.25rem] text-[12px] leading-snug text-muted"
+          data-testid="card-action"
+        >
           {archived
             ? 'PR entrou'
             : state === 'error'
@@ -242,21 +244,10 @@ function SessionCard({ sessionId }: { sessionId: string }) {
       )}
 
       <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
-        {usage.context ? (
-          <ContextMeter
-            used={usage.context.usedTokens}
-            max={usage.context.maxTokens}
-            percent={usage.context.percent}
-          />
-        ) : null}
-        {port !== undefined ? <span className="tabular-nums text-subtle">:{port}</span> : null}
         {queued > 0 ? (
           <span className="tabular-nums" data-testid="card-queued">
             {queued} na fila
           </span>
-        ) : null}
-        {usage.costUsd !== null ? (
-          <span className="tabular-nums">{money.format(usage.costUsd)}</span>
         ) : null}
         {workspace?.kind === 'worktree' ? (
           <span className="inline-flex min-w-0 items-center gap-1" title={workspace.branch}>
