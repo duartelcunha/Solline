@@ -16,6 +16,7 @@ import {
   type Turn,
   type Usage,
 } from '@solline/protocol';
+import { titleFrom } from '../features/session/title.ts';
 
 /** Tudo o que a interface sabe de uma sessão. Só muda por eventos do motor. */
 export interface SessionData {
@@ -213,9 +214,4 @@ function reduceEngineEvent(data: SessionData, event: EngineEvent): SessionData {
     default:
       return data;
   }
-}
-
-function titleFrom(text: string): string {
-  const line = text.replace(/\s+/g, ' ').trim();
-  return line.length > 60 ? `${line.slice(0, 59)}…` : line || 'Nova sessão';
 }

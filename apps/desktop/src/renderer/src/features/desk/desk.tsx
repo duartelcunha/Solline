@@ -219,7 +219,10 @@ function SessionCard({ sessionId }: { sessionId: string }) {
           <SessionBot sessionId={sessionId} size={48} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="line-clamp-2 text-[13px] leading-snug font-semibold tracking-[-0.01em]">
+          <div
+            className="text-[13px] leading-snug font-semibold tracking-[-0.01em] break-words"
+            title={title}
+          >
             {title}
           </div>
           <div className="truncate text-[11.5px] text-subtle">{project ?? ''}</div>

@@ -26,6 +26,7 @@ import {
   type Turn,
 } from '@solline/protocol';
 import type { SollineApi, UiRecoveryState, WindowState, Theme } from '@solline/protocol/bridge';
+import { titleFrom } from '../src/renderer/src/features/session/title.ts';
 import {
   DraftUpdateSchema,
   UiRecoverySchema,
@@ -397,11 +398,7 @@ ${goal}
             item.turns.length === 0
           ) {
             const block = delta.turn.blocks.find((block) => block.kind === 'text');
-            if (block?.kind === 'text') {
-              const text = block.text.replace(/\s+/g, ' ').trim();
-              item.session.title =
-                text.length > 60 ? `${text.slice(0, 59)}…` : text || 'Nova sessão';
-            }
+            if (block?.kind === 'text') item.session.title = titleFrom(block.text);
           }
           item.turns = applyDelta(item.turns, delta);
         }
