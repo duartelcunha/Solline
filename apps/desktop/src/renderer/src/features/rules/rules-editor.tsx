@@ -206,7 +206,7 @@ function RuleRow({ rule, onEdit }: { rule: ProjectRule; onEdit: () => void }) {
     <li
       data-testid="rule-row"
       data-enabled={rule.enabled}
-      className="flex items-start gap-3 border-t border-line py-4 first:border-t-0"
+      className="flex items-start gap-3 rounded-md border border-line bg-surface px-3.5 py-3 shadow-[0_1px_2px_#0000000a]"
     >
       <div className="pt-0.5">
         <Switch
@@ -228,30 +228,47 @@ function RuleRow({ rule, onEdit }: { rule: ProjectRule; onEdit: () => void }) {
         type="button"
         onClick={onEdit}
         aria-label={`Editar a regra ${rule.title}`}
-        className={`min-w-0 flex-1 rounded-sm text-left ${rule.enabled ? '' : 'opacity-60'}`}
+        className="min-w-0 flex-1 rounded-sm text-left"
       >
-        <span className="block truncate text-[13px] font-medium">{rule.title}</span>
-        <span className="mt-0.5 block truncate text-[12.5px] text-muted">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span
+            className={`truncate text-[13.5px] font-medium tracking-[-0.01em] ${rule.enabled ? '' : 'text-muted'}`}
+          >
+            {rule.title}
+          </span>
+          {rule.enabled ? null : (
+            <span className="shrink-0 text-[11px] text-subtle">Desligada</span>
+          )}
+        </span>
+        <span
+          className={`mt-1 block truncate text-[12.5px] leading-snug ${rule.enabled ? 'text-muted' : 'text-subtle'}`}
+        >
           {firstLine(rule.text)}
         </span>
         <span className="mt-2 flex flex-wrap items-center gap-1.5">
           {rule.globs.length === 0 ? (
-            <span className="text-[11px] text-subtle">Vale sempre</span>
+            <span className="rounded-sm bg-surface-sunken px-1.5 py-px text-[11px] text-subtle">
+              Vale sempre
+            </span>
           ) : (
             rule.globs.map((glob) => (
               <code
                 key={glob}
-                className="rounded-sm border border-line bg-surface-sunken px-1.5 py-px font-mono text-[11px]"
+                className="rounded-sm border border-line bg-surface-sunken px-1.5 py-px font-mono text-[11px] text-muted"
               >
                 {glob}
               </code>
             ))
           )}
-          {rule.enabled ? null : <span className="text-[11px] text-subtle">· Desligada</span>}
         </span>
       </button>
-      {/* A linha inteira já edita: o lápis é o sinal visível e fica fora da ordem do teclado. */}
-      <button type="button" className="space-control" aria-hidden tabIndex={-1} onClick={onEdit}>
+      <button
+        type="button"
+        className="space-control space-quiet"
+        aria-hidden
+        tabIndex={-1}
+        onClick={onEdit}
+      >
         <Pencil size={14} />
       </button>
     </li>
@@ -281,10 +298,10 @@ export function RulesEditor({ projectId }: { projectId: string | null }) {
   });
 
   const list = (rules: ProjectRule[], level: string | null) => (
-    <ul data-testid={level === null ? 'rules-global' : 'rules-list'}>
+    <ul className="grid gap-2" data-testid={level === null ? 'rules-global' : 'rules-list'}>
       {rules.map((rule) =>
         editing === rule.id ? (
-          <li key={rule.id} className="py-3">
+          <li key={rule.id}>
             <RuleForm projectId={level} initial={draftOf(rule)} onClose={() => setEditing(null)} />
           </li>
         ) : (
@@ -294,21 +311,35 @@ export function RulesEditor({ projectId }: { projectId: string | null }) {
     </ul>
   );
 
+  const section = (label: string, count: number) => (
+    <div className="mt-6 mb-2 flex items-baseline justify-between gap-3">
+      <h3 className="text-[11px] font-medium tracking-[0.04em] text-subtle uppercase">{label}</h3>
+      <span className="text-[11px] tabular-nums text-subtle">{count}</span>
+    </div>
+  );
+
   return (
     <section className="space-rules-view max-w-[800px]" aria-label="Regras">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
         <div className="min-w-0">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-[15px] font-semibold tracking-[-0.015em]">
             {projectId === null ? 'Regras de todos os projetos' : 'Regras do projeto'}
           </h2>
-          <p className="mt-1 text-[12px] text-muted">
+          <p className="mt-1 max-w-[38ch] text-[12.5px] leading-snug text-muted">
             Escritas por ti e guardadas na Solline. Um commit não as altera.
           </p>
+          <p
+            className="mt-2 text-[11px] tabular-nums text-subtle"
+            data-testid="rules-size"
+            title={`Acima de ${SIZE_WARN_LINES} linhas ou ${SIZE_WARN_CHARS} caracteres os agentes seguem pior`}
+          >
+            Sempre à vista: {size.lines} linhas · {size.chars} caracteres
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1 rounded-lg border border-line bg-surface-sunken p-1">
           <button
             type="button"
-            className="space-control"
+            className="space-control space-quiet"
             disabled={!view.canUndo}
             onClick={() => void actions.undoRules(projectId)}
             data-testid="rules-undo"
@@ -318,11 +349,11 @@ export function RulesEditor({ projectId }: { projectId: string | null }) {
           </button>
           <button
             type="button"
-            className="space-control"
+            className="space-control space-quiet"
             onClick={() => void (preview ? setPreview(null) : showPreview())}
             data-testid="rules-preview"
           >
-            {preview ? 'Fechar pré-visualização' : 'O que o agente recebe'}
+            {preview ? 'Fechar' : 'O que o agente recebe'}
           </button>
           <button
             type="button"
@@ -337,7 +368,7 @@ export function RulesEditor({ projectId }: { projectId: string | null }) {
             Regra
           </button>
         </div>
-      </div>
+      </header>
 
       <div className="mt-5 grid gap-2.5">
         {view.warnings.map((warning) => (
@@ -348,7 +379,7 @@ export function RulesEditor({ projectId }: { projectId: string | null }) {
       </div>
 
       {preview ? (
-        <div className="mt-4 grid gap-3" data-testid="rules-preview-text">
+        <div className="mt-4 grid gap-2" data-testid="rules-preview-text">
           {(
             [
               ['Claude', preview.claude],
@@ -356,9 +387,11 @@ export function RulesEditor({ projectId }: { projectId: string | null }) {
               ['ACP', preview.acp],
             ] as const
           ).map(([name, text]) => (
-            <div key={name}>
-              <p className="text-[12px] font-medium">{name}</p>
-              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-control border border-line bg-surface-sunken p-3 font-mono text-[11.5px] text-muted">
+            <div key={name} className="rounded-md border border-line bg-surface">
+              <p className="border-b border-line px-3 py-1.5 text-[11px] font-medium tracking-[0.04em] text-subtle uppercase">
+                {name}
+              </p>
+              <pre className="max-h-48 overflow-auto px-3 py-2.5 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap text-muted">
                 {text || '(nada no arranque)'}
               </pre>
             </div>
@@ -377,27 +410,27 @@ export function RulesEditor({ projectId }: { projectId: string | null }) {
       ) : null}
 
       {global && global.rules.length > 0 ? (
-        <div className="mt-5">
-          <h3 className="text-[12.5px] font-medium text-muted">Em todos os projetos</h3>
+        <div>
+          {section('Em todos os projetos', global.rules.length)}
           {list(global.rules, null)}
         </div>
       ) : null}
 
       {projectId !== null ? (
         view.rules.length === 0 && editing !== 'new' && !global?.rules.length ? (
-          <div className="space-empty" data-testid="rules-empty">
+          <div className="space-empty mt-6 rounded-md border border-dashed border-line" data-testid="rules-empty">
             <ScrollText size={30} strokeWidth={1} aria-hidden />
             <p>Ainda sem regras.</p>
             <span>Uma regra curta, escrita por ti, vale mais do que um ficheiro comprido.</span>
           </div>
         ) : (
-          <>
-            <h3 className="mt-5 text-[12.5px] font-medium text-muted">Neste projeto</h3>
+          <div>
+            {section('Neste projeto', view.rules.length)}
             {list(view.rules, projectId)}
-          </>
+          </div>
         )
       ) : view.rules.length === 0 && editing !== 'new' ? (
-        <div className="space-empty" data-testid="rules-empty">
+        <div className="space-empty mt-6 rounded-md border border-dashed border-line" data-testid="rules-empty">
           <ScrollText size={30} strokeWidth={1} aria-hidden />
           <p>Ainda sem regras gerais.</p>
           <span>Valem em todos os projetos, até as desligares.</span>
@@ -405,14 +438,6 @@ export function RulesEditor({ projectId }: { projectId: string | null }) {
       ) : (
         list(view.rules, null)
       )}
-
-      <p
-        className="mt-4 text-[11.5px] text-subtle tabular-nums"
-        data-testid="rules-size"
-        title={`Acima de ${SIZE_WARN_LINES} linhas ou ${SIZE_WARN_CHARS} caracteres os agentes seguem pior`}
-      >
-        Sempre à vista dos agentes: {size.lines} linhas · {size.chars} caracteres
-      </p>
     </section>
   );
 }
