@@ -160,8 +160,9 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
       </span>
       <div className="flex min-w-0 flex-col gap-0.5 py-1">
         <h1
-          className="line-clamp-2 text-[13px] leading-snug font-semibold tracking-[-0.01em]"
+          className="text-[13px] leading-snug font-semibold tracking-[-0.01em] break-words"
           data-testid="session-title"
+          title={title}
         >
           {title}
         </h1>

@@ -62,6 +62,7 @@ function SessionRow({ id }: { id: string }) {
         onClick={() => actions.selectSession(id)}
         aria-current={active ? 'page' : undefined}
         aria-label={`${title}, ${STATE_LABEL[state]}`}
+        title={title}
         data-testid="session-row"
         data-state={state}
         className={`relative flex w-full items-center gap-2 rounded-md py-1.5 pr-7 pl-5 text-left text-[13px] transition-colors duration-150 active:bg-surface-hover ${active ? 'bg-surface-hover text-fg' : 'text-muted hover:bg-surface-hover/70 hover:text-fg'}`}
