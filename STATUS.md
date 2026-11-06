@@ -2,20 +2,20 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** 🟢 M6 fechado no ramo do PR #2, com as quatro decisões do Duarte; a seguir o M7, quando ele o pedir.
+**Estado:** 🟢 M6 no `main` (`9a85f61`). O plano do M7 está escrito; a implementação espera o Duarte.
 
 **Última atualização:** 2026-11-06, por Duarte
 
 ## Onde está
 
-- O `main` tem o M6. O ramo `cursor/m6-decisoes-m7-plano-5567` (PR #2) traz as quatro decisões.
+- `main` inclui o M6 (squash `9a85f61`). O plano do M7 está em `docs/M7-plano.md`.
 - Regras nativas, fora da pasta: gerais e por projeto, com desfazer e pré-visualização. A Solline não lê `CLAUDE.md` nem `AGENTS.md`.
 - Consulta do Claude sem Bash (`disallowedTools`). Uma consulta não passa o testemunho. Memórias externas não se aprovam em lote.
 - O git das worktrees só corre pelo caminho de `resolveGit()`.
 
 ## Próximo passo
 
-O M7 (do pedido ao PR), quando o Duarte o pedir. O plano está em `docs/M7-plano.md`. As quatro decisões do M6 estão fechadas (`DECISIONS.md`, 2026-11-06).
+Implementar o M7 pela ordem de `docs/M7-plano.md`: contrato, commit local, issue do GitHub, PR e CI, arquivar quando o PR entra.
 
 ## Comandos
 
