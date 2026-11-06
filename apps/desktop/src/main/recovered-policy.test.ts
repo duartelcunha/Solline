@@ -132,7 +132,7 @@ describe('recovered project policy', () => {
     f.projects.get.mockResolvedValue(undefined);
     await reconcilePolicy(f.engine, f.projects, 'rules.list', { projectId: 'project' });
     expect(f.calls).toEqual([]);
-    for (const command of ['rules.save', 'rules.delete', 'rules.import', 'rules.export'] as const) {
+    for (const command of ['rules.save', 'rules.delete', 'rules.undo'] as const) {
       const payload =
         command === 'rules.save'
           ? { projectId: 'project', title: 'A', text: 'b' }

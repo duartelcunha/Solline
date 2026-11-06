@@ -2,23 +2,20 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** 🟢 M6 implementado e no `main`; a seguir decidir os pontos abertos do M6 e começar o M7.
+**Estado:** 🟢 M6 fechado no ramo do PR #2, com as quatro decisões do Duarte; a seguir o M7, quando ele o pedir.
 
-**Última atualização:** 2026-10-29, por Claude
+**Última atualização:** 2026-11-06, por Duarte
 
 ## Onde está
 
-- Ramo principal `main` (inclui todo o antigo `feat/m6-cerebro`). Nada por enviar.
-- M6: regras, memória e consulta/delegação entre agentes
-  (`packages/engine/src/rules/manager.ts`, `packages/engine/src/memory/manager.ts`,
-  `packages/engine/src/consult/manager.ts`). Roadmap em `docs/visao.md` (M6, M7).
-- O git é sempre chamado pelo caminho de `resolveGit()`, nunca pelo nome solto
-  (teste em `packages/engine/test/git-resolution.test.ts`).
+- O `main` tem o M6. O ramo `cursor/m6-decisoes-m7-plano-5567` (PR #2) traz as quatro decisões.
+- Regras nativas, fora da pasta: gerais e por projeto, com desfazer e pré-visualização. A Solline não lê `CLAUDE.md` nem `AGENTS.md`.
+- Consulta do Claude sem Bash (`disallowedTools`). Uma consulta não passa o testemunho. Memórias externas não se aprovam em lote.
+- O git das worktrees só corre pelo caminho de `resolveGit()`.
 
 ## Próximo passo
 
-Decidir os pontos do M6 em aberto no `DECISIONS.md` (importação de regras, Bash nas consultas,
-testemunho e bifurcação de consultas, aprovação em lote de memórias externas) e só depois começar o M7.
+O M7 (do pedido ao PR), quando o Duarte o pedir. O plano está em `docs/M7-plano.md`. As quatro decisões do M6 estão fechadas (`DECISIONS.md`, 2026-11-06).
 
 ## Comandos
 
@@ -45,4 +42,5 @@ cd apps/desktop && ../../node_modules/.bin/eslint .
 
 - 2026-10-29: `STATUS.md` passa a ser o ponto de retoma; os antigos `tasks/*` e `docs/claude-handoff.md` estão em `docs/arquivo/`.
 - 2026-10-29: o git do motor passa por `resolveGit()`, para um repositório aberto não poder pôr um `git.exe` seu à frente.
+- 2026-11-06: regras nativas (gerais e por projeto), sem ler `CLAUDE.md` nem `AGENTS.md`. Consulta do Claude sem Bash. Uma consulta não passa o testemunho. Memórias externas não se aprovam em lote. Detalhe em `DECISIONS.md`.
 - Decisões mais antigas: `DECISIONS.md`.

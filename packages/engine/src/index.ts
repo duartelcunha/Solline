@@ -21,7 +21,6 @@ export {
 } from './quality/codex-reviewer.ts';
 export { routeReviewer, type ReviewerPicker } from './quality/routing.ts';
 export { MIN_REVIEW_LINES, isSensitivePath, reviewWorth } from './quality/gating.ts';
-export { MAX_RULES_CHARS, readProjectRules } from './quality/rules.ts';
 export { claudePlanner, type Planner } from './races/planner.ts';
 export {
   DRAFT_HEADERS,
@@ -159,18 +158,15 @@ export {
   type ReadResult,
 } from './memory/evidence.ts';
 export { memoryKey, describeCitation } from './memory/keys.ts';
-export { exportRules, nativeCoverage, readNativeFiles, withMarker } from './rules/files.ts';
-export { globToRegExp, matchesAny, matchesGlob } from './rules/glob.ts';
 export {
   INDEX_TITLE,
   START_TITLE,
   lengthWarning,
-  renderAgentsMd,
   renderStart,
   renderTouched,
   type RuleTarget,
 } from './rules/render.ts';
-export { splitSections } from './rules/sections.ts';
+export { globToRegExp, matchesAny, matchesGlob } from './rules/glob.ts';
 export {
   MCP_CATALOG,
   findNode,

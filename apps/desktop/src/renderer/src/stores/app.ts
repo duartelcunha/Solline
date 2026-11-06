@@ -626,7 +626,10 @@ export const actions = {
     }
   },
 
-  async deleteRule(projectId: string, id: string): Promise<CommandResult<'rules.delete'> | null> {
+  async deleteRule(
+    projectId: string | null,
+    id: string,
+  ): Promise<CommandResult<'rules.delete'> | null> {
     try {
       return await request('rules.delete', { projectId, id });
     } catch (error) {
@@ -635,28 +638,20 @@ export const actions = {
     }
   },
 
-  /** Importa o CLAUDE.md e o AGENTS.md da pasta (ou só `path`); null se falhou. */
-  async importRules(
-    projectId: string,
-    path?: 'AGENTS.md' | 'CLAUDE.md',
-  ): Promise<CommandResult<'rules.import'> | null> {
+  async undoRules(projectId: string | null): Promise<CommandResult<'rules.undo'> | null> {
     try {
-      return await request('rules.import', { projectId, ...(path ? { path } : {}) });
+      return await request('rules.undo', { projectId });
     } catch (error) {
-      useApp.setState({ notice: `Não consegui importar as regras. ${message(error)}` });
+      useApp.setState({ notice: `Não consegui desfazer. ${message(error)}` });
       return null;
     }
   },
 
-  /**
-   * Escreve o AGENTS.md e o CLAUDE.md na pasta do projeto (o main pede confirmação). Um conflito
-   * (ficheiro teu) volta no resultado e não é um erro; null só se falhou.
-   */
-  async exportRules(projectId: string): Promise<CommandResult<'rules.export'> | null> {
+  async previewRules(projectId: string | null): Promise<CommandResult<'rules.preview'> | null> {
     try {
-      return await request('rules.export', { projectId });
+      return await request('rules.preview', { projectId });
     } catch (error) {
-      useApp.setState({ notice: `Não consegui exportar as regras. ${message(error)}` });
+      useApp.setState({ notice: `Não consegui mostrar o texto. ${message(error)}` });
       return null;
     }
   },

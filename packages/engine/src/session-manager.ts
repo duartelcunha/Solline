@@ -39,7 +39,6 @@ import { draftFilesOf, handoffMessage, objectiveOf, type DraftFile } from './han
 import type { Reviewer } from './quality/reviewer.ts';
 import type { ReviewerPicker } from './quality/routing.ts';
 import { reviewWorth } from './quality/gating.ts';
-import { readProjectRules } from './quality/rules.ts';
 import { NO_REVIEW, SessionQuality, fixMessage } from './quality/session-quality.ts';
 import { ProjectChecks, checkFixMessage } from './checks/project-checks.ts';
 import type { RunCommand } from './checks/run.ts';
@@ -56,7 +55,6 @@ import { safestMode } from './adapters/acp/capabilities.ts';
 import type { McpCatalog } from './mcp/catalog.ts';
 import { McpLaunchError } from './mcp/launch.ts';
 import type { Brain, BrainBinding } from './brain/brain.ts';
-import { nativeCoverage } from './rules/files.ts';
 import { matchesAny } from './rules/glob.ts';
 import type { RulesManager } from './rules/manager.ts';
 import type { MemoryService } from './memory/manager.ts';
@@ -1172,7 +1170,7 @@ export class SessionManager {
         if (ready && 'error' in ready) throw ready.error;
         const diff = ready?.diff ?? (await diffOf());
         if (diff.length === 0) return null;
-        const rules = entry.trusted ? await readProjectRules(entry.info.cwd) : undefined;
+        const rules = this.#startupRules(entry.info.projectId);
         return { cwd: entry.info.cwd, diff, request, rules };
       },
       {
@@ -1861,6 +1859,8 @@ export class SessionManager {
     const source = this.#get(sourceId);
     const sourceMemory = this.#memoryOf(sourceId);
     this.#requireActive(source);
+    if (isConsult(source.info))
+      throw new Error('Uma consulta não passa o testemunho. Abre uma sessão normal para continuar.');
     if (sourceMemory.closing) throw new Error('A sessão está a fechar');
     this.#requireIdle(source, sourceMemory, 'passar o testemunho');
     this.#handingOff.add(sourceId);
@@ -2259,26 +2259,25 @@ export class SessionManager {
     return undefined;
   }
 
+  /** O bloco de regras que o revisor lê: o mesmo texto do arranque, sem os ficheiros da pasta. */
+  #startupRules(projectId: string): string | undefined {
+    if (!this.#rules) return undefined;
+    return renderStart(this.#rules.deliver(projectId), { target: 'instructions', readTool: true });
+  }
+
   /**
-   * As regras do projeto no formato do agente: no arranque (instructions) ou com a primeira
-   * mensagem (intro). Não vão se o agente já lê, da pasta, uma exportação da Solline em dia.
+   * As regras no formato do agente: no arranque (instructions) ou com a primeira mensagem (intro).
+   * Gerais primeiro, depois as do projeto. A pasta do projeto não entra.
    */
   async #ruleBlock(
     info: SessionInfo,
     definition: AgentDefinition,
-    trusted: boolean,
+    _trusted: boolean,
     readTool: boolean,
   ): Promise<{ instructions?: string; intro?: string } | undefined> {
     const channel = definition.rules;
     if (!this.#rules || !channel) return undefined;
-    const rules = this.#rules.enabled(info.projectId);
-    if (rules.length === 0) return undefined;
-    const native = trusted ? (channel.native ?? []) : [];
-    if (native.length > 0) {
-      const coverage = await nativeCoverage(info.cwd, rules).catch(() => undefined);
-      if (coverage && native.every((name) => coverage[name] === 'current')) return undefined;
-    }
-    const text = renderStart(rules, { target: channel.via, readTool });
+    const text = renderStart(this.#rules.deliver(info.projectId), { target: channel.via, readTool });
     if (!text) return undefined;
     return channel.via === 'instructions' ? { instructions: text } : { intro: text };
   }
@@ -2314,7 +2313,7 @@ export class SessionManager {
     const checkpoints = memory.checkpoints;
     if (!this.#rules || !checkpoints || !entry.definition.rules) return undefined;
     const pending = this.#rules
-      .enabled(entry.info.projectId)
+      .deliver(entry.info.projectId)
       .filter((rule) => rule.globs.length > 0 && !memory.rules.delivered.has(rule.id));
     if (pending.length === 0) return undefined;
     const turns = checkpoints

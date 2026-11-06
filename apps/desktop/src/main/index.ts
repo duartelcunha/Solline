@@ -171,17 +171,6 @@ async function confirmSetup(name: string, command: string, copyEnv: boolean): Pr
     acceptLabel: 'Preparar',
   });
 }
-async function confirmExportRules(folder: string): Promise<boolean> {
-  return confirm({
-    title: 'Exportar as regras',
-    message: `Escrever AGENTS.md e CLAUDE.md em ${folder}?`,
-    detail:
-      'Ficam na pasta do projeto, para os agentes e para quem usar o repositório. A Solline só reescreve ' +
-      'ficheiros que ela própria escreveu e que não editaste; se algum for teu, nada é escrito.',
-    acceptLabel: 'Escrever',
-    cancelLabel: 'Cancelar',
-  });
-}
 async function confirmDiscard(): Promise<boolean> {
   return confirm({
     title: 'Deitar fora',
@@ -318,21 +307,6 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
       const updated = await projects.setSetup(projectId, setup);
       await engine.request('projects.setupChanged', { projectId, setup });
       return { project: updated };
-    }
-    case 'rules.import': {
-      // A pasta vem do projeto guardado: a interface só diz de que projeto.
-      const request = payload as CommandPayload<'rules.import'>;
-      const project = await projects.get(request.projectId);
-      if (!project) throw new Error('Projeto desconhecido');
-      return engine.request('rules.importNow', { ...request, cwd: project.path });
-    }
-    case 'rules.export': {
-      // Escrever na pasta do projeto é para fora da Solline: confirma-se fora da interface.
-      const { projectId } = payload as CommandPayload<'rules.export'>;
-      const project = await projects.get(projectId);
-      if (!project) throw new Error('Projeto desconhecido');
-      if (!(await confirmExportRules(project.name))) return { written: [] };
-      return engine.request('rules.exportNow', { projectId, cwd: project.path });
     }
     case 'mcp.add': {
       // Os valores secretos vão para o Gestor de Credenciais e nunca ao motor.
@@ -622,9 +596,7 @@ ipcMain.handle(IPC.request, async (event, raw: unknown) => {
         command === 'session.close' ||
         command === 'worktrees.discard' ||
         command === 'race.close' ||
-        command === 'split.resolve' ||
-        command === 'rules.import' ||
-        command === 'rules.export'
+        command === 'split.resolve'
       )
         await reconcilePolicy(engine, policyProjects, command, input);
       const result = commandSchemas[command].result.parse(await handleMain(command, input));

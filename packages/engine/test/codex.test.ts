@@ -158,7 +158,12 @@ describe('CodexAppServerAdapter', () => {
       },
     });
     expect(server.received.find((m) => m.method === 'thread/start')).toMatchObject({
-      params: { cwd: 'C:/p', approvalPolicy: 'untrusted', sandbox: 'workspace-write' },
+      params: {
+        cwd: 'C:/p',
+        approvalPolicy: 'untrusted',
+        sandbox: 'workspace-write',
+        config: { project_doc_max_bytes: 0, project_doc_fallback_filenames: [] },
+      },
     });
     expect(sink.deltas).toContainEqual({ type: 'meta', agentSessionId: 'thread-1' });
     await a.close();

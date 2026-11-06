@@ -1,5 +1,7 @@
 # M6: quatro decisões
 
+Fechadas a 2026-11-06. A 1 não seguiu estas opções: as regras passaram a ser nativas (`docs/PLANO-regras-nativas.md`). As 2, 3 e 4 ficaram na opção 1. O registo está no `DECISIONS.md`.
+
 O M6 está no `main`. Estes quatro pontos ficaram em aberto no `DECISIONS.md` (revisão de 28/10/2026) e no `STATUS.md`. Cada secção cabe numa leitura. O por omissão é uma recomendação para decidir depressa; não está implementado.
 
 Ficam no `DECISIONS.md` e não estão aqui: passar uma memória externa a regra (`memory.toRule`) sem segunda confirmação, a impressão das ferramentas MCP, e o cartão de consulta que no Codex se cancela aos 900 s.

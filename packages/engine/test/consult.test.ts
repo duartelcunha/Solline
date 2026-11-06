@@ -499,6 +499,16 @@ describe('perguntar a…', { timeout: 60_000 }, () => {
     expect(info(answer.session).title).toBe('Pergunta de Claude: Como se chama a função?');
   });
 
+  it('uma consulta não passa o testemunho', async () => {
+    build();
+    const claude = await open('claude');
+    const result = await asked(claude, 'ask_agent', { question: 'Olá' }, 'allow');
+    const answer = JSON.parse(result.text) as { session: string };
+    await expect(
+      manager.handoff(answer.session, { agent: 'claude', text: 'Continua daqui.' }),
+    ).rejects.toThrow('não passa o testemunho');
+  });
+
   it('o Codex pergunta ao Claude (em planeamento)', async () => {
     build();
     const codex = await open('codex');

@@ -1,10 +1,7 @@
 import {
   RULE_MAX_GLOBS,
   RuleGlob,
-  type NativeRuleFile,
   type ProjectRule,
-  type RulesConflict,
-  type RulesImportResult,
 } from '@solline/protocol';
 
 /** Os mesmos limites do motor (`packages/engine/src/rules/render.ts`): o aviso é dele, a medida é só um espelho. */
@@ -47,48 +44,3 @@ export function alwaysOnSize(rules: readonly ProjectRule[]): { lines: number; ch
 export function firstLine(text: string): string {
   return text.trim().split('\n')[0]?.trim() ?? '';
 }
-
-const FILE_STATE: Record<RulesImportResult['files'][number]['state'], string> = {
-  read: 'lido',
-  missing: 'não existe',
-  exported: 'é uma exportação da Solline por editar, não há nada a importar',
-  unsafe: 'não é um ficheiro normal, não o li',
-};
-
-const SKIP_REASON: Record<RulesImportResult['skipped'][number]['reason'], string> = {
-  duplicate: 'já existia',
-  empty: 'estava vazia',
-  'too-long': 'era comprida demais',
-  limit: 'passava o limite de regras',
-};
-
-/** O resultado de importar, numa frase curta mais uma linha por ficheiro e por regra deixada de fora. */
-export function importSummary(result: RulesImportResult): { headline: string; details: string[] } {
-  const count = result.imported.length;
-  const headline =
-    count === 0
-      ? 'Não havia regras novas para importar.'
-      : count === 1
-        ? 'Importei 1 regra.'
-        : `Importei ${count} regras.`;
-  return {
-    headline,
-    details: [
-      ...result.files.map((file) => `${file.name}: ${FILE_STATE[file.state]}`),
-      ...result.skipped.map((item) => `«${item.title}» ${SKIP_REASON[item.reason]}`),
-    ],
-  };
-}
-
-/** O nome do ficheiro de um conflito, se for um dos dois que a Solline sabe importar. */
-export function conflictFile(conflict: RulesConflict): NativeRuleFile | null {
-  const name = conflict.path.split(/[\\/]/).at(-1);
-  return name === 'AGENTS.md' || name === 'CLAUDE.md' ? name : null;
-}
-
-export const CONFLICT_REASON: Record<RulesConflict['reason'], string> = {
-  unmarked: 'Este ficheiro foi escrito à mão e a Solline não escreve por cima.',
-  edited:
-    'Alguém editou este ficheiro depois da última exportação e a Solline não escreve por cima.',
-  unsafe: 'Este caminho não é um ficheiro normal (é uma ligação ou uma pasta).',
-};

@@ -156,7 +156,7 @@ sincronizado com todos.
 
 Inspiração: steering do Kiro, regras e memórias do Cursor, Oracle do Amp, sincronização MCP do AionUi.
 
-Estado (28/10/2026): feito. As regras escritas uma vez chegam a cada agente sem tocar no repositório, no formato dele, e podem ser exportadas para `AGENTS.md` e `CLAUDE.md`. Os agentes propõem memórias com prova, mas só entram com a tua aprovação; ficam "a confirmar" quando o código que citam muda ou ao fim de 28 dias. "Perguntar a…" e "Delegar" pedem sempre o teu cartão de aprovação. O catálogo MCP é global e cada projeto escolhe os seus servidores; só arranca o que aprovaste exatamente, mostra as ferramentas que o servidor anuncia e guarda os segredos no Gestor de Credenciais do Windows. O revisor Codex deixou de arrancar os servidores MCP do utilizador. Por fazer, com nome: decidir a importação de regras (hoje entram ligadas e sem pré-visualização), o Bash nas consultas do Claude, recusar passar o testemunho ou bifurcar uma consulta, e recusar no motor a aprovação em lote de memórias de origem externa. A lista completa está em `DECISIONS.md`.
+Estado (06/11/2026): as quatro decisões estão fechadas. As regras são nativas (gerais e por projeto), fora da pasta; a Solline não lê `CLAUDE.md` nem `AGENTS.md`. Uma consulta do Claude não tem Bash. Uma consulta não passa o testemunho. Memórias externas aprovam-se uma a uma. Detalhe em `DECISIONS.md`.
 
 ### M7: do pedido ao PR
 

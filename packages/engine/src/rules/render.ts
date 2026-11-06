@@ -46,8 +46,6 @@ function indexLine(rule: ProjectRule, how: string): string {
 
 const READ_HOW = 'Lê com a ferramenta read_rule quando editares estes ficheiros.';
 const AUTO_HOW = 'Aplica-se quando editares estes ficheiros.';
-/** Nos ficheiros exportados não se sabe se quem lê tem a ferramenta. */
-const EXPORT_HOW = 'Lê com a ferramenta read_rule (se a tiveres) quando editares estes ficheiros.';
 
 function indexOf(scoped: readonly ProjectRule[], how: string): string {
   return `## ${INDEX_TITLE}\n\n${scoped.map((rule) => indexLine(rule, how)).join('\n')}`;
@@ -82,23 +80,6 @@ export function renderTouched(rules: readonly ProjectRule[]): string | undefined
   ].join('\n\n');
 }
 
-/** O corpo do AGENTS.md exportado (o marcador com o hash é posto por quem escreve o ficheiro). */
-export function renderAgentsMd(rules: readonly ProjectRule[]): string {
-  const { unscoped, scoped } = splitRules(rules);
-  const parts = [
-    '<!-- Gerado pela Solline. Edita as regras na app; este ficheiro só é reescrito enquanto não o editares. -->',
-    '# Regras do projeto',
-    ...unscoped.map(section),
-  ];
-  if (scoped.length > 0) parts.push(indexOf(scoped, EXPORT_HOW));
-  return `${parts.join('\n\n')}\n`;
-}
-
-/** O corpo do CLAUDE.md exportado: o Claude Code importa o AGENTS.md. */
-export function renderClaudeMd(): string {
-  return '@AGENTS.md\n';
-}
-
 function lineCount(text: string): number {
   return text.length === 0 ? 0 : text.split('\n').length;
 }
@@ -116,16 +97,5 @@ export function lengthWarning(rules: readonly ProjectRule[]): RulesWarning | und
       `As regras sem padrões somam ${lines} linhas e ${text.length} caracteres, e os agentes ` +
       `seguem melhor regras curtas (até cerca de ${LENGTH_WARN_LINES} linhas). Dá padrões de ` +
       'ficheiro às que só valem para uma parte do projeto, ou encurta.',
-  };
-}
-
-/** O aviso de quem importou de um ficheiro escrito à mão que ainda pode estar na pasta. */
-export function nativeWarning(importedFrom: readonly string[]): RulesWarning | undefined {
-  if (importedFrom.length === 0) return undefined;
-  return {
-    kind: 'native',
-    text:
-      `Importaste regras de ${importedFrom.join(' e ')}. Se o ficheiro continuar na pasta, o ` +
-      'agente pode ver as regras duas vezes.',
   };
 }

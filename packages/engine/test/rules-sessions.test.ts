@@ -24,7 +24,6 @@ import {
   claudeDefinition,
   codexDefinition,
   contextTool,
-  exportRules,
   registryOf,
   rulesTools,
   sourceShimPath,
@@ -419,59 +418,23 @@ describe('as regras com padrões entram ao tocar nos ficheiros', { timeout: 60_0
     expect(Scripted.received.at(-1)?.context).toContain(SQL_TEXT);
   });
 
-  describe('sem repetir o que o agente já lê da pasta', () => {
-    const everything = () => rules.enabled('p');
-
-    it('o Claude, com o CLAUDE.md e o AGENTS.md da Solline em dia, não recebe o bloco do arranque', async () => {
-      await exportRules(project, everything());
-      const id = await start('claude');
-      expect(Scripted.started[0]!.instructions).toBeUndefined();
-      // As regras com padrões continuam a entrar ao tocar nos ficheiros.
-      await turn(id, 'escreve db/a.sql=1');
-      await turn(id, 'e agora?');
-      expect(Scripted.received.at(-1)?.context).toContain(SQL_TEXT);
-    });
-
-    it('o Codex só precisa do AGENTS.md; o Claude, sem o CLAUDE.md, recebe na mesma', async () => {
-      await exportRules(project, everything());
-      await rm(path.join(project, 'CLAUDE.md'));
+  describe('a pasta não substitui as regras da Solline', () => {
+    it('com CLAUDE.md e AGENTS.md na pasta, o bloco vai na mesma', async () => {
+      await writeFile(path.join(project, 'CLAUDE.md'), '## Do ficheiro\nNão devia entrar.\n');
+      await writeFile(path.join(project, 'AGENTS.md'), '## Do agents\nTambém não.\n');
+      await start('claude');
+      const instructions = Scripted.started.at(-1)!.instructions ?? '';
+      expect(instructions).toContain('## Estilo');
+      expect(instructions).not.toContain('Não devia entrar');
       await start('codex');
-      expect(Scripted.started.at(-1)!.instructions).toBeUndefined();
-      await start('claude');
       expect(Scripted.started.at(-1)!.instructions).toContain('## Estilo');
+      expect(Scripted.started.at(-1)!.instructions).not.toContain('Também não');
     });
 
-    it('uma exportação desatualizada ou editada à mão não conta: o bloco vai', async () => {
-      await exportRules(project, everything());
-      rules.save({ projectId: 'p', title: 'Nova', text: 'Regra nova.', globs: [], enabled: true });
-      await start('claude');
-      expect(Scripted.started.at(-1)!.instructions).toContain('Regra nova.');
-
-      await exportRules(project, everything());
-      const file = path.join(project, 'AGENTS.md');
-      const { readFile } = await import('node:fs/promises');
-      await writeFile(file, `${await readFile(file, 'utf8')}\numa linha minha\n`);
-      await start('codex');
-      expect(Scripted.started.at(-1)!.instructions).toContain('Regra nova.');
-    });
-
-    it('um CLAUDE.md escrito à mão não conta e o bloco vai (o aviso fica no estado)', async () => {
-      await writeFile(path.join(project, 'CLAUDE.md'), '## Estilo\nUsa dois espaços em tudo.\n');
-      await start('claude');
-      expect(Scripted.started.at(-1)!.instructions).toContain('## Estilo');
-    });
-
-    it('um projeto sem confiança não lê o CLAUDE.md da pasta: o bloco vai', async () => {
-      await exportRules(project, everything());
+    it('um projeto sem confiança recebe o mesmo bloco', async () => {
+      await writeFile(path.join(project, 'CLAUDE.md'), '## Do ficheiro\nNão.\n');
       await start('claude', false);
       expect(Scripted.started.at(-1)!.instructions).toContain('## Estilo');
-    });
-
-    it('os agentes ACP não leem estes ficheiros sozinhos: recebem sempre', async () => {
-      await exportRules(project, everything());
-      const id = await start(CATALOG[0]!.id);
-      await turn(id, 'olá');
-      expect(Scripted.received[0]!.context).toContain('## Estilo');
     });
   });
 });

@@ -331,28 +331,33 @@ ${goal}
   }
   if (scene === 'cerebro' || scene === 'rules-conflict' || scene === 'mcp-skipped')
     mcp = { servers: cerebro.servers(), projects: { [project.id]: ['docs', 'notas'] } };
-  function rulesView(projectId: string): ProjectRulesView {
-    const found = rules.projects[projectId];
+  function rulesView(projectId: string | null): ProjectRulesView {
+    const found = projectId === null ? rules.global : rules.projects[projectId];
     return {
       projectId,
       rules: found?.rules ?? [],
-      importedFrom: found?.importedFrom ?? [],
       warnings: found?.warnings ?? [],
+      canUndo: rules.history.length > 0,
     };
   }
-  function saveRules(projectId: string, view: ProjectRulesView) {
-    rules = {
-      ...rules,
-      revision: rules.revision + 1,
-      projects: {
-        ...rules.projects,
-        [projectId]: {
-          rules: view.rules,
-          importedFrom: view.importedFrom,
-          warnings: view.warnings,
-        },
-      },
+  function saveRules(projectId: string | null, view: ProjectRulesView) {
+    const previous = {
+      global: rules.global.rules,
+      projects: Object.fromEntries(
+        Object.entries(rules.projects).map(([id, bucket]) => [id, bucket.rules]),
+      ),
     };
+    const bucket = { rules: view.rules, warnings: view.warnings };
+    const history = [...rules.history, previous].slice(-30);
+    rules =
+      projectId === null
+        ? { ...rules, revision: rules.revision + 1, history, global: bucket }
+        : {
+            ...rules,
+            revision: rules.revision + 1,
+            history,
+            projects: { ...rules.projects, [projectId]: bucket },
+          };
     emit({ kind: 'event', type: 'rules.changed', rules });
   }
   /** O que o motor faz depois de permitires: abre a sessão da consulta ou da delegação. */
@@ -1255,7 +1260,7 @@ ${goal}
         return {};
       }
       case 'rules.list':
-        return rulesView(String(payload.projectId));
+        return rulesView(payload.projectId === null ? null : String(payload.projectId));
       case 'rules.save': {
         const input = commandSchemas['rules.save'].payload.parse(payload);
         const view = rulesView(input.projectId);
@@ -1280,57 +1285,32 @@ ${goal}
         return rulesView(input.projectId);
       }
       case 'rules.delete': {
-        const projectId = String(payload.projectId);
+        const projectId = payload.projectId === null ? null : String(payload.projectId);
         const view = rulesView(projectId);
         saveRules(projectId, { ...view, rules: view.rules.filter((r) => r.id !== payload.id) });
         return rulesView(projectId);
       }
-      case 'rules.import': {
-        const projectId = String(payload.projectId);
-        const view = rulesView(projectId);
-        const path = payload.path as 'AGENTS.md' | 'CLAUDE.md' | undefined;
-        const found: ProjectRule[] =
-          path === 'AGENTS.md'
-            ? []
-            : [
-                {
-                  id: crypto.randomUUID(),
-                  projectId,
-                  title: 'Estilo dos ficheiros',
-                  text: 'Indentação de dois espaços e aspas simples.',
-                  globs: [],
-                  enabled: true,
-                  createdAt: Date.now(),
-                  updatedAt: Date.now(),
-                },
-              ];
-        const fresh = found.filter((r) => !view.rules.some((v) => v.title === r.title));
-        if (fresh.length) saveRules(projectId, { ...view, rules: [...view.rules, ...fresh] });
-        const files = [
-          {
-            name: 'CLAUDE.md' as const,
-            state: path === 'AGENTS.md' ? ('missing' as const) : ('read' as const),
-          },
-          { name: 'AGENTS.md' as const, state: 'missing' as const },
-        ];
-        return {
-          imported: fresh,
-          skipped: found
-            .filter((r) => !fresh.includes(r))
-            .map((r) => ({ title: r.title, reason: 'duplicate' as const })),
-          files: files.filter((f) => !path || f.name === path),
+      case 'rules.undo': {
+        const entry = rules.history.at(-1);
+        if (!entry) return rulesView(payload.projectId === null ? null : String(payload.projectId));
+        rules = {
+          ...rules,
+          revision: rules.revision + 1,
+          history: rules.history.slice(0, -1),
+          global: { rules: entry.global, warnings: [] },
+          projects: Object.fromEntries(
+            Object.entries(entry.projects).map(([id, list]) => [id, { rules: list, warnings: [] }]),
+          ),
         };
+        emit({ kind: 'event', type: 'rules.changed', rules });
+        return rulesView(payload.projectId === null ? null : String(payload.projectId));
       }
-      case 'rules.export':
-        if (scene === 'rules-conflict')
-          return {
-            conflict: {
-              path: 'C:/qa/atelier/AGENTS.md',
-              reason: 'edited' as const,
-              message: 'O ficheiro foi editado à mão.',
-            },
-          };
-        return { written: ['C:/qa/atelier/AGENTS.md', 'C:/qa/atelier/CLAUDE.md'] };
+      case 'rules.preview':
+        return {
+          claude: 'Regras do projeto (Solline)',
+          codex: 'Regras do projeto (Solline)',
+          acp: '',
+        };
       case 'memory.approve': {
         const input = commandSchemas['memory.approve'].payload.parse(payload);
         spaces.memories = spaces.memories.map((m) =>

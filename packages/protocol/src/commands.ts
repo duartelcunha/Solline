@@ -389,8 +389,6 @@ export const MAIN_COMMANDS = [
   'session.create',
   'session.close',
   'worktrees.discard',
-  'rules.import',
-  'rules.export',
   'mcp.add',
   'mcp.update',
   'mcp.setSecret',

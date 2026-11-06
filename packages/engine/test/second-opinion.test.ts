@@ -1,15 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { engineCommandSchemas, rankFindings, type FileDiff, type Finding } from '@solline/protocol';
 import {
-  MAX_RULES_CHARS,
   codexAvailability,
   codexReviewer,
   isSensitivePath,
   promptFor,
-  readProjectRules,
   reviewWorth,
   routeReviewer,
   type Reviewer,
@@ -531,6 +527,8 @@ describe('revisor Codex', () => {
       expect((thread.params as { config: unknown }).config).toEqual({
         'features.plugins': false,
         'features.apps': false,
+        project_doc_max_bytes: 0,
+        project_doc_fallback_filenames: [],
         mcp_servers: { node_repl: { enabled: false }, 'a.b': { enabled: false } },
       });
       await server.waitFor((m) => m.method === 'turn/start');
@@ -547,6 +545,8 @@ describe('revisor Codex', () => {
       expect((thread.params as { config: unknown }).config).toEqual({
         'features.plugins': false,
         'features.apps': false,
+        project_doc_max_bytes: 0,
+        project_doc_fallback_filenames: [],
       });
       await server.waitFor((m) => m.method === 'turn/start');
       complete(server, { findings: [] });
@@ -608,40 +608,6 @@ describe('revisor Codex', () => {
       expect(methods).not.toContain('thread/start');
       expect(methods).not.toContain('config/read');
     });
-  });
-});
-
-describe('regras do projeto', () => {
-  let dir: string;
-  beforeEach(async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'solline-rules-'));
-  });
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
-
-  it('junta o CLAUDE.md e o AGENTS.md da raiz, cada um com o seu título', async () => {
-    await writeFile(path.join(dir, 'CLAUDE.md'), 'Regra do Claude.\n');
-    await writeFile(path.join(dir, 'AGENTS.md'), 'Regra dos agentes.\n');
-    const rules = await readProjectRules(dir);
-    expect(rules).toContain('## CLAUDE.md\nRegra do Claude.');
-    expect(rules).toContain('## AGENTS.md\nRegra dos agentes.');
-  });
-
-  it('sem ficheiros não há regras; só um deles chega; pastas com esse nome não contam', async () => {
-    expect(await readProjectRules(dir)).toBeUndefined();
-    await mkdir(path.join(dir, 'CLAUDE.md'));
-    expect(await readProjectRules(dir)).toBeUndefined();
-    await writeFile(path.join(dir, 'AGENTS.md'), 'Só estas.');
-    expect(await readProjectRules(dir)).toBe('## AGENTS.md\nSó estas.');
-  });
-
-  it('corta nos 8 mil caracteres no total', async () => {
-    await writeFile(path.join(dir, 'CLAUDE.md'), 'a'.repeat(20_000));
-    await writeFile(path.join(dir, 'AGENTS.md'), 'b'.repeat(20_000));
-    const rules = (await readProjectRules(dir))!;
-    expect(rules.length).toBeLessThanOrEqual(MAX_RULES_CHARS + 40);
-    expect(rules).toContain('aaaa');
   });
 });
 

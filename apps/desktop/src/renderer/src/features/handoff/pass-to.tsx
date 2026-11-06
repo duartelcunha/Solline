@@ -7,12 +7,14 @@ import { handoffGate } from './handoff-model.ts';
 function usePassToGate(sessionId: string) {
   const state = useSession(sessionId, (s) => s.info.state);
   const handedTo = useSession(sessionId, (s) => s.info.handedTo);
-  return handoffGate({ state, ...(handedTo ? { handedTo } : {}) });
+  const origin = useSession(sessionId, (s) => s.info.origin);
+  return handoffGate({ state, ...(handedTo ? { handedTo } : {}), ...(origin ? { origin } : {}) });
 }
 
 /** "Passar a…": um botão pequeno que abre o diálogo (no painel de rever). */
 export function PassToButton({ sessionId }: { sessionId: string }) {
   const gate = usePassToGate(sessionId);
+  if (gate.hidden) return null;
   return (
     <button
       type="button"
@@ -47,14 +49,16 @@ export function SessionMenu({ sessionId }: { sessionId: string }) {
         </Menu.Trigger>
       }
     >
-      <ActionItem
-        title="Passar a…"
-        description={gate.reason ?? 'Continuar noutro agente, na mesma pasta'}
-        icon={<Handshake size={14} />}
-        disabled={!gate.enabled}
-        onSelect={() => actions.openHandoff(sessionId)}
-        testId="session-pass-to"
-      />
+      {gate.hidden ? null : (
+        <ActionItem
+          title="Passar a…"
+          description={gate.reason ?? 'Continuar noutro agente, na mesma pasta'}
+          icon={<Handshake size={14} />}
+          disabled={!gate.enabled}
+          onSelect={() => actions.openHandoff(sessionId)}
+          testId="session-pass-to"
+        />
+      )}
       <ActionItem
         title="Mapa"
         description="Ver as sessões ligadas deste projeto"

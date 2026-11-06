@@ -12,6 +12,7 @@ import {
   toPermissionResult,
 } from '../src/index.ts';
 import { fakeQuery, loadFixture, recordingSink, reduce, waitFor, testRegistry } from './helpers.ts';
+import { CLAUDE_MD_EXCLUDES, READ_ONLY_DISALLOWED } from '../src/adapters/claude/sdk.ts';
 
 function adapterFor(fixture: string, extra: { mode?: string; model?: string } = {}) {
   const fake = fakeQuery(loadFixture(fixture));
@@ -207,7 +208,23 @@ describe('projetos sem confiança', () => {
     const untrusted = withSettings(false);
     await untrusted.adapter.start();
     expect(untrusted.fake.options().settingSources).toEqual(['user']);
+    expect(trusted.fake.options().settings).toEqual({ claudeMdExcludes: [...CLAUDE_MD_EXCLUDES] });
+    expect(untrusted.fake.options().settings).toEqual({
+      claudeMdExcludes: [...CLAUDE_MD_EXCLUDES],
+    });
     await untrusted.adapter.close();
+  });
+
+  it('uma consulta só de leitura tira o Bash, que as regras allow decidem antes do motor', async () => {
+    const fake = fakeQuery(loadFixture('plain-answer'));
+    const adapter = new ClaudeSdkAdapter(
+      { cwd: 'C:/tmp/proj', mode: 'plan', queryFn: fake.queryFn, projectTrusted: true, readOnly: true },
+      recordingSink(),
+    );
+    await adapter.start();
+    expect(fake.options().disallowedTools).toEqual([...READ_ONLY_DISALLOWED]);
+    expect(fake.options().disallowedTools).toContain('Bash');
+    await adapter.close();
   });
 
   it('sem confiança, o cartão de permissão diz que o "sempre" fica na sessão', async () => {

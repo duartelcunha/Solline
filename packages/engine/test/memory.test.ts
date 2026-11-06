@@ -281,6 +281,24 @@ describe('origem externa: o turno foi à web ou a servidores de terceiros', () =
     expect(await memory.read(caller(), id)).toContain('Origem externa');
   });
 
+  it('um lote com uma memória externa não aprova nenhuma', async () => {
+    const { memory, caller, proposal, one } = await setup();
+    const external = await memory.propose(
+      caller({ turn: { id: 't1', external: true } }),
+      proposal({ text: 'Veio de fora' }),
+    );
+    const local = await memory.propose(
+      caller({ turn: { id: 't2', external: false } }),
+      proposal({ text: 'Veio da pasta' }),
+    );
+    await expect(memory.approve({ ids: [external, local] })).rejects.toThrow('uma a uma');
+    expect(one(external).state).toBe('pending');
+    expect(one(local).state).toBe('pending');
+    await memory.approve({ ids: [external] });
+    expect(one(external).state).toBe('active');
+    expect(one(local).state).toBe('pending');
+  });
+
   const tool = (name: string, extra: Partial<ToolBlock> = {}): ToolBlock => ({
     kind: 'tool',
     id: name,
