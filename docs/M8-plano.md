@@ -58,3 +58,15 @@ Tornar o custo do resultado visível sem inventar um número.
 ## Feito no M8.2
 
 O livro está em `packages/engine/src/ledger`. Um total acumulado não se soma duas vezes. Um total que desce abre outra execução. Um subagente não entra na soma. Sem leitura, o painel não aparece. Um número em falta fica desconhecido, nunca zero. Não há estimativa em dólares. A quota fica por reportar. Há um limite de turnos e um de minutos. Param antes do próximo turno.
+
+## M8.3 — Ciclo check, corrigir, check
+
+Corrigir uma verificação falhada sem fazer de cola, e parar cedo.
+
+**Entra.** Opt-in por sessão, desligado por omissão. Usa as verificações do projeto já aprovadas. A primeira falha fica como base. No máximo 3 correções. Duas falhas com a mesma impressão, sem progresso, param o ciclo. Tempo esgotado ou comando em falta é infraestrutura e não se repete. Feito só quando a ronda passa e fica ligada ao turno. Dá para parar. Não faz push.
+
+**Não entra.** Instalar dependências, enfraquecer testes, auto-push, e prometer CI remota verde.
+
+## Feito no M8.3
+
+O ciclo está em `packages/engine/src/repair`. Nasce desligado. No máximo 3 correções. A segunda falha igual para. Tempo esgotado ou comando em falta não se repete. Feito só com a ronda verde ligada ao turno. Não faz push.

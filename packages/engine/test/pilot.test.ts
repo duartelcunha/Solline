@@ -54,7 +54,7 @@ describe('linha de base do M8', () => {
     for (const row of MATRIX) readFileSync(join(root, row.evidence));
     const byId = new Map(MATRIX.map((row) => [row.id, row.status]));
     expect(byId.get('linear')).toBe('partial');
-    expect(byId.get('check-fix-loop')).toBe('absent');
+    expect(byId.get('check-fix-loop')).toBe('present');
     expect(byId.get('usage-ledger')).toBe('present');
     expect(byId.get('approval-judge')).toBe('absent');
     expect(byId.get('model-routing')).toBe('absent');

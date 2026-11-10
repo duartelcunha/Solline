@@ -1823,6 +1823,23 @@ export const actions = {
     }
   },
 
+  async setRepair(sessionId: string, enabled: boolean): Promise<void> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('repair.set', { sessionId, enabled });
+    } catch (error) {
+      setActionError(sessionId, error);
+    }
+  },
+
+  async cancelRepair(sessionId: string): Promise<void> {
+    try {
+      await request('repair.cancel', { sessionId });
+    } catch (error) {
+      setActionError(sessionId, error);
+    }
+  },
+
   /** Grava os limites locais. O turno que já vai a meio não é cortado. */
   async setBudget(sessionId: string, limits: BudgetLimits): Promise<void> {
     sessionStores.get(sessionId)?.setState({ actionError: null });

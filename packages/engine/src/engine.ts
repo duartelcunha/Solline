@@ -692,6 +692,8 @@ export class Engine {
           maxTurns: p.maxTurns,
           maxMinutes: p.maxMinutes,
         }),
+      'repair.set': async (p) => s.setRepair(p.sessionId, p.enabled),
+      'repair.cancel': async (p) => s.cancelRepair(p.sessionId),
       'checks.run': (p) => s.runChecks(p.sessionId),
       'checks.fix': async (p) => ({ turnId: await s.fixCheck(p.sessionId, p.id) }),
       'handoff.draft': async (p) => {
