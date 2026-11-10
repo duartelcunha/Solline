@@ -1031,3 +1031,13 @@ O Duarte aceitou as quatro como recomendadas. O plano está em `docs/M8-plano.md
 - **Juiz.** Modo sombra e recomendação. As confirmações nativas atuais ficam. O juiz não aprova push, merge, apagar, memórias externas nem mudanças de permissão. Um parecer que falha ou discorda fica inconclusivo.
 - **Modelo.** O modelo por omissão mantém-se. O percurso económico fica opt-in até o piloto o justificar, e só em tarefas delimitadas.
 - **Intenção e plano.** Objetos locais da Solline, ligados ao commit e ao PR. Sem ficheiro de regras novo e sem voltar a carregar `CLAUDE.md` ou `AGENTS.md`. Um ficheiro de projeto só quando for partilhado de propósito.
+
+## 2026-11-10: o Duarte retoma o M8 e corta o que se segue
+
+O Duarte retomou o M8.2 e o M8.3 neste dia. O M8.4 (juiz em sombra) fica parado e fora da cadeia de merge: o parecer não entra até haver uma razão para o fundir. A frase antiga «parar depois do M8.1» deixa de valer.
+
+- **M11.** Não se faz. A mesa já ordena as sessões por «precisa de ti».
+- **M12.** Fica uma nota de uma página, só com o gatilho.
+- **M13.** Adiado.
+- **Regressão aos sete dias.** A verificação automática sai. Mais tarde, um botão «Reabrir».
+- **M8.5.** Só com as 10 tarefas do corpus, e só quando houver uma pergunta concreta. Sem essa pergunta, fica adiado.

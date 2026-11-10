@@ -2,9 +2,9 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0 a M8.3 feitos. Sem medição com clientes reais. M8.4 por fazer.
+**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0 a M8.3 feitos. O M8.4 está parado. O M8.5 fica adiado até haver uma pergunta concreta para as 10 tarefas.
 
-**Última atualização:** 2026-11-06, por Duarte
+**Última atualização:** 2026-11-10, por Duarte
 
 ## Onde está
 
@@ -17,7 +17,7 @@
 
 ## Próximo passo
 
-M8.4: juiz em sombra, só recomenda, não aprova push, merge nem apagar. Plano em `docs/M8-plano.md`.
+O M8.4 não entra na cadeia de merge. O M8.5 só com as 10 tarefas, quando houver uma pergunta concreta. O plano curto (M11 cortado, M12 uma nota, M13 adiado) está em `docs/M8-plano.md` e em `DECISIONS.md`.
 
 ## Comandos
 
