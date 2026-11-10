@@ -48,11 +48,11 @@
   width: min(600px, calc(100vw - 40px));
   max-height: 75vh;
   overflow: auto;
-  border: 1px solid var(--sl-border-strong);
-  border-radius: 16px;
+  border: 0;
+  border-radius: var(--sl-radius-lg);
   background: var(--sl-surface);
   color: var(--sl-text);
-  box-shadow: 0 16px 48px rgb(0 0 0 / 0.2);
+  box-shadow: var(--sl-shadow-overlay);
 }
 .navigation-search-field {
   display: flex;
