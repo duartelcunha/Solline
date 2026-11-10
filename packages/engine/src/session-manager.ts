@@ -32,6 +32,7 @@ import {
 } from '@solline/protocol';
 import { SessionLedger, reportFromUsage } from './ledger/ledger.ts';
 import { RepairLoop } from './repair/loop.ts';
+import { advise, packetFrom } from './shadow/judge.ts';
 import type { SavedSession } from './recovery/state.ts';
 import { interruptedAdapter } from './recovery/interrupted-adapter.ts';
 import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/types.ts';
@@ -2656,6 +2657,23 @@ export class SessionManager {
       workspace: info.workspace,
       handedTo: info.handedTo,
     };
+  }
+
+  async shadowAsk(sessionId: string) {
+    const entry = this.#get(sessionId);
+    const memory = this.#memoryOf(sessionId);
+    const request = memory.turns.find((turn) => turn.role === 'user');
+    const checks = this.#checks.get(entry.info.cwd)?.state;
+    const pending = memory.checkpoints?.timeline().pending;
+    return advise(
+      packetFrom({
+        request: request ? textOf(request) : '',
+        diff: pending ? `${pending.files} ficheiros, +${pending.additions} −${pending.deletions}` : '',
+        checks: checks?.results.map((result) => `${result.id} ${result.state}`).join('\n') ?? '',
+        rules: '',
+      }),
+      null,
+    );
   }
 
   setRepair(sessionId: string, enabled: boolean): ReturnType<RepairLoop['view']> {

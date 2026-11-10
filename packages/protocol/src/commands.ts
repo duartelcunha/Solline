@@ -27,6 +27,7 @@ import {
 import { CheckList, CheckSpec, SetupSpec, checksCommandSchemas } from './checks.ts';
 import { ledgerCommandSchemas } from './ledger.ts';
 import { repairCommandSchemas } from './repair.ts';
+import { shadowCommandSchemas } from './shadow.ts';
 import { reviewCommandSchemas } from './review.ts';
 import { EngineSnapshot } from './recovery.ts';
 import { DelegateTask, memoryCommandSchemas, spacesCommandSchemas } from './spaces.ts';
@@ -369,6 +370,7 @@ export const commandSchemas = {
   ...checksCommandSchemas,
   ...ledgerCommandSchemas,
   ...repairCommandSchemas,
+  ...shadowCommandSchemas,
   ...handoffCommandSchemas,
   ...forkCommandSchemas,
   ...consultCommandSchemas,

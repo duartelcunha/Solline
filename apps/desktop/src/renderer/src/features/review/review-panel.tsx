@@ -76,6 +76,7 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
   const scope = draft.scope;
   const setScope = (scope: DiffScope) => actions.editReview(sessionId, { scope });
   const [files, setFiles] = useState<FileDiff[] | null>(null);
+  const [shadow, setShadow] = useState<string | null>(null);
   const filesBox = useRef<HTMLDivElement>(null);
   /** Depois de aceitar ou rejeitar, a vista desliza para o hunk que ficou nesse lugar. */
   const nextHunk = useRef<number | null>(null);
@@ -263,6 +264,16 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
             ))}
           </Menu.RadioGroup>
         </MenuShell>
+        <button
+          type="button"
+          data-testid="shadow-ask"
+          onClick={() =>
+            void actions.shadowAsk(sessionId).then((advice) => setShadow(advice.reason))
+          }
+          className="sl-press ml-auto rounded-sm px-1 text-[12px] text-muted hover:text-fg"
+        >
+          Juiz
+        </button>
         {total && files && files.length > 0 ? (
           <span className="truncate font-mono text-[11px] text-muted tabular-nums">
             {files?.length ?? 0} {files?.length === 1 ? 'ficheiro' : 'ficheiros'} ·{' '}
@@ -318,6 +329,9 @@ function ReviewBody({ sessionId }: { sessionId: string }) {
           </button>
         </div>
       </header>
+      <p data-testid="shadow-note" className="border-b border-line px-3 py-1.5 text-[12px] text-muted">
+        {shadow ?? 'O juiz em sombra não aprova envios.'}
+      </p>
 
       <QualityStrip sessionId={sessionId} />
 

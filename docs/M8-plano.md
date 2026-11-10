@@ -67,6 +67,14 @@ Corrigir uma verificação falhada sem fazer de cola, e parar cedo.
 
 **Não entra.** Instalar dependências, enfraquecer testes, auto-push, e prometer CI remota verde.
 
+## M8.4 — Juiz em sombra
+
+Separar fazer de avaliar, sem lhe dar poder.
+
+**Entra.** Um pacote com o pedido, o diff e as verificações. Não leva o que o autor disse de si. Duas leituras. Se falham ou discordam, é inconclusivo. Um achado sem prova sai. O resultado nunca autoriza push, merge nem apagar. Sem cliente de modelo, fica por fazer.
+
+**Não entra.** Aprovar envios, memórias ou permissões. Tratar o parecer como prova mecânica.
+
 ## Feito no M8.3
 
 O ciclo está em `packages/engine/src/repair`. Nasce desligado. No máximo 3 correções. A segunda falha igual, já sem horas, caminhos, durações e ids, para. Tempo esgotado ou comando em falta não se repete. Feito só com a ronda verde ligada ao turno. Não faz push.
@@ -80,3 +88,7 @@ O Duarte retomou o M8.2 e o M8.3. O M8.4 fica parado e fora da cadeia de merge. 
 - O M13 fica adiado.
 - A verificação automática de regressão aos sete dias sai. Mais tarde há um botão «Reabrir».
 - O M8.5 só corre com as 10 tarefas quando existir uma pergunta concreta. Sem isso, fica adiado.
+
+## Escrito no M8.4, parado
+
+O código do juiz está neste ramo e não entra na cadeia de merge. Sem cliente fica por fazer. Com um leitor de teste, um bug conhecido traz a prova e duas leituras que discordam ficam inconclusivas. `canAuthorize` é sempre falso.

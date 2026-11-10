@@ -10,6 +10,7 @@ export * from './lineage.ts';
 export * from './checks.ts';
 export * from './ledger.ts';
 export * from './repair.ts';
+export * from './shadow.ts';
 export * from './race.ts';
 export * from './split.ts';
 export * from './commands.ts';

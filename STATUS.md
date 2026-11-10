@@ -2,7 +2,7 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0 a M8.3 feitos. O M8.4 está parado. O M8.5 fica adiado até haver uma pergunta concreta para as 10 tarefas.
+**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0 a M8.3 feitos. O M8.4 está parado, fora da cadeia de merge. O M8.5 fica adiado até haver uma pergunta concreta para as 10 tarefas.
 
 **Última atualização:** 2026-11-10, por Duarte
 

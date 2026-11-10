@@ -56,7 +56,7 @@ describe('linha de base do M8', () => {
     expect(byId.get('linear')).toBe('partial');
     expect(byId.get('check-fix-loop')).toBe('present');
     expect(byId.get('usage-ledger')).toBe('present');
-    expect(byId.get('approval-judge')).toBe('absent');
+    expect(byId.get('approval-judge')).toBe('present');
     expect(byId.get('model-routing')).toBe('absent');
     expect(byId.get('consult-no-bash')).toBe('present');
     expect(byId.get('no-md-autoload')).toBe('present');

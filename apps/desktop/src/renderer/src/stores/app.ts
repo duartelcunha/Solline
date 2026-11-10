@@ -1823,6 +1823,10 @@ export const actions = {
     }
   },
 
+  async shadowAsk(sessionId: string) {
+    return request('shadow.ask', { sessionId });
+  },
+
   async setRepair(sessionId: string, enabled: boolean): Promise<void> {
     sessionStores.get(sessionId)?.setState({ actionError: null });
     try {

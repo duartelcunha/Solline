@@ -372,9 +372,9 @@ export const MATRIX: readonly MatrixRow[] = [
   {
     id: 'approval-judge',
     milestone: 'M8',
-    status: 'absent',
-    evidence: 'packages/engine/src/verify/judge.ts',
-    note: 'O juiz que existe desempata corridas. Não recomenda sobre um diff nem aprova envios.',
+    status: 'present',
+    evidence: 'packages/engine/src/shadow/judge.ts',
+    note: 'Recomenda em sombra. Falhar ou discordar fica inconclusivo. Não autoriza push, merge nem apagar.',
   },
   {
     id: 'model-routing',

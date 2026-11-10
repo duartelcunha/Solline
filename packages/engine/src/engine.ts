@@ -694,6 +694,7 @@ export class Engine {
         }),
       'repair.set': async (p) => s.setRepair(p.sessionId, p.enabled),
       'repair.cancel': async (p) => s.cancelRepair(p.sessionId),
+      'shadow.ask': async (p) => s.shadowAsk(p.sessionId),
       'checks.run': (p) => s.runChecks(p.sessionId),
       'checks.fix': async (p) => ({ turnId: await s.fixCheck(p.sessionId, p.id) }),
       'handoff.draft': async (p) => {
