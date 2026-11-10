@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { BudgetLimits, TokenSnapshot } from '@solline/protocol';
 import { actions, useSession } from '../../stores/app.ts';
-import { shownAmount } from './format.ts';
+import { hasReading, shownAmount } from './format.ts';
 
 const money = new Intl.NumberFormat('pt-PT', {
   style: 'currency',
@@ -35,7 +35,6 @@ export function LedgerPanel({ sessionId }: { sessionId: string }) {
   const ledger = useSession(sessionId, (s) => s.ledger);
   const [open, setOpen] = useState(false);
   const [turns, setTurns] = useState('');
-  const [attempts, setAttempts] = useState('');
   const [minutes, setMinutes] = useState('');
   const limit = (value: string): number | null => {
     const text = value.trim();
@@ -46,11 +45,11 @@ export function LedgerPanel({ sessionId }: { sessionId: string }) {
   const save = () => {
     const limits: BudgetLimits = {
       maxTurns: limit(turns),
-      maxAttempts: limit(attempts),
       maxMinutes: limit(minutes),
     };
     void actions.setBudget(sessionId, limits);
   };
+  if (!hasReading(ledger)) return null;
   return (
     <div className="mb-2">
       <button
@@ -71,10 +70,6 @@ export function LedgerPanel({ sessionId }: { sessionId: string }) {
             <>
               {rows(ledger.total)}
               <p>Quota: {ledger.quota.reason}</p>
-              <p>
-                Estimativa de tabela ({ledger.priceVersion}):{' '}
-                {shownAmount(ledger.estimateUsd, (value) => money.format(value))}
-              </p>
               {ledger.budget.stop ? (
                 <p data-testid="ledger-stop">{ledger.budget.stop.text}</p>
               ) : null}
@@ -94,17 +89,6 @@ export function LedgerPanel({ sessionId }: { sessionId: string }) {
                 inputMode="numeric"
                 aria-label="Limite de turnos"
                 data-testid="budget-turns"
-                className="h-7 w-16 rounded-control border border-line bg-transparent px-2 text-fg"
-              />
-            </label>
-            <label className="grid gap-0.5">
-              Tentativas
-              <input
-                value={attempts}
-                onChange={(event) => setAttempts(event.target.value)}
-                inputMode="numeric"
-                aria-label="Limite de tentativas"
-                data-testid="budget-attempts"
                 className="h-7 w-16 rounded-control border border-line bg-transparent px-2 text-fg"
               />
             </label>

@@ -6,17 +6,7 @@ import type {
   Usage,
 } from '@solline/protocol';
 
-/** A tabela que sai com o produto. Não há tarifa verificada: a estimativa fica desconhecida. */
-export const PRICE_VERSION = 'unpriced-2026-11-10';
-
 export const QUOTA_REASON = 'Nenhum agente reporta a quota oficial.';
-
-export interface PriceRow {
-  /** Dólares de tabela por token, não a fatura da subscrição. */
-  fresh: number;
-  cached: number;
-  output: number;
-}
 
 export interface UsageReport {
   freshInput?: number | null;
@@ -64,18 +54,11 @@ export class SessionLedger {
   #seq = 0;
   #budget: LedgerView['budget'] = {
     maxTurns: null,
-    maxAttempts: null,
     maxMinutes: null,
     turns: 0,
-    attempts: 0,
     startedAt: null,
     stop: null,
   };
-  #table: Readonly<Record<string, PriceRow>>;
-
-  constructor(table: Readonly<Record<string, PriceRow>> = {}) {
-    this.#table = table;
-  }
 
   observe(report: UsageReport): void {
     const snapshot = this.#snapshot(report);
@@ -99,7 +82,6 @@ export class SessionLedger {
     this.#budget = {
       ...this.#budget,
       maxTurns: limits.maxTurns,
-      maxAttempts: limits.maxAttempts,
       maxMinutes: limits.maxMinutes,
       stop: null,
     };
@@ -111,20 +93,13 @@ export class SessionLedger {
   /** Antes de abrir outro turno. O turno que já vai a meio não é cortado aqui. */
   gate(
     now: number,
-  ): { ok: true } | { ok: false; reason: 'turns' | 'attempts' | 'time'; text: string } {
+  ): { ok: true } | { ok: false; reason: 'turns' | 'time'; text: string } {
     const budget = this.#budget;
     if (budget.maxTurns !== null && budget.turns >= budget.maxTurns) {
       return {
         ok: false,
         reason: 'turns',
         text: 'Chegaste ao limite de turnos. O próximo não começa.',
-      };
-    }
-    if (budget.maxAttempts !== null && budget.attempts >= budget.maxAttempts) {
-      return {
-        ok: false,
-        reason: 'attempts',
-        text: 'Chegaste ao limite de tentativas. O próximo envio não começa.',
       };
     }
     if (
@@ -144,7 +119,6 @@ export class SessionLedger {
   noteTurn(now: number): void {
     if (this.#budget.startedAt === null) this.#budget.startedAt = now;
     this.#budget.turns += 1;
-    this.#budget.attempts += 1;
     const gate = this.gate(now);
     this.#budget.stop = gate.ok ? null : { reason: gate.reason, text: gate.text };
   }
@@ -152,7 +126,6 @@ export class SessionLedger {
   view(): LedgerView {
     const parents = this.#executions.filter((item) => item.kind !== 'subagent');
     const total = this.#sum(parents);
-    const model = parents.length === 1 ? (parents[0]?.model ?? null) : null;
     return {
       executions: this.#executions.map((item) => ({
         id: item.id,
@@ -162,15 +135,13 @@ export class SessionLedger {
         spent: clone(item.spent),
       })),
       total,
-      estimateUsd: estimateUsd(total, model, this.#table),
-      priceVersion: PRICE_VERSION,
       quota: { status: 'unknown', reason: QUOTA_REASON },
       budget: { ...this.#budget, stop: this.#budget.stop ? { ...this.#budget.stop } : null },
     };
   }
 
-  static fromView(view: LedgerView, table?: Readonly<Record<string, PriceRow>>): SessionLedger {
-    const ledger = new SessionLedger(table);
+  static fromView(view: LedgerView): SessionLedger {
+    const ledger = new SessionLedger();
     ledger.#executions = view.executions.map((item) => ({
       ...item,
       seen: true,
@@ -267,17 +238,4 @@ export function reportFromUsage(usage: Partial<Usage>): UsageReport {
     costUsd: usage.costUsd === undefined ? null : usage.costUsd,
     model: models.length === 1 ? (models[0]?.model ?? null) : null,
   };
-}
-
-/** Estimativa de tabela. Sem linha de preço, ou sem tokens, fica null. */
-export function estimateUsd(
-  spent: TokenSnapshot,
-  model: string | null,
-  table: Readonly<Record<string, PriceRow>>,
-): number | null {
-  if (!model) return null;
-  const row = table[model];
-  if (!row) return null;
-  if (spent.freshInput === null || spent.cachedInput === null || spent.output === null) return null;
-  return spent.freshInput * row.fresh + spent.cachedInput * row.cached + spent.output * row.output;
 }

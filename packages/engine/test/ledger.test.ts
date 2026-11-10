@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SessionLedger, estimateUsd, type PriceRow } from '../src/ledger/ledger.ts';
-
-const table: Record<string, PriceRow> = {
-  haiku: { fresh: 0.001, cached: 0.0001, output: 0.002 },
-};
+import { SessionLedger } from '../src/ledger/ledger.ts';
 
 describe('livro de custo', () => {
   it('não soma dois totais acumulados', () => {
@@ -62,28 +58,24 @@ describe('livro de custo', () => {
     expect(restored.view().executions).toHaveLength(1);
   });
 
-  it('a estimativa só existe com tabela e com tokens; a quota fica desconhecida', () => {
-    const priced = new SessionLedger(table);
-    priced.observe({ freshInput: 10, cachedInput: 0, output: 5, model: 'haiku' });
-    expect(priced.view().estimateUsd).toBeCloseTo(10 * 0.001 + 5 * 0.002);
-    const bare = new SessionLedger();
-    bare.observe({ freshInput: 10, cachedInput: 0, output: 5, model: 'haiku', costUsd: 1 });
-    expect(bare.view().estimateUsd).toBeNull();
-    expect(bare.view().priceVersion).toBe('unpriced-2026-11-10');
-    expect(bare.view().quota.status).toBe('unknown');
-    expect(estimateUsd(bare.view().total, 'haiku', {})).toBeNull();
+  it('a quota fica desconhecida e o custo reportado não é uma estimativa', () => {
+    const ledger = new SessionLedger();
+    ledger.observe({ freshInput: 10, cachedInput: 0, output: 5, model: 'haiku', costUsd: 1 });
+    expect(ledger.view().quota.status).toBe('unknown');
+    expect(ledger.view().total.costUsd).toBe(1);
+    expect('estimateUsd' in ledger.view()).toBe(false);
   });
 
   it('o limite pára antes do próximo turno e não no meio', () => {
     const ledger = new SessionLedger();
-    ledger.setBudget({ maxTurns: 1, maxAttempts: null, maxMinutes: null });
+    ledger.setBudget({ maxTurns: 1, maxMinutes: null });
     expect(ledger.gate(0).ok).toBe(true);
     ledger.noteTurn(1_000);
     const blocked = ledger.gate(2_000);
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) expect(blocked.reason).toBe('turns');
     const timed = new SessionLedger();
-    timed.setBudget({ maxTurns: null, maxAttempts: null, maxMinutes: 1 });
+    timed.setBudget({ maxTurns: null, maxMinutes: 1 });
     expect(timed.gate(0).ok).toBe(true);
     timed.noteTurn(0);
     expect(timed.gate(30_000).ok).toBe(true);
