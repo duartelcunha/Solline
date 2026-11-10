@@ -12,7 +12,7 @@
 - Regras nativas, fora da pasta. A Solline não lê `CLAUDE.md` nem `AGENTS.md`.
 - Consulta do Claude sem Bash. Uma consulta não passa o testemunho. Memórias externas não se aprovam em lote.
 - Do pedido ao PR: issue do GitHub, commit sem push, confirmação nativa antes do push, CI só de leitura, sessão arquivada quando o PR entra. Linear não está ligado.
-- Matriz em `docs/M8-matriz.md`. Corpus de 42 tarefas e harness em `packages/engine/src/pilot`. Sem cliente de modelo, a linha de base fica por medir.
+- Matriz só em `packages/engine/src/pilot/matrix.ts`. Corpus de 10 tarefas e harness de dois braços em `packages/engine/src/pilot`. Sem cliente de modelo, a linha de base fica por medir.
 
 ## Próximo passo
 

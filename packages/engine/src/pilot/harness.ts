@@ -1,12 +1,13 @@
-import { CORPUS, corpusSeal, type Split, type Task } from './corpus.ts';
+import { CORPUS, corpusSeal, type Task } from './corpus.ts';
 import { MATRIX, type CapabilityStatus, type MatrixRow } from './matrix.ts';
 
 /**
- * Ensaio emparelhado. Três braços, a mesma tarefa, a mesma ordem alternada.
+ * Ensaio de duas pontas, o mesmo modelo: cliente nativo e Solline.
  * O que ninguém mediu fica not-measured. Nunca se preenche com zero.
+ * Os tokens só entram quando o cliente os reportou.
  */
 
-export const ARMS = ['native-reference', 'solline-reference', 'solline-economy'] as const;
+export const ARMS = ['native-reference', 'solline-reference'] as const;
 export type Arm = (typeof ARMS)[number];
 
 export interface Absent {
@@ -22,11 +23,13 @@ export interface Present<T> {
 export type Reading<T> = Absent | Present<T>;
 
 export const NO_CLIENT = 'Sem cliente de modelo nesta máquina.';
-export const ECONOMY_OPT_IN =
-  'O percurso económico fica opt-in até passar o piloto, e não há cliente.';
 export const NO_OBSERVATION = 'O cliente estava disponível e não devolveu observação.';
-export const BLIND_REQUIRED = 'A aceitação só conta com revisão que não viu a configuração.';
 export const UNKNOWN_VALUE = 'O cliente não reportou este valor.';
+export const NATIVE_FOCUS = 'O cliente nativo não tem a janela da Solline.';
+export const NOT_A_WEEK = 'Esta corrida não cobre uma semana. Os aceites não se promovem a taxa semanal.';
+
+/** O que estes minutos medem: a janela da Solline em foco, um proxy da atenção, não a atenção em si. */
+export const ATTENTION_PROXY = 'minutos com a janela da Solline em foco';
 
 export function measured<T>(value: T): Present<T> {
   if (typeof value === 'number' && !Number.isFinite(value)) {
@@ -57,10 +60,8 @@ export function booleanReading(
 
 export interface RawObservation {
   accepted?: boolean | null;
-  blind?: boolean | null;
-  regressionWithin7Days?: boolean | null;
-  attentionMinutes?: number | null;
-  durationMs?: number | null;
+  /** Minutos com a janela da Solline em foco. Ignorado no braço nativo. */
+  focusedMinutes?: number | null;
   freshInputTokens?: number | null;
   cachedInputTokens?: number | null;
   outputTokens?: number | null;
@@ -69,20 +70,15 @@ export interface RawObservation {
 export interface ClientReach {
   native: boolean;
   solline: boolean;
-  economy: boolean;
 }
 
 export interface Slot {
   taskId: string;
-  split: Split;
   arm: Arm;
-  /** 0 corre primeiro no par. O braço económico fica de fora do par e leva 2. */
-  order: 0 | 1 | 2;
+  /** 0 corre primeiro neste par. */
+  order: 0 | 1;
   accepted: Reading<boolean>;
-  blind: Reading<boolean>;
-  regressionWithin7Days: Reading<boolean>;
-  attentionMinutes: Reading<number>;
-  durationMs: Reading<number>;
+  focusedMinutes: Reading<number>;
   freshInputTokens: Reading<number>;
   cachedInputTokens: Reading<number>;
   outputTokens: Reading<number>;
@@ -91,7 +87,6 @@ export interface Slot {
 export interface SmokeRow {
   id: string;
   code: CapabilityStatus;
-  /** Correr isto contra um agente real é outra prova. Aqui fica explícito quando não correu. */
   agents: Absent;
 }
 
@@ -99,13 +94,15 @@ export interface BaselineReport {
   recordedAt: string;
   corpusSeal: string;
   tasks: number;
-  tuning: number;
-  eval: number;
   clients: ClientReach;
   slots: readonly Slot[];
-  acceptanceRate: Reading<number>;
-  attentionMinutes: Reading<number>;
-  tokensPerAccepted: Reading<number>;
+  /** Aceites nesta corrida, só quando todas as células foram julgadas. */
+  acceptedTasks: Reading<number>;
+  /** Não se calcula a partir de uma corrida só. */
+  acceptedTasksPerWeek: Reading<number>;
+  /** Proxy: minutos de foco da janela Solline a dividir pelas tarefas aceites nesse braço. */
+  focusedMinutesPerAccepted: Reading<number>;
+  attentionProxy: typeof ATTENTION_PROXY;
   smoke: readonly SmokeRow[];
 }
 
@@ -125,8 +122,7 @@ const SMOKE: readonly { id: string; rows: readonly string[] }[] = [
 
 const RANK: Record<CapabilityStatus, number> = { absent: 0, partial: 1, present: 2 };
 
-export function orderOf(index: number, arm: Arm): 0 | 1 | 2 {
-  if (arm === 'solline-economy') return 2;
+export function orderOf(index: number, arm: Arm): 0 | 1 {
   const nativeFirst = index % 2 === 0;
   if (arm === 'native-reference') return nativeFirst ? 0 : 1;
   return nativeFirst ? 1 : 0;
@@ -134,22 +130,17 @@ export function orderOf(index: number, arm: Arm): 0 | 1 | 2 {
 
 function reachable(arm: Arm, clients: ClientReach): string | null {
   if (arm === 'native-reference') return clients.native ? null : NO_CLIENT;
-  if (arm === 'solline-reference') return clients.solline ? null : NO_CLIENT;
-  return clients.economy ? null : ECONOMY_OPT_IN;
+  return clients.solline ? null : NO_CLIENT;
 }
 
 function blank(task: Task, arm: Arm, index: number, reason: string): Slot {
   const absent = notMeasured(reason);
   return {
     taskId: task.id,
-    split: task.split,
     arm,
     order: orderOf(index, arm),
     accepted: absent,
-    blind: absent,
-    regressionWithin7Days: absent,
-    attentionMinutes: absent,
-    durationMs: absent,
+    focusedMinutes: arm === 'native-reference' ? notMeasured(NATIVE_FOCUS) : absent,
     freshInputTokens: absent,
     cachedInputTokens: absent,
     outputTokens: absent,
@@ -157,20 +148,15 @@ function blank(task: Task, arm: Arm, index: number, reason: string): Slot {
 }
 
 function fromObservation(task: Task, arm: Arm, index: number, raw: RawObservation): Slot {
-  const blind = booleanReading(raw.blind, UNKNOWN_VALUE);
-  const acceptedRaw = booleanReading(raw.accepted, UNKNOWN_VALUE);
-  const accepted =
-    blind.status === 'measured' && blind.value ? acceptedRaw : notMeasured(BLIND_REQUIRED);
   return {
     taskId: task.id,
-    split: task.split,
     arm,
     order: orderOf(index, arm),
-    accepted,
-    blind,
-    regressionWithin7Days: booleanReading(raw.regressionWithin7Days, UNKNOWN_VALUE),
-    attentionMinutes: numberReading(raw.attentionMinutes, UNKNOWN_VALUE),
-    durationMs: numberReading(raw.durationMs, UNKNOWN_VALUE),
+    accepted: booleanReading(raw.accepted, UNKNOWN_VALUE),
+    focusedMinutes:
+      arm === 'native-reference'
+        ? notMeasured(NATIVE_FOCUS)
+        : numberReading(raw.focusedMinutes, UNKNOWN_VALUE),
     freshInputTokens: numberReading(raw.freshInputTokens, UNKNOWN_VALUE),
     cachedInputTokens: numberReading(raw.cachedInputTokens, UNKNOWN_VALUE),
     outputTokens: numberReading(raw.outputTokens, UNKNOWN_VALUE),
@@ -190,43 +176,31 @@ export function sumMeasured(readings: readonly Reading<number>[]): Reading<numbe
   return measured(total);
 }
 
-/** Taxa só quando todas as aceitações foram medidas. Uma ausência não conta como recusa. */
-export function acceptanceRate(readings: readonly Reading<boolean>[]): Reading<number> {
-  if (readings.length === 0) return notMeasured('Não há tarefas.');
+function acceptedCount(slots: readonly Slot[]): Reading<number> {
+  if (slots.length === 0) return notMeasured('Não há tarefas.');
   let yes = 0;
-  for (const reading of readings) {
-    if (reading.status === 'not-measured') {
-      return notMeasured('Há tarefas por medir. A taxa não trata ausência como recusa.');
+  for (const slot of slots) {
+    if (slot.accepted.status === 'not-measured') {
+      return notMeasured('Há tarefas por medir. A contagem não trata ausência como recusa.');
     }
-    if (reading.value) yes += 1;
+    if (slot.accepted.value) yes += 1;
   }
-  return measured(yes / readings.length);
+  return measured(yes);
 }
 
-/**
- * Tokens de todas as tentativas, a dividir pelas aceites. Falhas contam no numerador.
- * Se faltar um valor, ou se não houver aceite, o quociente fica por medir.
- */
-export function tokensPerAccepted(slots: readonly Slot[]): Reading<number> {
-  if (slots.length === 0) return notMeasured('Não há tentativas.');
-  const parts = slots.flatMap((slot) => [
-    slot.freshInputTokens,
-    slot.cachedInputTokens,
-    slot.outputTokens,
-  ]);
-  const total = sumMeasured(parts);
-  if (total.status === 'not-measured') return total;
-  const accepted = slots.filter(
+/** Minutos de foco da Solline por tarefa aceite nesse braço. Falta de minutos não vira zero. */
+export function focusedMinutesPerAccepted(slots: readonly Slot[]): Reading<number> {
+  const solline = slots.filter((slot) => slot.arm === 'solline-reference');
+  const accepted = solline.filter(
     (slot) => slot.accepted.status === 'measured' && slot.accepted.value,
   );
-  if (accepted.length === 0) {
-    return notMeasured('Não há tarefas aceites neste conjunto. O consumo não se divide por zero.');
+  if (solline.some((slot) => slot.accepted.status === 'not-measured')) {
+    return notMeasured('Há tarefas por julgar. O denominador não as trata como recusa.');
   }
-  const unjudged = slots.some((slot) => slot.accepted.status === 'not-measured');
-  if (unjudged) {
-    return notMeasured('Há tentativas por julgar. O denominador não as trata como recusa.');
-  }
-  return measured(total.value / accepted.length);
+  if (accepted.length === 0) return notMeasured('Não há tarefa aceite na Solline.');
+  const minutes = sumMeasured(accepted.map((slot) => slot.focusedMinutes));
+  if (minutes.status === 'not-measured') return minutes;
+  return measured(minutes.value / accepted.length);
 }
 
 function rowById(id: string): MatrixRow {
@@ -250,8 +224,7 @@ export interface BaselineInput {
   tasks?: readonly Task[];
   clients: ClientReach;
   recordedAt: string;
-  /** Quando o braço tem cliente e esta função não devolve nada, a célula fica por medir. */
-  observe?: (input: { task: Task; arm: Arm; order: 0 | 1 | 2 }) => RawObservation | undefined;
+  observe?: (input: { task: Task; arm: Arm; order: 0 | 1 }) => RawObservation | undefined;
 }
 
 export function runBaseline(input: BaselineInput): BaselineReport {
@@ -274,13 +247,12 @@ export function runBaseline(input: BaselineInput): BaselineReport {
     recordedAt,
     corpusSeal: corpusSeal(tasks),
     tasks: tasks.length,
-    tuning: tasks.filter((task) => task.split === 'tuning').length,
-    eval: tasks.filter((task) => task.split === 'eval').length,
     clients: { ...input.clients },
     slots,
-    acceptanceRate: acceptanceRate(slots.map((slot) => slot.accepted)),
-    attentionMinutes: sumMeasured(slots.map((slot) => slot.attentionMinutes)),
-    tokensPerAccepted: tokensPerAccepted(slots),
+    acceptedTasks: acceptedCount(slots),
+    acceptedTasksPerWeek: notMeasured(NOT_A_WEEK),
+    focusedMinutesPerAccepted: focusedMinutesPerAccepted(slots),
+    attentionProxy: ATTENTION_PROXY,
     smoke: smokeOf(agentReason),
   };
 }

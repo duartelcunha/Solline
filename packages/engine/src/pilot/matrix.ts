@@ -1,28 +1,4 @@
-/** O que o código faz hoje. presente, parcial ou ausente, com o ficheiro que o sustenta. */
-
-const STATUS_LABEL = { present: 'presente', partial: 'parcial', absent: 'ausente' } as const;
-
-/** A página em docs/M8-matriz.md. O teste exige que as duas digam o mesmo. */
-export function matrixMarkdown(): string {
-  const table = MATRIX.map(
-    (row) => `| ${row.id} | ${row.milestone} | ${STATUS_LABEL[row.status]} | \`${row.evidence}\` |`,
-  );
-  const notes = MATRIX.map((row) => `- \`${row.id}\`. ${row.note}`);
-  return [
-    '# Matriz de capacidades',
-    '',
-    'O que o código faz, por marco. Atualiza-se quando um marco muda o estado. Não é uma medição com agentes.',
-    '',
-    '| id | marco | estado | prova |',
-    '| --- | --- | --- | --- |',
-    ...table,
-    '',
-    '## Notas',
-    '',
-    ...notes,
-    '',
-  ].join('\n');
-}
+/** O que o código faz hoje. presente, parcial ou ausente, com o ficheiro que o sustenta. Uma só lista. */
 
 export type CapabilityStatus = 'present' | 'partial' | 'absent';
 

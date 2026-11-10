@@ -54,10 +54,12 @@ pnpm test
 
 Engine integration tests can use real agent accounts. Set `SOLLINE_SKIP_SDK=1` for an offline
 run; `SOLLINE_AGENTS` selects real agents (`packages/engine/test/real-agents.ts:3`).
-The paired-trial baseline is `packages/engine/src/pilot`. Without a model client, every
-model-dependent cell stays not measured. A missing number is not stored as zero. The
-capability matrix is [docs/M8-matriz.md](docs/M8-matriz.md). No model client was available
-for the first baseline run, so acceptance, attention and tokens are not measured.
+The paired-trial baseline is `packages/engine/src/pilot`. Two arms, the same model:
+the native client and Solline. Ten real tasks. Without a model client, every
+model-dependent cell stays not measured. A missing number is not stored as zero.
+The capability matrix is `packages/engine/src/pilot/matrix.ts`. No model client was
+available for the first baseline run, so acceptance and focused minutes are not measured.
+Tokens are recorded only when a client reports them.
 The desktop smoke enables real sessions with `SOLLINE_E2E_SDK=1`, accepts an installed app
 through `SOLLINE_EXE`, and captures screenshots with `SOLLINE_SHOTS`
 (`apps/desktop/e2e/smoke.spec.ts:19`).
