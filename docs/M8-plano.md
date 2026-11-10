@@ -29,7 +29,7 @@ Nesta máquina não há cliente de modelo. A corrida de 2026-11-06 deixa aceita�
 
 ## Adiado
 
-M8.2 (livro de custo e orçamento), M8.3 (ciclo check, corrigir, check), M8.4 (juiz em sombra) e M8.5 (escolha de modelo) não se fazem nesta ronda. A decisão do Duarte é parar depois do M8.1. Cada uma, se voltar, escreve o seu plano aqui antes de se construir.
+M8.3, M8.4 e M8.5 continuam por fazer até a fatia anterior fechar. M8.5 só entra se uma medição real o justificar.
 
 ## M8.1 — Clareza
 
@@ -45,6 +45,12 @@ Ver o estado e o próximo passo sem procurar, e tirar da frente o que não se de
 
 O cabeçalho mostra o título em duas linhas e o próximo passo. Modelo, esforço e modo estão no mesmo grupo, com o nome do esforço sempre visível. A corrida diz «Corrida». A mesa deixa de mostrar custo, porta e medidor. O compositor resume ficheiros por rever e verificações. O painel Rever, aberto, ocupa mais da sessão. As cores não mudaram: o texto secundário já passa 4,5:1.
 
-## A seguir
+## M8.2 — Livro de custo e orçamento
 
-Nada nesta ronda. M8.2 em diante está na secção Adiado.
+Tornar o custo do resultado visível sem inventar um número.
+
+**Entra.** Um livro local por sessão e por execução. O agente reporta totais acumulados: a diferença é o gasto, um total que desce abre outra execução, um subagente não se soma ao pai. Campo em falta fica desconhecido, nunca zero. Zero reportado continua zero. A estimativa monetária só existe com uma tabela de preços; a tabela que sai é vazia (`unpriced-2026-11-10`), porque não há tarifa verificada nesta máquina. A quota oficial não é reportada por nenhum agente: fica desconhecida. Limites opt-in de turnos, tentativas e minutos. O turno que já vai a meio não é cortado; o próximo não começa.
+
+**Não entra.** Ler credenciais, endpoints de faturação, tratar dólares estimados como fatura, e prometer um teto no meio de uma resposta.
+
+**Prova.** Testes do livro com retoma, reset e subagente. Capturas do painel, claro e escuro, larga e estreita.
