@@ -17,6 +17,7 @@ import { Celebration } from './features/pull/celebration.tsx';
 import { IssuesDialog } from './features/issues/issues-dialog.tsx';
 import { HandoffDialog } from './features/handoff/handoff-dialog.tsx';
 import { SessionMenu } from './features/handoff/pass-to.tsx';
+import { checkCounts, nextStep } from './features/session/glance.ts';
 import { HandedBanner, SessionOriginLink } from './features/handoff/session-lineage.tsx';
 import { MapDialog } from './features/map/map-dialog.tsx';
 import { Desk, useNeedsYouCount } from './features/desk/desk.tsx';
@@ -131,6 +132,11 @@ function EngineStatus({ ping }: { ping: PingState }) {
 function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
   const title = useSession(sessionId, (s) => s.info.title);
   const state = useSession(sessionId, (s) => s.info.state);
+  const archived = useSession(sessionId, (s) => s.info.archived === true);
+  const failingChecks = useSession(sessionId, (s) => checkCounts(s.checks?.results).failed);
+  const pendingFiles = useSession(sessionId, (s) => s.timeline?.pending?.files ?? 0);
+  const queued = useSession(sessionId, (s) => s.queue?.items.length ?? 0);
+  const hasTurns = useSession(sessionId, (s) => s.turns.length > 0);
   const label = {
     starting: 'A preparar',
     idle: 'À tua espera',
@@ -138,23 +144,35 @@ function SessionHeaderTitle({ sessionId }: { sessionId: string }) {
     'needs-you': 'Precisa de ti',
     error: 'Ligação interrompida',
   }[state];
+  const step = nextStep({
+    state,
+    archived,
+    failingChecks,
+    pendingFiles,
+    queued,
+    hasTurns,
+  });
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div className="flex min-w-[14rem] flex-1 items-start gap-2">
       {/* O mesmo nome de transição do capuz dos cartões da mesa: abrir uma sessão transforma um no outro. */}
-      <span className="session-bot-target">
+      <span className="session-bot-target mt-0.5">
         <SessionBot key={sessionId} sessionId={sessionId} size={36} alive />
       </span>
       <div className="flex min-w-0 flex-col gap-0.5 py-1">
         <h1
-          className="truncate text-[13px] font-semibold tracking-[-0.01em]"
+          className="text-[13px] leading-snug font-semibold tracking-[-0.01em] break-words"
           data-testid="session-title"
+          title={title}
         >
           {title}
         </h1>
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
           <span className="session-state-chip shrink-0" data-state={state}>
             <SessionMark sessionId={sessionId} size={12} />
             {label}
+          </span>
+          <span className="min-w-0 text-[12px] leading-snug text-muted" data-testid="next-step">
+            {step}
           </span>
           <SessionOriginLink sessionId={sessionId} />
         </div>
@@ -443,7 +461,7 @@ export function App() {
         <MapDialog />
 
         <main tabIndex={-1} className="flex min-h-0 min-w-0 flex-col">
-          <header className="session-header drag flex min-h-14 shrink-0 items-center gap-3 border-b border-line/60 pr-[12rem] pl-5">
+          <header className="session-header drag flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line/60 pr-[12rem] pl-5">
             {activeSessionId ? (
               <SessionHeaderTitle sessionId={activeSessionId} />
             ) : raceId ? (

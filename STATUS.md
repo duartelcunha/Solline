@@ -2,7 +2,7 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0 feito: verdade, matriz, corpus e harness. Sem medição com clientes reais. M8.1 não começou.
+**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0 e M8.1 feitos. Sem medição com clientes reais. M8.2 em diante adiado.
 
 **Última atualização:** 2026-11-06, por Duarte
 
@@ -13,10 +13,11 @@
 - Consulta do Claude sem Bash. Uma consulta não passa o testemunho. Memórias externas não se aprovam em lote.
 - Do pedido ao PR: issue do GitHub, commit sem push, confirmação nativa antes do push, CI só de leitura, sessão arquivada quando o PR entra. Linear não está ligado.
 - Matriz só em `packages/engine/src/pilot/matrix.ts`. Corpus de 10 tarefas e harness de dois braços em `packages/engine/src/pilot`. Sem cliente de modelo, a linha de base fica por medir.
+- M8.1: próximo passo no cabeçalho, título em duas linhas, corrida com nome, mesa sem telemetria miúda, resumo da prova junto ao compositor.
 
 ## Próximo passo
 
-M8.1: hierarquia da sessão, controlos raros recolhidos, texto sem cortes essenciais, contraste e resumo do turno. Plano em `docs/M8-plano.md`, ainda por escrever nessa fatia.
+Nada nesta ronda. M8.2 (livro de custo), M8.3 (ciclo), M8.4 (juiz) e M8.5 (modelo) estão adiados em `docs/M8-plano.md`.
 
 ## Comandos
 

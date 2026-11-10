@@ -60,11 +60,11 @@ export function RacePill({
         <Menu.Trigger
           disabled={disabled}
           data-testid="pill-race"
-          aria-label={`${count} pistas. Mudar`}
+          aria-label={count === 1 ? 'Corrida, 1 pista. Mudar' : `${count} pistas. Mudar`}
           className={`${pillClass} ${count > 1 ? 'border-line-strong text-fg' : ''}`}
         >
           <Layers size={13} />
-          <span className="tabular-nums">{count}×</span>
+          <span>{count === 1 ? 'Corrida' : `${count} pistas`}</span>
         </Menu.Trigger>
       }
     >
