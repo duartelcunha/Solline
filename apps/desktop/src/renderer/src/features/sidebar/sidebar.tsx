@@ -185,7 +185,7 @@ export function Sidebar({
   const pending = usePendingCounts().total;
   return (
     <aside
-      className="flex min-h-0 flex-col border-r border-line bg-sidebar"
+      className="flex min-h-0 flex-col bg-sidebar"
       aria-label="Projetos e sessões"
     >
       <div className="drag flex h-11 shrink-0 items-center gap-2 px-4">
