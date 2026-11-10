@@ -4,6 +4,7 @@ import { RulesState } from './rules.ts';
 import { McpCatalogState } from './mcp-catalog.ts';
 import { AgentId, AskBlock, ConversationDelta, SessionState, Workspace } from './conversation.ts';
 import { Checks, SetupState } from './checks.ts';
+import { LedgerView } from './ledger.ts';
 import { Race } from './race.ts';
 import { Quality } from './quality.ts';
 import { Timeline } from './review.ts';
@@ -92,6 +93,14 @@ export const SessionChecksEvent = z.object({
   checks: Checks,
 });
 
+/** O livro de custo desta sessão mudou. */
+export const SessionLedgerEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.ledger'),
+  sessionId: z.string(),
+  ledger: LedgerView,
+});
+
 /** Onde a sessão trabalha mudou: o branch ganhou nome, mudaram os +/− ou o trabalho foi trazido. */
 export const SessionWorkspaceEvent = z.object({
   kind: z.literal('event'),
@@ -178,6 +187,7 @@ export const EngineEvent = z
     SessionTimelineEvent,
     SessionQualityEvent,
     SessionChecksEvent,
+    SessionLedgerEvent,
     SessionWorkspaceEvent,
     SessionQueueEvent,
     SessionHandoffEvent,

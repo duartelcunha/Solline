@@ -6,6 +6,7 @@ import { actions, flushDrafts, useApp, useSession } from '../../stores/app.ts';
 import { useSessionAgentLabel } from '../agents/agent-label.tsx';
 import { SettingsPills } from './pills.tsx';
 import { checkCounts, proofLine } from '../session/glance.ts';
+import { LedgerPanel } from '../ledger/ledger-panel.tsx';
 import { RacePill } from '../race/race-pill.tsx';
 import { handedBanner, handedReason } from '../handoff/handoff-model.ts';
 import { useSplitFlow } from '../split/split-flow.tsx';
@@ -197,6 +198,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             {proof}
           </p>
         ) : null}
+        <LedgerPanel sessionId={sessionId} />
         {actionError ? (
           <p
             role="alert"

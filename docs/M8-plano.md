@@ -54,3 +54,7 @@ Tornar o custo do resultado visível sem inventar um número.
 **Não entra.** Ler credenciais, endpoints de faturação, tratar dólares estimados como fatura, e prometer um teto no meio de uma resposta.
 
 **Prova.** Testes do livro com retoma, reset e subagente. Capturas do painel, claro e escuro, larga e estreita.
+
+## Feito no M8.2
+
+O livro está em `packages/engine/src/ledger`. Um total acumulado não se soma duas vezes. Um total que desce abre outra execução. Um subagente não entra na soma. O painel diz «desconhecido» ou «Ainda não há leitura», nunca zero inventado. A tabela de preços que sai é vazia. A quota fica por reportar. Os limites opt-in param antes do próximo turno.

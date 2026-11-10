@@ -4,6 +4,7 @@ import {
   applyDelta,
   type AgentCapabilities,
   type Checks,
+  type LedgerView,
   type CiResult,
   type ConsultRequest,
   type PullRequest,
@@ -44,6 +45,8 @@ export interface SessionData {
   quality: Quality | null;
   /** As verificações do projeto (tipos, lint, testes) depois do último turno que mudou ficheiros. */
   checks: Checks | null;
+  /** Livro de custo. Null: ainda não houve leitura. */
+  ledger: LedgerView | null;
   /** O último "Trazer" deu conflitos nestes ficheiros (para pedir ao agente que os resolva). */
   conflicts: { files: string[]; into: string } | null;
   /** O PR desta sessão, se já foi aberto. */
@@ -89,6 +92,7 @@ export function createSessionStore(
     interrupted: false,
     quality: null,
     checks: null,
+    ledger: null,
     conflicts: null,
     pull: null,
     ci: null,
@@ -182,6 +186,8 @@ function reduceEngineEvent(data: SessionData, event: EngineEvent): SessionData {
       return { ...data, quality: event.quality };
     case 'session.checks':
       return { ...data, checks: event.checks };
+    case 'session.ledger':
+      return { ...data, ledger: event.ledger };
     case 'session.setup':
       return { ...data, info: { ...data.info, setup: event.setup } };
     case 'session.queue':
