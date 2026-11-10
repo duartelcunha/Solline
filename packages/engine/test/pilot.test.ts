@@ -102,7 +102,10 @@ describe('linha de base do M8', () => {
     expect(first.tasks).toBe(10);
     expect(first.slots).toHaveLength(20);
     expect(first.acceptedTasks.status).toBe('not-measured');
-    expect(first.acceptedTasksPerWeek.reason).toContain('semana');
+    expect(first.acceptedTasksPerWeek.status).toBe('not-measured');
+    if (first.acceptedTasksPerWeek.status === 'not-measured') {
+      expect(first.acceptedTasksPerWeek.reason).toContain('semana');
+    }
     expect(first.attentionProxy).toBe(ATTENTION_PROXY);
     expect(JSON.stringify(first)).not.toContain('"value":0');
   });
@@ -144,13 +147,18 @@ describe('linha de base do M8', () => {
     expect(solline?.order).toBe(1);
     expect(report.slots.find((item) => item.taskId === 't02' && item.arm === 'native-reference')?.order).toBe(1);
     expect(native?.accepted).toEqual({ status: 'measured', value: true });
-    expect(native?.focusedMinutes.reason).toContain('janela da Solline');
+    expect(native?.focusedMinutes.status).toBe('not-measured');
+    if (native?.focusedMinutes.status === 'not-measured') {
+      expect(native.focusedMinutes.reason).toContain('janela da Solline');
+    }
     expect(solline?.focusedMinutes).toEqual({ status: 'measured', value: 12 });
     expect(solline?.freshInputTokens.status).toBe('not-measured');
     expect(solline?.outputTokens).toEqual({ status: 'measured', value: 1 });
     expect(report.acceptedTasks).toEqual({ status: 'measured', value: 4 });
     expect(report.focusedMinutesPerAccepted).toEqual({ status: 'measured', value: 12 });
-    expect(report.slots.some((item) => item.arm === 'solline-economy')).toBe(false);
+    expect(new Set(report.slots.map((item) => item.arm))).toEqual(
+      new Set(['native-reference', 'solline-reference']),
+    );
   });
 
   it('minutos em falta numa tarefa aceite não viram zero', () => {
