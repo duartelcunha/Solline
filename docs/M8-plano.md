@@ -29,7 +29,7 @@ Nesta máquina não há cliente de modelo. A corrida de 2026-11-06 deixa aceita�
 
 ## Adiado
 
-M8.3, M8.4 e M8.5 continuam por fazer até a fatia anterior fechar. M8.5 só entra se uma medição real o justificar.
+O M8.4 está parado: o parecer em sombra não entra na cadeia de merge. O M8.5 só corre com estas 10 tarefas quando houver uma pergunta concreta. Sem essa pergunta, fica adiado.
 
 ## M8.1 — Clareza
 
@@ -63,10 +63,20 @@ O livro está em `packages/engine/src/ledger`. Um total acumulado não se soma d
 
 Corrigir uma verificação falhada sem fazer de cola, e parar cedo.
 
-**Entra.** Opt-in por sessão, desligado por omissão. Usa as verificações do projeto já aprovadas. A primeira falha fica como base. No máximo 3 correções. Duas falhas com a mesma impressão, sem progresso, param o ciclo. Tempo esgotado ou comando em falta é infraestrutura e não se repete. Feito só quando a ronda passa e fica ligada ao turno. Dá para parar. Não faz push.
+**Entra.** Opt-in por sessão, desligado por omissão. Usa as verificações do projeto já aprovadas. No máximo 3 correções. Duas falhas com o mesmo texto, depois de tirar horas, caminhos, durações e ids, param o ciclo. Tempo esgotado ou comando em falta é infraestrutura e não se repete. Feito só quando a ronda passa e fica ligada ao turno. Dá para parar. Não faz push.
 
 **Não entra.** Instalar dependências, enfraquecer testes, auto-push, e prometer CI remota verde.
 
 ## Feito no M8.3
 
-O ciclo está em `packages/engine/src/repair`. Nasce desligado. No máximo 3 correções. A segunda falha igual para. Tempo esgotado ou comando em falta não se repete. Feito só com a ronda verde ligada ao turno. Não faz push.
+O ciclo está em `packages/engine/src/repair`. Nasce desligado. No máximo 3 correções. A segunda falha igual, já sem horas, caminhos, durações e ids, para. Tempo esgotado ou comando em falta não se repete. Feito só com a ronda verde ligada ao turno. Não faz push.
+
+## 2026-11-10
+
+O Duarte retomou o M8.2 e o M8.3. O M8.4 fica parado e fora da cadeia de merge. O plano que se segue é mais curto:
+
+- O M11 não se faz. A mesa já ordena pelo que precisa de ti.
+- O M12 é uma nota de uma página, só com o gatilho.
+- O M13 fica adiado.
+- A verificação automática de regressão aos sete dias sai. Mais tarde há um botão «Reabrir».
+- O M8.5 só corre com as 10 tarefas quando existir uma pergunta concreta. Sem isso, fica adiado.

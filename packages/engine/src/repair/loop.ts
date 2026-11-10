@@ -15,8 +15,24 @@ export interface RoundInput {
 
 const INFRA = /command not found|não encontrei|ENOENT|spawn /i;
 
+/** Tira o que muda sem mudar a falha: horas, caminhos, durações e ids. */
+export function normaliseFailure(text: string): string {
+  return text
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, ' ')
+    .replace(/\b[0-9a-f]{12,40}\b/gi, ' ')
+    .replace(/\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?Z?)?\b/g, ' ')
+    .replace(/\b\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?\b/g, ' ')
+    .replace(/\b\d+(?:[.,]\d+)?\s*(?:ms|s|min|mins|segundos?|minutos?)\b/gi, ' ')
+    .replace(/[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]*/g, ' ')
+    .replace(/\/(?:tmp|var\/folders|private\/var|private\/tmp)\/\S+/g, ' ')
+    .replace(/\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function fingerprint(failed: readonly CheckRound[]): string {
-  return failed.map((item) => `${item.id}\n${item.tail ?? ''}`).join('\n---\n');
+  return failed.map((item) => `${item.id}\n${normaliseFailure(item.tail ?? '')}`).join('\n---\n');
 }
 
 function infra(item: CheckRound): boolean {
@@ -32,14 +48,12 @@ export class RepairLoop {
   #reason: string | null = null;
   #proofTurnId: string | null = null;
   #last: string | null = null;
-  #baseline: string | null = null;
 
   setEnabled(enabled: boolean): void {
     this.#enabled = enabled;
     this.#fixes = 0;
     this.#equivalent = 0;
     this.#last = null;
-    this.#baseline = null;
     this.#proofTurnId = null;
     this.#state = enabled ? 'watching' : 'off';
     this.#reason = enabled ? null : 'Desligado.';
@@ -75,7 +89,6 @@ export class RepairLoop {
       return { fixId: null };
     }
     const print = fingerprint(failed);
-    if (this.#baseline === null) this.#baseline = print;
     this.#equivalent = print === this.#last ? this.#equivalent + 1 : 1;
     this.#last = print;
     if (this.#equivalent >= 2) {

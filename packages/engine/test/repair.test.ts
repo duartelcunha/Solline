@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RepairLoop } from '../src/repair/loop.ts';
+import { RepairLoop, normaliseFailure } from '../src/repair/loop.ts';
 
 const fail = (tail = 'expected 1') => ({ id: 'types', state: 'failed' as const, tail });
 
@@ -44,6 +44,20 @@ describe('ciclo de correção', () => {
     ).toBeNull();
     expect(ok.view()).toMatchObject({ state: 'done', proofTurnId: 't9' });
     expect(ok.view().reason).toContain('Não houve push');
+  });
+
+  it('duas falhas iguais depois de limpar caminhos e horas param o ciclo', () => {
+    const loop = new RepairLoop();
+    loop.setEnabled(true);
+    const first =
+      'expected 1\n    at /tmp/solline-abc/src/parser.ts:12:4\n    2026-11-10T10:00:01.250Z\n    durou 1.2s id 6f1e2a9b0c1d';
+    const second =
+      'expected 1\n    at /private/var/folders/zz/src/parser.ts:40:8\n    11:15:02\n    durou 80ms id a1b2c3d4e5f6';
+    expect(normaliseFailure(first)).toBe(normaliseFailure(second));
+    expect(loop.see({ turnId: 't1', outcomes: [fail(first)] }).fixId).toBe('types');
+    loop.markSent();
+    expect(loop.see({ turnId: 't2', outcomes: [fail(second)] }).fixId).toBeNull();
+    expect(loop.view().reason).toContain('duas vezes');
   });
 
   it('uma ronda a meio não dispara correção', () => {
