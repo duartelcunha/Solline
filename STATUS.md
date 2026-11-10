@@ -2,7 +2,7 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0, M8.1 e M8.2 feitos. Sem medição com clientes reais. M8.3 em diante por fazer.
+**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0 a M8.3 feitos. Sem medição com clientes reais. M8.4 por fazer.
 
 **Última atualização:** 2026-11-06, por Duarte
 
@@ -17,7 +17,7 @@
 
 ## Próximo passo
 
-M8.3: ciclo check, corrigir, check, opt-in, no máximo 3 correções, parar após 2 falhas equivalentes, sem auto-push. Plano em `docs/M8-plano.md`.
+M8.4: juiz em sombra, só recomenda, não aprova push, merge nem apagar. Plano em `docs/M8-plano.md`.
 
 ## Comandos
 
