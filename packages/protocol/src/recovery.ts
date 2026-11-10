@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AgentCapabilities, PermissionAnswer, SessionInfo, Turn, Usage } from './conversation.ts';
 import { Checks } from './checks.ts';
+import { LedgerView } from './ledger.ts';
 import { Quality } from './quality.ts';
 import { Timeline, ReviewComment } from './review.ts';
 import { Race, RaceLaneSpec } from './race.ts';
@@ -64,6 +65,8 @@ export const RecoverySession = z
     timeline: Timeline.nullable(),
     quality: Quality.nullable(),
     checks: Checks.nullable(),
+    /** Ausente nos diários antigos. */
+    ledger: LedgerView.nullable().optional(),
     conflicts: z.object({ files: z.array(z.string()), into: z.string() }).nullable(),
     interrupted: z.boolean(),
     error: z.string().nullable(),

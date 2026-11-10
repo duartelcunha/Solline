@@ -7,6 +7,7 @@ import type {
   McpServerDescriptor,
   CommandName,
   CommandPayload,
+  BudgetLimits,
   CheckSpec,
   CommandResult,
   Orphan,
@@ -1817,6 +1818,16 @@ export const actions = {
     sessionStores.get(sessionId)?.setState({ actionError: null });
     try {
       await request('checks.run', { sessionId });
+    } catch (error) {
+      setActionError(sessionId, error);
+    }
+  },
+
+  /** Grava os limites locais. O turno que já vai a meio não é cortado. */
+  async setBudget(sessionId: string, limits: BudgetLimits): Promise<void> {
+    sessionStores.get(sessionId)?.setState({ actionError: null });
+    try {
+      await request('ledger.budget', { sessionId, ...limits });
     } catch (error) {
       setActionError(sessionId, error);
     }

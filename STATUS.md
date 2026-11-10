@@ -2,7 +2,7 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0 e M8.1 feitos. Sem medição com clientes reais. M8.2 em diante adiado.
+**Estado:** M6 e M7 no `main` (`ca95a44`). M8.0, M8.1 e M8.2 feitos. Sem medição com clientes reais. M8.3 em diante por fazer.
 
 **Última atualização:** 2026-11-06, por Duarte
 
@@ -17,7 +17,7 @@
 
 ## Próximo passo
 
-Nada nesta ronda. M8.2 (livro de custo), M8.3 (ciclo), M8.4 (juiz) e M8.5 (modelo) estão adiados em `docs/M8-plano.md`.
+M8.3: ciclo check, corrigir, check, opt-in, no máximo 3 correções, parar após 2 falhas equivalentes, sem auto-push. Plano em `docs/M8-plano.md`.
 
 ## Comandos
 

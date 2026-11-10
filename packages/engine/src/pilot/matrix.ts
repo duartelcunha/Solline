@@ -358,9 +358,9 @@ export const MATRIX: readonly MatrixRow[] = [
   {
     id: 'usage-ledger',
     milestone: 'M8',
-    status: 'absent',
-    evidence: 'packages/protocol/src/conversation.ts',
-    note: 'Não há livro por tarefa, execução e fase. O custo da sessão é o último total reportado.',
+    status: 'present',
+    evidence: 'packages/engine/src/ledger/ledger.ts',
+    note: 'Livro por execução. O em falta fica null. A tabela de preços que sai é vazia e a quota não é reportada.',
   },
   {
     id: 'session-cost-display',
