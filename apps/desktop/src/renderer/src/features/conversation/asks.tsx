@@ -121,7 +121,7 @@ export function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd
       aria-hidden
-      className="ml-1.5 rounded-[4px] border border-current/25 px-1 font-mono text-[10px] leading-4 opacity-70"
+      className="ml-1.5 rounded-[4px] bg-surface-sunken px-1 font-mono text-[10px] leading-4 opacity-70"
     >
       {children}
     </kbd>
@@ -153,7 +153,7 @@ export function Card({
       data-testid={testId}
       data-ask={id}
       style={morph}
-      className="appear rounded-lg border border-attention/30 bg-surface p-5 shadow-raised"
+      className="appear rounded-lg bg-surface p-5 shadow-raised"
     >
       {children}
     </section>
@@ -406,7 +406,7 @@ export function QuestionCard({ block, onAnswer }: { block: QuestionBlock; onAnsw
                   >
                     <span
                       aria-hidden
-                      className={`mt-0.5 grid size-4 shrink-0 place-items-center border ${q.multiSelect ? 'rounded-[3px]' : 'rounded-full'} ${on ? 'border-fg text-fg' : 'border-muted text-muted'}`}
+                      className={`mt-0.5 grid size-4 shrink-0 place-items-center ${q.multiSelect ? 'rounded-[3px]' : 'rounded-full'} ${on ? 'bg-fg text-bg' : 'bg-surface-sunken text-muted'}`}
                     >
                       {on ? (
                         q.multiSelect ? (

@@ -144,7 +144,38 @@ body {
 .pill {
   border-color: transparent;
   background-color: var(--sl-surface-sunken);
-  box-shadow: inset 0 0 0 0.5px var(--sl-border);
+  box-shadow: none;
+}
+[aria-label='Modelo, esforço e modo'] {
+  border-color: transparent;
+  background: var(--sl-surface-sunken);
+  padding: 2px;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--sl-text) 7%, transparent);
+}
+[aria-label='Modelo, esforço e modo'] .pill {
+  background-color: transparent;
+  box-shadow: none;
+}
+[aria-label='Modelo, esforço e modo'] .pill:hover,
+[aria-label='Modelo, esforço e modo'] .pill[data-state='open'] {
+  background-color: var(--sl-surface);
+  box-shadow: var(--sl-shadow-raised);
+}
+button.border-line,
+button.border-line-strong,
+.rounded-full.border-line-strong {
+  border-color: transparent;
+  background-color: var(--sl-surface-sunken);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--sl-text) 8%, transparent);
+}
+.border-accent,
+[class*='border-accent'],
+[class*='border-attention'],
+[class*='border-danger'] {
+  border-color: transparent;
+}
+.border-accent {
+  background-color: color-mix(in srgb, var(--sl-accent) 7%, var(--sl-surface));
 }
 [data-testid='send']:not(:disabled),
 [data-testid='welcome-new-session'] {
@@ -209,9 +240,8 @@ body {
   box-shadow: var(--sl-shadow-raised);
 }
 [data-testid='desk-card'][data-state='needs-you'] {
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--sl-attention) 42%, transparent),
-    var(--sl-shadow-raised);
+  background: color-mix(in srgb, var(--sl-attention-soft) 72%, var(--sl-surface));
+  box-shadow: var(--sl-shadow-raised);
 }
 .companion-gathering {
   display: flex;
@@ -352,8 +382,10 @@ body {
   font-weight: 600;
 }
 .prose-sl blockquote {
-  border-left: 2px solid var(--sl-border-strong);
-  padding-left: 0.9em;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.2em 0.8em;
+  background: var(--sl-surface-sunken);
   color: var(--sl-text-muted);
 }
 .prose-sl :not(pre) > code {
@@ -362,7 +394,7 @@ body {
   padding: 0.1em 0.35em;
   border-radius: 4px;
   background: var(--sl-surface-sunken);
-  border: 1px solid var(--sl-border);
+  border: 0;
 }
 .prose-sl pre code {
   font-family: var(--sl-font-mono);
@@ -376,8 +408,10 @@ body {
 }
 .prose-sl th,
 .prose-sl td {
-  border: 1px solid var(--sl-border);
+  border: 0;
+  border-bottom: 0;
   padding: 0.35em 0.7em;
+  background: transparent;
   text-align: left;
 }
 .prose-sl th {
@@ -452,14 +486,16 @@ body {
 .diff-direction {
   align-self: start;
   margin-top: 2px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 4px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
   font-size: 11px;
   font-weight: 600;
   line-height: 14px;
 }
 .diff-del .diff-direction {
-  border-style: dashed;
+  background: color-mix(in srgb, currentColor 24%, transparent);
 }
 .diff-count {
   color: var(--sl-text-muted);
@@ -658,9 +694,10 @@ body {
   left: 0;
   z-index: 40;
   padding: 5px 9px;
-  border: 1px solid var(--sl-border-strong);
-  border-radius: 7px;
+  border: 0;
+  border-radius: 8px;
   background: var(--sl-surface);
+  box-shadow: var(--sl-shadow-raised);
   color: var(--sl-text);
   font-size: 12px;
   white-space: nowrap;

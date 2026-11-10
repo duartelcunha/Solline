@@ -11,8 +11,9 @@ body {
 main {
   height: 144px;
   padding: 16px 20px;
-  border: 1px solid var(--sl-border-strong);
+  border: 0;
   background: var(--sl-surface);
+  box-shadow: var(--sl-shadow-overlay);
 }
 .wordmark {
   font-size: 11px;

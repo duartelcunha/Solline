@@ -11,8 +11,8 @@
   --sl-surface: #ffffff;
   --sl-surface-hover: #efeff2;
   --sl-surface-sunken: #f2f2f5;
-  --sl-border: color-mix(in srgb, #1d1d1f 9%, transparent);
-  --sl-border-strong: color-mix(in srgb, #1d1d1f 18%, transparent);
+  --sl-border: transparent;
+  --sl-border-strong: transparent;
   --sl-text: #1d1d1f;
   --sl-text-muted: #48484a;
   --sl-text-subtle: #636366;
@@ -27,15 +27,15 @@
   --sl-focus: #1d1d1f;
   --sl-selection: #d6d6dc;
   --sl-shadow-raised:
-    inset 0 1px 0 #ffffffd9, 0 0 0 0.5px #1d1d1f0f, 0 1px 2px #1d1d1f0a, 0 10px 28px -14px #1d1d1f2e;
+    inset 0 1px 0 #ffffff, 0 1px 1px #1d1d1f0a, 0 8px 22px -10px #1d1d1f2b;
   --sl-shadow-overlay:
-    inset 0 1px 0 #ffffffeb, 0 0 0 0.5px #1d1d1f14, 0 24px 64px -24px #1d1d1f47;
+    inset 0 1px 0 #ffffff, 0 2px 6px #1d1d1f0c, 0 22px 56px -18px #1d1d1f3d;
   --sl-glass: color-mix(in srgb, #ffffff 86%, transparent);
   --sl-glass-edge: #ffffff;
   --sl-glass-rim: none;
   --sl-glass-shadow: var(--sl-shadow-raised);
   --sl-shadow-material:
-    inset 0 1px 0 #ffffffc7, 0 0 0 0.5px #1d1d1f10, 0 16px 40px -20px #1d1d1f38;
+    inset 0 1px 0 #ffffffc7, 0 1px 2px #1d1d1f08, 0 14px 36px -16px #1d1d1f30;
   --sl-ground: #e4e4ea;
   --sl-radius-sm: 8px;
   --sl-radius-control: 11px;
@@ -56,8 +56,8 @@
   --sl-surface: #2c2c2e;
   --sl-surface-hover: #3a3a3c;
   --sl-surface-sunken: #232325;
-  --sl-border: color-mix(in srgb, #ffffff 10%, transparent);
-  --sl-border-strong: color-mix(in srgb, #ffffff 20%, transparent);
+  --sl-border: transparent;
+  --sl-border-strong: transparent;
   --sl-text: #f5f5f7;
   --sl-text-muted: #d1d1d6;
   --sl-text-subtle: #aeaeb2;
@@ -72,14 +72,14 @@
   --sl-focus: #f5f5f7;
   --sl-selection: #4a4a4e;
   --sl-shadow-raised:
-    inset 0 1px 0 #ffffff14, 0 0 0 0.5px #ffffff14, 0 12px 32px -12px #0000008c;
+    inset 0 1px 0 #ffffff1a, 0 1px 2px #00000040, 0 12px 28px -12px #000000b8;
   --sl-shadow-overlay:
-    inset 0 1px 0 #ffffff18, 0 0 0 0.5px #ffffff18, 0 28px 80px -20px #000000c0;
+    inset 0 1px 0 #ffffff1c, 0 2px 8px #00000055, 0 26px 64px -16px #000000d0;
   --sl-glass: color-mix(in srgb, #2c2c2e 88%, transparent);
   --sl-glass-edge: #ffffff14;
   --sl-glass-rim: none;
   --sl-glass-shadow: var(--sl-shadow-raised);
   --sl-shadow-material:
-    inset 0 1px 0 #ffffff12, 0 0 0 0.5px #ffffff14, 0 18px 48px -18px #000000b3;
+    inset 0 1px 0 #ffffff14, 0 1px 2px #00000040, 0 16px 40px -14px #000000c0;
   --sl-ground: #111113;
 }

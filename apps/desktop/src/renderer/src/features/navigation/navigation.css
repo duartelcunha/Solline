@@ -20,7 +20,8 @@
 .navigation-search-trigger kbd {
   font-family: inherit;
   font-size: 10px;
-  border: 1px solid var(--sl-border);
+  border: 0;
+  background: var(--sl-surface-sunken);
   border-radius: 4px;
   padding: 1px 4px;
 }
