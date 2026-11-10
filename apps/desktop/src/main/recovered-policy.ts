@@ -19,6 +19,7 @@ const INSPECTION = new Set<CommandName>([
   'review.diff',
   'quality.get',
   'checks.get',
+  'ledger.get',
   // Só lê as regras guardadas (mesmo de um projeto que entretanto saiu).
   'rules.list',
   // Só desiste de um rascunho a escrever: não toca em nada.

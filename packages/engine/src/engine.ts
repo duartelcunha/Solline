@@ -686,6 +686,12 @@ export class Engine {
       'quality.fix': async (p) => ({ turnId: await s.fix(p.sessionId, p.ids) }),
       'quality.dismiss': async (p) => s.dismiss(p.sessionId, p.ids),
       'checks.get': async (p) => s.checks(p.sessionId),
+      'ledger.get': async (p) => s.ledger(p.sessionId),
+      'ledger.budget': async (p) =>
+        s.setBudget(p.sessionId, {
+          maxTurns: p.maxTurns,
+          maxMinutes: p.maxMinutes,
+        }),
       'checks.run': (p) => s.runChecks(p.sessionId),
       'checks.fix': async (p) => ({ turnId: await s.fixCheck(p.sessionId, p.id) }),
       'handoff.draft': async (p) => {
@@ -963,6 +969,7 @@ const READ_ONLY = new Set<EngineCommandName>([
   'review.diff',
   'quality.get',
   'checks.get',
+  'ledger.get',
   'handoff.draft',
   'handoff.cancelDraft',
 ]);

@@ -27,8 +27,10 @@ import {
   type WorktreeStats,
   type Timeline,
   type Turn,
+  type BudgetLimits,
   type RecoverySession,
 } from '@solline/protocol';
+import { SessionLedger, reportFromUsage } from './ledger/ledger.ts';
 import type { SavedSession } from './recovery/state.ts';
 import { interruptedAdapter } from './recovery/interrupted-adapter.ts';
 import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/types.ts';
@@ -192,6 +194,7 @@ const DISABLED_TIMELINE = (rewind: ConversationRewind): Timeline => ({
 export class SessionManager {
   #stopping = false;
   readonly #recoveryViews = new Map<string, RecoverySession>();
+  readonly #ledgers = new Map<string, SessionLedger>();
   readonly #unavailableHistory = new Map<string, SavedSession>();
   readonly #unresolvedWorktrees = new Set<string>();
   readonly #beforeEffect: (command: string, sessionId: string, text?: string) => () => void;
@@ -555,6 +558,14 @@ export class SessionManager {
   async #startTurn(sessionId: string, text: string, submissionId?: string): Promise<string> {
     const entry = this.#get(sessionId);
     const memory = this.#memoryOf(sessionId);
+    const ledger = this.#ledgerOf(sessionId);
+    const gate = ledger.gate(Date.now());
+    if (!gate.ok) {
+      this.#emitLedger(sessionId);
+      throw new Error(gate.text);
+    }
+    ledger.noteTurn(Date.now());
+    this.#emitLedger(sessionId);
     const completed = this.#beforeEffect('session.turn', sessionId, text);
     // Um turno novo muda os ficheiros: a ronda de verificações a meio deixa de valer.
     this.#checks.get(entry.info.cwd)?.cancel();
@@ -924,6 +935,9 @@ export class SessionManager {
           conflicts: saved?.conflicts ?? null,
           interrupted: saved?.interrupted ?? false,
           error: saved?.error ?? null,
+          ...((this.#ledgers.get(entry.info.id)?.view() ?? saved?.ledger)
+            ? { ledger: this.#ledgers.get(entry.info.id)?.view() ?? saved?.ledger }
+            : {}),
         };
         return {
           view,
@@ -1030,6 +1044,7 @@ export class SessionManager {
         adapter: interruptedAdapter(view.capabilities, info.agentSessionId),
       });
       this.#recoveryViews.set(info.id, view);
+      if (view.ledger) this.#ledgers.set(info.id, SessionLedger.fromView(view.ledger));
       if (this.#checksOptions && view.checks && !this.#checks.has(info.cwd)) {
         this.#checks.set(
           info.cwd,
@@ -1935,7 +1950,9 @@ export class SessionManager {
     const sourceMemory = this.#memoryOf(sourceId);
     this.#requireActive(source);
     if (isConsult(source.info))
-      throw new Error('Uma consulta não passa o testemunho. Abre uma sessão normal para continuar.');
+      throw new Error(
+        'Uma consulta não passa o testemunho. Abre uma sessão normal para continuar.',
+      );
     if (sourceMemory.closing) throw new Error('A sessão está a fechar');
     this.#requireIdle(source, sourceMemory, 'passar o testemunho');
     this.#handingOff.add(sourceId);
@@ -2353,7 +2370,10 @@ export class SessionManager {
   ): Promise<{ instructions?: string; intro?: string } | undefined> {
     const channel = definition.rules;
     if (!this.#rules || !channel) return undefined;
-    const text = renderStart(this.#rules.deliver(info.projectId), { target: channel.via, readTool });
+    const text = renderStart(this.#rules.deliver(info.projectId), {
+      target: channel.via,
+      readTool,
+    });
     if (!text) return undefined;
     return channel.via === 'instructions' ? { instructions: text } : { intro: text };
   }
@@ -2608,6 +2628,10 @@ export class SessionManager {
           info.title = text.text.replace(/\s+/g, ' ').trim().slice(0, 80) || info.title;
       }
       if (memory) memory.turns = applyDelta(memory.turns, delta);
+      if (delta.type === 'usage') {
+        this.#ledgerOf(info.id).observe(reportFromUsage(delta.usage));
+        this.#emitLedger(info.id);
+      }
       this.#emit({ kind: 'event', type: 'session.event', sessionId: info.id, delta });
     };
   }
@@ -2629,6 +2653,33 @@ export class SessionManager {
       workspace: info.workspace,
       handedTo: info.handedTo,
     };
+  }
+
+  ledger(sessionId: string): ReturnType<SessionLedger['view']> {
+    this.#get(sessionId);
+    return this.#ledgerOf(sessionId).view();
+  }
+
+  setBudget(sessionId: string, limits: BudgetLimits): ReturnType<SessionLedger['view']> {
+    this.#get(sessionId);
+    const ledger = this.#ledgerOf(sessionId);
+    ledger.setBudget(limits);
+    this.#emitLedger(sessionId);
+    return ledger.view();
+  }
+
+  #ledgerOf(sessionId: string): SessionLedger {
+    const existing = this.#ledgers.get(sessionId);
+    if (existing) return existing;
+    const created = new SessionLedger();
+    this.#ledgers.set(sessionId, created);
+    return created;
+  }
+
+  #emitLedger(sessionId: string): void {
+    const ledger = this.#ledgers.get(sessionId);
+    if (!ledger) return;
+    this.#emit({ kind: 'event', type: 'session.ledger', sessionId, ledger: ledger.view() });
   }
 
   #get(sessionId: string): Entry {
