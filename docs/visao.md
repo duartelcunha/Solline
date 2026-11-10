@@ -27,8 +27,8 @@ isso pode cruzá-los:
 4. Um só cérebro: regras do projeto escritas uma vez e traduzidas para o formato de cada agente,
    memória partilhada e uma ferramenta `ask_agent` para qualquer agente consultar outro. O que o
    Codex aprende na segunda, o Claude já sabe na terça.
-5. Do pedido ao PR com a CI verde, com os agentes certos em cada passo e um só contador de uso para
-   todas as subscrições. Hoje isto obriga a juntar Conductor, Cursor, Happy, Jules e tokscale.
+5. Do pedido ao PR, com os agentes certos em cada passo. O commit, o PR e a leitura da CI já
+   existem. O contador único de uso e o ciclo de correção ainda são o M8.
 
 ## Como tem de se sentir
 
@@ -148,10 +148,11 @@ demais. A lista completa está em `DECISIONS.md`.
 
 ### M6: um só cérebro para todos os agentes
 
-Regras do projeto escritas uma vez, com âmbito por tipo de ficheiro, traduzidas para `CLAUDE.md`,
-`AGENTS.md` ou prompt de sistema conforme o agente. Uma memória partilhada (servidor MCP do motor),
-com cada memória nova aprovada por ti. As ferramentas `ask_agent` e `delegate` deixam qualquer agente
-pedir uma segunda opinião ou passar uma subtarefa a outro. O catálogo MCP passa a ser global e
+Regras do projeto escritas uma vez, com âmbito por tipo de ficheiro, entregues no prompt de cada
+agente. A forma que entrou não escreve nem lê `CLAUDE.md` ou `AGENTS.md`. Uma memória partilhada
+(servidor MCP do motor), com cada memória nova aprovada por ti. As ferramentas `ask_agent` e
+`delegate` deixam qualquer agente pedir uma segunda opinião ou passar uma subtarefa a outro. O
+catálogo MCP passa a ser global e
 sincronizado com todos.
 
 Inspiração: steering do Kiro, regras e memórias do Cursor, Oracle do Amp, sincronização MCP do AionUi.
@@ -160,20 +161,33 @@ Estado (06/11/2026): as quatro decisões estão fechadas. As regras são nativas
 
 ### M7: do pedido ao PR
 
-Começar uma sessão a partir de uma issue (GitHub, Linear), com o branch e o contexto já preenchidos.
-Commit, PR, estado da CI e correção automática de checks falhados dentro da app, com o agente certo
-a corrigir. Um PR que entra arquiva a sessão (e merece a tal pequena celebração).
+Começar uma sessão a partir de uma issue do GitHub, com o branch e o contexto já preenchidos.
+Commit com a mensagem escrita, PR com confirmação antes do push, estado da CI em leitura, e um
+check falhado que se pode mandar à sessão uma vez. Um PR que entra arquiva a sessão (e merece a
+tal pequena celebração). O ciclo que corrige sozinho, e o Linear, ficam de fora deste marco.
 
 Inspiração: loop de PR do Claude desktop, Conductor, Emdash.
 
-### M8: uso, custo e objetivos sem supervisão
+Estado (06/11/2026): feito no `ca95a44`. Uma issue do GitHub abre sessão com worktree, título e
+primeira mensagem. O commit leva a mensagem escrita e não faz merge nem push. O PR pede confirmação
+nativa, com repositório e branch, antes do push. A CI é só leitura. Um check falhado segue para a
+fila uma vez, por clique. Um PR que entra arquiva a sessão. O Linear está no contrato e não está
+ligado: a API pede uma chave, e a Solline não a guarda. Correção em ciclo, livro de custo e juiz
+são o M8.
 
-Um só contador de uso e custo para todas as subscrições e APIs, com o limite de cada plano à vista
-(o Codex desta conta ia em 78% do limite mensal). Objetivos longos ("até os testes passarem") com um
-verificador neutro, aprovações tratadas por um modelo juiz de outro fabricante e passagem para um
-modelo mais forte quando o progresso para.
+### M8: uso, custo e trabalho com menos supervisão
+
+A métrica principal é trabalho aceite, sem regressão, por hora de atenção. A qualidade é condição
+fixa. O consumo é a segunda medida. O contador é um livro local: o que o agente não reporta fica
+desconhecido, nunca zero. Um ciclo de check, corrigir e check é opt-in, com limite de tentativas,
+e não faz push. O juiz recomenda em modo sombra e não aprova push, merge nem apagar. O modelo por
+omissão mantém-se. O percurso económico só entra depois do piloto.
 
 Inspiração: `/goal` do Codex e do Claude, auto-review do Codex, tokscale e ccusage.
+
+Estado (06/11/2026): as quatro decisões estão fechadas. O M8.0 fixa a verdade: esta página, o
+README e o STATUS alinhados com o M6 e o M7, a matriz em `packages/engine/src/pilot/matrix.ts`, o corpus do piloto
+e o harness da linha de base. Ainda não há medição com clientes reais. M8.1 em diante não começou.
 
 ### Depois
 

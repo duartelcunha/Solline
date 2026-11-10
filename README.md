@@ -3,9 +3,11 @@
 **Solline is a personal Windows desktop app for working with coding agents in one place.**
 
 It brings Claude Code, Codex and reviewed ACP agents into a shared workspace, so you can
-keep project rules, review work and continue with another agent. The project has reached
-M6, the shared brain milestone; remaining decisions and the roadmap are in
-[STATUS.md](STATUS.md) and [the vision](docs/visao.md).
+keep project rules, review work and continue with another agent. `main` includes M6 (the
+shared brain) and M7 (GitHub issue, commit, pull request, read-only CI, and archive when
+the pull request merges). M8 has started with a measurement baseline. The decisions and
+the slice plan are in [docs/M8-plano.md](docs/M8-plano.md). The resume point is
+[STATUS.md](STATUS.md) and the roadmap is [the vision](docs/visao.md).
 
 ## Try it
 
@@ -52,6 +54,12 @@ pnpm test
 
 Engine integration tests can use real agent accounts. Set `SOLLINE_SKIP_SDK=1` for an offline
 run; `SOLLINE_AGENTS` selects real agents (`packages/engine/test/real-agents.ts:3`).
+The paired-trial baseline is `packages/engine/src/pilot`. Two arms, the same model:
+the native client and Solline. Ten real tasks. Without a model client, every
+model-dependent cell stays not measured. A missing number is not stored as zero.
+The capability matrix is `packages/engine/src/pilot/matrix.ts`. No model client was
+available for the first baseline run, so acceptance and focused minutes are not measured.
+Tokens are recorded only when a client reports them.
 The desktop smoke enables real sessions with `SOLLINE_E2E_SDK=1`, accepts an installed app
 through `SOLLINE_EXE`, and captures screenshots with `SOLLINE_SHOTS`
 (`apps/desktop/e2e/smoke.spec.ts:19`).

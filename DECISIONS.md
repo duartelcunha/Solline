@@ -1022,3 +1022,12 @@ O Duarte fechou as quatro. O plano das regras está em `docs/PLANO-regras-nativa
 ## 2026-11-06: Linear no M7
 
 A API do Linear pede uma chave. A Solline não a guarda. O M7 segue só com o GitHub, pela sessão local do `gh`.
+
+## 2026-11-06: as quatro decisões do M8
+
+O Duarte aceitou as quatro como recomendadas. O plano está em `docs/M8-plano.md`.
+
+- **Métrica.** Trabalho aceite e sem regressão, por hora da atenção dele. A qualidade é condição fixa. O consumo é a segunda medida. Não se otimiza tokens à custa de o tornar o debugger dos modelos baratos.
+- **Juiz.** Modo sombra e recomendação. As confirmações nativas atuais ficam. O juiz não aprova push, merge, apagar, memórias externas nem mudanças de permissão. Um parecer que falha ou discorda fica inconclusivo.
+- **Modelo.** O modelo por omissão mantém-se. O percurso económico fica opt-in até o piloto o justificar, e só em tarefas delimitadas.
+- **Intenção e plano.** Objetos locais da Solline, ligados ao commit e ao PR. Sem ficheiro de regras novo e sem voltar a carregar `CLAUDE.md` ou `AGENTS.md`. Um ficheiro de projeto só quando for partilhado de propósito.
