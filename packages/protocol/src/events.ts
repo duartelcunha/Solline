@@ -5,6 +5,7 @@ import { McpCatalogState } from './mcp-catalog.ts';
 import { AgentId, AskBlock, ConversationDelta, SessionState, Workspace } from './conversation.ts';
 import { Checks, SetupState } from './checks.ts';
 import { LedgerView } from './ledger.ts';
+import { RepairView } from './repair.ts';
 import { Race } from './race.ts';
 import { Quality } from './quality.ts';
 import { Timeline } from './review.ts';
@@ -101,6 +102,13 @@ export const SessionLedgerEvent = z.object({
   ledger: LedgerView,
 });
 
+export const SessionRepairEvent = z.object({
+  kind: z.literal('event'),
+  type: z.literal('session.repair'),
+  sessionId: z.string(),
+  repair: RepairView,
+});
+
 /** Onde a sessão trabalha mudou: o branch ganhou nome, mudaram os +/− ou o trabalho foi trazido. */
 export const SessionWorkspaceEvent = z.object({
   kind: z.literal('event'),
@@ -188,6 +196,7 @@ export const EngineEvent = z
     SessionQualityEvent,
     SessionChecksEvent,
     SessionLedgerEvent,
+    SessionRepairEvent,
     SessionWorkspaceEvent,
     SessionQueueEvent,
     SessionHandoffEvent,

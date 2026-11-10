@@ -351,9 +351,9 @@ export const MATRIX: readonly MatrixRow[] = [
   {
     id: 'check-fix-loop',
     milestone: 'M8',
-    status: 'absent',
-    evidence: 'packages/protocol/src/checks.ts',
-    note: 'Não há ciclo com orçamento, nem paragem depois de falhas equivalentes.',
+    status: 'present',
+    evidence: 'packages/engine/src/repair/loop.ts',
+    note: 'Opt-in. No máximo 3 correções, para após 2 falhas iguais, e não faz push.',
   },
   {
     id: 'usage-ledger',

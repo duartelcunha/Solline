@@ -123,6 +123,7 @@ export function ChecksRow({ sessionId }: { sessionId: string }) {
     sessionId,
     (s) => s.info.state === 'running' || s.info.state === 'starting',
   );
+  const repair = useSession(sessionId, (s) => s.repair);
   const [editing, setEditing] = useState(false);
   if (!checks) return null;
   if (!checks.trusted) return <LockedPill projectId={projectId} />;
@@ -150,6 +151,11 @@ export function ChecksRow({ sessionId }: { sessionId: string }) {
               )}
             </IconSwap>
             {sum.text ? <span className="tabular-nums">{sum.text}</span> : null}
+            {repair?.enabled ? (
+              <span className="text-[11px]" data-testid="repair-chip">
+                {repair.fixes}/3
+              </span>
+            ) : null}
           </Menu.Trigger>
         }
       >
@@ -194,6 +200,17 @@ export function ChecksRow({ sessionId }: { sessionId: string }) {
           );
         })}
         <Menu.Separator className="my-1 h-px bg-line" />
+        <ActionItem
+          title={repair?.enabled ? 'Parar correção' : 'Corrigir sozinho'}
+          description={repair?.reason ?? 'Até 3 vezes. Não faz push.'}
+          icon={<Send size={14} />}
+          onSelect={() =>
+            void (repair?.enabled
+              ? actions.cancelRepair(sessionId)
+              : actions.setRepair(sessionId, true))
+          }
+          testId="repair-toggle"
+        />
         <ActionItem
           title="Repetir"
           icon={<RotateCw size={14} />}

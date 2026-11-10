@@ -31,6 +31,7 @@ import {
   type RecoverySession,
 } from '@solline/protocol';
 import { SessionLedger, reportFromUsage } from './ledger/ledger.ts';
+import { RepairLoop } from './repair/loop.ts';
 import type { SavedSession } from './recovery/state.ts';
 import { interruptedAdapter } from './recovery/interrupted-adapter.ts';
 import type { AgentAdapter, AdapterSink, McpServerLaunch } from './adapters/types.ts';
@@ -195,6 +196,7 @@ export class SessionManager {
   #stopping = false;
   readonly #recoveryViews = new Map<string, RecoverySession>();
   readonly #ledgers = new Map<string, SessionLedger>();
+  readonly #repairs = new Map<string, RepairLoop>();
   readonly #unavailableHistory = new Map<string, SavedSession>();
   readonly #unresolvedWorktrees = new Set<string>();
   readonly #beforeEffect: (command: string, sessionId: string, text?: string) => () => void;
@@ -503,6 +505,7 @@ export class SessionManager {
             sessionId: entry.info.id,
             checks: state,
           });
+          void this.#maybeRepair(entry.info.id, state);
         }
       },
     });
@@ -2653,6 +2656,62 @@ export class SessionManager {
       workspace: info.workspace,
       handedTo: info.handedTo,
     };
+  }
+
+  setRepair(sessionId: string, enabled: boolean): ReturnType<RepairLoop['view']> {
+    this.#get(sessionId);
+    const loop = this.#repairOf(sessionId);
+    loop.setEnabled(enabled);
+    this.#emitRepair(sessionId);
+    if (enabled) {
+      const checks = this.#checks.get(this.#get(sessionId).info.cwd);
+      if (checks) void this.#maybeRepair(sessionId, checks.state);
+    }
+    return loop.view();
+  }
+
+  cancelRepair(sessionId: string): ReturnType<RepairLoop['view']> {
+    this.#get(sessionId);
+    const loop = this.#repairOf(sessionId);
+    loop.cancel();
+    this.#emitRepair(sessionId);
+    return loop.view();
+  }
+
+  async #maybeRepair(sessionId: string, state: Checks): Promise<void> {
+    const loop = this.#repairs.get(sessionId);
+    if (!loop || !loop.view().enabled) return;
+    const decision = loop.see({
+      turnId: state.turnId,
+      outcomes: state.results.map((result) => ({
+        id: result.id,
+        state: result.state,
+        tail: result.tail,
+      })),
+    });
+    this.#emitRepair(sessionId);
+    if (!decision.fixId) return;
+    try {
+      await this.fixCheck(sessionId, decision.fixId);
+      loop.markSent();
+      this.#emitRepair(sessionId);
+    } catch {
+      // A mensagem não seguiu. Não conta como correção.
+    }
+  }
+
+  #repairOf(sessionId: string): RepairLoop {
+    const existing = this.#repairs.get(sessionId);
+    if (existing) return existing;
+    const created = new RepairLoop();
+    this.#repairs.set(sessionId, created);
+    return created;
+  }
+
+  #emitRepair(sessionId: string): void {
+    const loop = this.#repairs.get(sessionId);
+    if (!loop) return;
+    this.#emit({ kind: 'event', type: 'session.repair', sessionId, repair: loop.view() });
   }
 
   ledger(sessionId: string): ReturnType<SessionLedger['view']> {

@@ -15,7 +15,7 @@ import { actions, useApp, useSession } from '../../stores/app.ts';
 import { SessionBot } from '../agents/bots.tsx';
 import { RaceCard } from '../race/race.tsx';
 import { Mark } from '../quality/checks.tsx';
-import { deskOrder, lastAction, pendingAsk } from './desk-order.ts';
+import { countNeedsYou, deskOrder, lastAction, pendingAsk } from './desk-order.ts';
 import { sessionStore } from '../../stores/app.ts';
 import { morphUpdate } from '../../lib/morph.ts';
 import { deskCanAllowDirectly } from '../conversation/consult-model.ts';
@@ -387,7 +387,7 @@ function useSessionStates(ids: readonly string[]): string {
 export function useNeedsYouCount(): number {
   const ids = useApp((s) => s.sessionIds);
   const key = useSessionStates(ids);
-  return key.split('|').filter((pair) => pair.endsWith(':needs-you')).length;
+  return countNeedsYou(key);
 }
 
 /** A mesa: um cartão vivo por sessão, ordenados pelo que precisa de ti. */

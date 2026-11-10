@@ -23,6 +23,15 @@ export function deskOrder<T extends { id: string; state: SessionState; archived?
     .map(({ s }) => s);
 }
 
+/**
+ * Conta sessões que precisam de ti. A chave é `id:estado:arquivada`, separada por `|`.
+ * Uma sessão arquivada não entra na conta.
+ */
+export function countNeedsYou(key: string): number {
+  if (!key) return 0;
+  return key.split('|').filter((part) => part.endsWith(':needs-you:0')).length;
+}
+
 /** A última coisa que o agente fez, numa linha: a ferramenta ou o começo do texto. */
 export function lastAction(turns: readonly Turn[]): string | null {
   for (let t = turns.length - 1; t >= 0; t--) {

@@ -5,6 +5,7 @@ import {
   type AgentCapabilities,
   type Checks,
   type LedgerView,
+  type RepairView,
   type CiResult,
   type ConsultRequest,
   type PullRequest,
@@ -47,6 +48,7 @@ export interface SessionData {
   checks: Checks | null;
   /** Livro de custo. Null: ainda não houve leitura. */
   ledger: LedgerView | null;
+  repair: RepairView | null;
   /** O último "Trazer" deu conflitos nestes ficheiros (para pedir ao agente que os resolva). */
   conflicts: { files: string[]; into: string } | null;
   /** O PR desta sessão, se já foi aberto. */
@@ -93,6 +95,7 @@ export function createSessionStore(
     quality: null,
     checks: null,
     ledger: null,
+    repair: null,
     conflicts: null,
     pull: null,
     ci: null,
@@ -188,6 +191,8 @@ function reduceEngineEvent(data: SessionData, event: EngineEvent): SessionData {
       return { ...data, checks: event.checks };
     case 'session.ledger':
       return { ...data, ledger: event.ledger };
+    case 'session.repair':
+      return { ...data, repair: event.repair };
     case 'session.setup':
       return { ...data, info: { ...data.info, setup: event.setup } };
     case 'session.queue':
