@@ -35,7 +35,7 @@ export type LedgerExecution = z.infer<typeof LedgerExecution>;
 
 export const BudgetStop = z
   .object({
-    reason: z.enum(['turns', 'attempts', 'time']),
+    reason: z.enum(['turns', 'time']),
     text: z.string().min(1).max(240),
   })
   .strict();
@@ -44,10 +44,8 @@ export type BudgetStop = z.infer<typeof BudgetStop>;
 export const BudgetState = z
   .object({
     maxTurns: z.number().int().positive().nullable(),
-    maxAttempts: z.number().int().positive().nullable(),
     maxMinutes: z.number().positive().nullable(),
     turns: z.number().int().nonnegative(),
-    attempts: z.number().int().nonnegative(),
     startedAt: z.number().nullable(),
     stop: BudgetStop.nullable(),
   })
@@ -59,9 +57,6 @@ export const LedgerView = z
     executions: z.array(LedgerExecution).max(40),
     /** Soma das execuções da sessão. Um subagente não entra. Null se faltar uma parcela. */
     total: TokenSnapshot,
-    estimateUsd: Reported,
-    /** Versão da tabela. `unpriced-…` quer dizer que não há preços fixados. */
-    priceVersion: z.string().min(1).max(40),
     quota: z
       .object({
         status: z.literal('unknown'),
@@ -76,7 +71,6 @@ export type LedgerView = z.infer<typeof LedgerView>;
 export const BudgetLimits = z
   .object({
     maxTurns: z.number().int().positive().nullable(),
-    maxAttempts: z.number().int().positive().nullable(),
     maxMinutes: z.number().positive().nullable(),
   })
   .strict();

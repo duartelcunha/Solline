@@ -690,7 +690,6 @@ export class Engine {
       'ledger.budget': async (p) =>
         s.setBudget(p.sessionId, {
           maxTurns: p.maxTurns,
-          maxAttempts: p.maxAttempts,
           maxMinutes: p.maxMinutes,
         }),
       'checks.run': (p) => s.runChecks(p.sessionId),

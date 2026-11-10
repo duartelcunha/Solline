@@ -49,7 +49,7 @@ O cabeçalho mostra o título em duas linhas e o próximo passo. Modelo, esforç
 
 Tornar o custo do resultado visível sem inventar um número.
 
-**Entra.** Um livro local por sessão e por execução. O agente reporta totais acumulados: a diferença é o gasto, um total que desce abre outra execução, um subagente não se soma ao pai. Campo em falta fica desconhecido, nunca zero. Zero reportado continua zero. A estimativa monetária só existe com uma tabela de preços; a tabela que sai é vazia (`unpriced-2026-11-10`), porque não há tarifa verificada nesta máquina. A quota oficial não é reportada por nenhum agente: fica desconhecida. Limites opt-in de turnos, tentativas e minutos. O turno que já vai a meio não é cortado; o próximo não começa.
+**Entra.** Um livro local por sessão e por execução. O agente reporta totais acumulados: a diferença é o gasto, um total que desce abre outra execução, um subagente não se soma ao pai. Campo em falta fica desconhecido, nunca zero. Zero reportado continua zero. Não há estimativa em dólares. A quota oficial não é reportada. Um limite de turnos e um de minutos, opt-in. O turno que já vai a meio não é cortado; o próximo não começa. O painel só aparece quando há uma leitura.
 
 **Não entra.** Ler credenciais, endpoints de faturação, tratar dólares estimados como fatura, e prometer um teto no meio de uma resposta.
 
@@ -57,4 +57,4 @@ Tornar o custo do resultado visível sem inventar um número.
 
 ## Feito no M8.2
 
-O livro está em `packages/engine/src/ledger`. Um total acumulado não se soma duas vezes. Um total que desce abre outra execução. Um subagente não entra na soma. O painel diz «desconhecido» ou «Ainda não há leitura», nunca zero inventado. A tabela de preços que sai é vazia. A quota fica por reportar. Os limites opt-in param antes do próximo turno.
+O livro está em `packages/engine/src/ledger`. Um total acumulado não se soma duas vezes. Um total que desce abre outra execução. Um subagente não entra na soma. Sem leitura, o painel não aparece. Um número em falta fica desconhecido, nunca zero. Não há estimativa em dólares. A quota fica por reportar. Há um limite de turnos e um de minutos. Param antes do próximo turno.
