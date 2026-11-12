@@ -105,11 +105,10 @@ export function installBridge(scene: Scene) {
   const queues = new Map<string, { paused: boolean; items: { id: string; text: string }[] }>();
   let count = 0;
   let queuedSequence = 2;
-  let failNext: string | null = new URLSearchParams(window.location?.search ?? '').has(
-    'failRecovery',
-  )
-    ? 'engine.snapshot'
-    : null;
+  // O modo estrito monta a recuperação duas vezes. Uma falha de uma só vez
+  // era gasta na montagem que o React descarta, e a segunda abria a app.
+  const failSnapshot = new URLSearchParams(window.location?.search ?? '').has('failRecovery');
+  let failNext: string | null = null;
   let recoveryOpened = false;
   const held = new Map<string, { promise: Promise<void>; release: () => void }>();
   const checks = {
@@ -1583,6 +1582,9 @@ ${goal}
         const parsed = commandSchemas[command].payload.parse(payload);
         journal.push({ kind: 'command', name: command, data: parsed });
         await held.get(command)?.promise;
+        if (failSnapshot && command === 'engine.snapshot') {
+          throw new Error('Falha simulada: tenta de novo.');
+        }
         if (failNext === command) {
           failNext = null;
           throw new Error('Falha simulada: tenta de novo.');
