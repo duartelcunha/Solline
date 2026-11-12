@@ -51,6 +51,40 @@ export interface BringResult {
 
 const TIMEOUT_MS = 60_000;
 const NO_STATS: WorktreeStats = { files: 0, additions: 0, deletions: 0 };
+/** O diff de uma corrida não pode depender do autocrlf de quem instalou o Git. */
+const GIT_STABLE = [
+  '-c',
+  'core.quotepath=false',
+  '-c',
+  'core.autocrlf=false',
+  '-c',
+  'core.safecrlf=false',
+];
+/** Dois git ao mesmo tempo no Windows disputam o index.lock por um instante. */
+const TRANSIENT_GIT =
+  /index\.lock|unable to create|being used by another process|permission denied|resource busy|ebusy/i;
+
+function gitFailureText(error: unknown): string {
+  if (!error || typeof error !== 'object') return String(error);
+  const detail = error as { message?: string; stderr?: Buffer | string };
+  const stderr =
+    typeof detail.stderr === 'string' ? detail.stderr : (detail.stderr?.toString() ?? '');
+  return `${detail.message ?? ''} ${stderr}`;
+}
+
+async function again<T>(run: () => Promise<T>): Promise<T> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await run();
+    } catch (error) {
+      last = error;
+      if (attempt === 4 || !TRANSIENT_GIT.test(gitFailureText(error))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+    }
+  }
+  throw last;
+}
 
 /** O título em minúsculas, sem acentos, até quatro palavras ligadas por hífen. */
 export function slug(title: string): string {
@@ -104,27 +138,30 @@ export class WorktreeManager {
     const git = this.#git;
     if (!git)
       return Promise.reject(new Error('Não encontrei o git: instala o Git para ter worktrees'));
-    return new Promise((resolve, reject) => {
-      execFile(
-        git,
-        ['-c', 'core.quotepath=false', ...args],
-        {
-          cwd,
-          env: { ...gitEnv(), ...extraEnv },
-          windowsHide: true,
-          timeout: TIMEOUT_MS,
-          maxBuffer: 16 * 1024 * 1024,
-        },
-        (error, stdout, stderr) => {
-          const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-          if (code !== 0 && !allowFail) {
-            reject(new Error(`git ${args[0]}: ${(stderr || String(error?.message)).trim()}`));
-            return;
-          }
-          resolve({ code, out: stdout });
-        },
-      );
-    });
+    return again(
+      () =>
+        new Promise((resolve, reject) => {
+          execFile(
+            git,
+            [...GIT_STABLE, ...args],
+            {
+              cwd,
+              env: { ...gitEnv(), ...extraEnv },
+              windowsHide: true,
+              timeout: TIMEOUT_MS,
+              maxBuffer: 16 * 1024 * 1024,
+            },
+            (error, stdout, stderr) => {
+              const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+              if (code !== 0 && !allowFail) {
+                reject(new Error(`git ${args[0]}: ${(stderr || String(error?.message)).trim()}`));
+                return;
+              }
+              resolve({ code, out: stdout });
+            },
+          );
+        }),
+    );
   }
 
   /** A raiz do repositório de uma pasta, ou null se não for git (ou ainda não tiver commits). */
@@ -323,21 +360,24 @@ export class WorktreeManager {
     const git = this.#git;
     if (!git)
       return Promise.reject(new Error('Não encontrei o git: instala o Git para ter worktrees'));
-    return new Promise((resolve, reject) => {
-      execFile(
-        git,
-        ['-c', 'core.quotepath=false', ...args],
-        {
-          cwd,
-          env: { ...gitEnv(), ...extraEnv },
-          windowsHide: true,
-          timeout: TIMEOUT_MS,
-          maxBuffer: 64 * 1024 * 1024,
-          encoding: 'buffer',
-        },
-        (error, stdout) => (error ? reject(error) : resolve(stdout)),
-      );
-    });
+    return again(
+      () =>
+        new Promise((resolve, reject) => {
+          execFile(
+            git,
+            [...GIT_STABLE, ...args],
+            {
+              cwd,
+              env: { ...gitEnv(), ...extraEnv },
+              windowsHide: true,
+              timeout: TIMEOUT_MS,
+              maxBuffer: 64 * 1024 * 1024,
+              encoding: 'buffer',
+            },
+            (error, stdout) => (error ? reject(error) : resolve(stdout)),
+          );
+        }),
+    );
   }
 
   /** O que a sessão mudou desde a base, contando os ficheiros por gravar e os novos. */

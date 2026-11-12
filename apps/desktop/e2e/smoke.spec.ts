@@ -691,11 +691,11 @@ test('uma corrida: o mesmo pedido em duas pistas, lado a lado (SDK real)', async
   await page.getByTestId('session-row').first().click();
   await expect(page.getByTestId('composer-input')).toBeEnabled({ timeout: 60_000 });
 
-  // 2×: a sessão como está (Haiku) e mais uma pista com o Sonnet.
+  // A sessão como está (Haiku) e mais uma pista com o Sonnet. A pastilha diz quantas pistas.
   await page.getByTestId('pill-race').click();
   await page.getByTestId('race-lane-claude-sonnet').click();
   await page.keyboard.press('Escape');
-  await expect(page.getByTestId('pill-race')).toContainText('2×');
+  await expect(page.getByTestId('pill-race')).toContainText('2 pistas');
   await page
     .getByTestId('composer-input')
     .fill('Create a file named race.txt containing exactly the word ok. Reply with one word.');

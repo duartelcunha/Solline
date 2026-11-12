@@ -4,10 +4,21 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentCapabilities, Project, SessionStartPayload } from '@solline/protocol';
-import type { AdapterSink, AgentAdapter, AgentStartOptions, SendOptions } from '../src/adapters/types.ts';
+import type {
+  AdapterSink,
+  AgentAdapter,
+  AgentStartOptions,
+  SendOptions,
+} from '../src/adapters/types.ts';
 import { Engine } from '../src/engine.ts';
-import { resolveGh, runGh } from '../src/pull/gh.ts';
-import { IssueService, issuePrompt, listGithubIssues, openListedIssue } from '../src/pull/issues.ts';
+import { resolveGit } from '../src/checkpoints/git.ts';
+import { ghNames, resolveGh, runGh } from '../src/pull/gh.ts';
+import {
+  IssueService,
+  issuePrompt,
+  listGithubIssues,
+  openListedIssue,
+} from '../src/pull/issues.ts';
 import { PullService, mapChecks } from '../src/pull/pull.ts';
 import { repoFromRemote } from '../src/pull/repo.ts';
 import { SessionManager } from '../src/session-manager.ts';
@@ -23,9 +34,7 @@ const caps: AgentCapabilities = {
 };
 
 class Talker implements AgentAdapter {
-  constructor(
-    private readonly sink: AdapterSink,
-  ) {}
+  constructor(private readonly sink: AdapterSink) {}
   async start() {
     this.sink.state('idle');
     return { settings: { model: null, effort: null, mode: null }, capabilities: caps };
@@ -64,8 +73,51 @@ afterEach(async () => {
 });
 
 function realGit(): string {
-  return execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  const git = resolveGit();
+  if (!git) throw new Error('Não encontrei o git.');
+  return git;
 }
+
+/** Um programa que o `execFile` consegue arrancar nesta plataforma. No Windows é um .cmd. */
+async function installNodeCommand(root: string, base: string, source: string): Promise<string> {
+  const script = path.join(root, `${base}.mjs`);
+  await writeFile(script, source);
+  if (process.platform === 'win32') {
+    const cmd = path.join(root, `${base}.cmd`);
+    await writeFile(cmd, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`);
+    return cmd;
+  }
+  const bin = path.join(root, base);
+  await writeFile(
+    bin,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`,
+  );
+  await chmod(bin, 0o755);
+  return bin;
+}
+
+/** O Git para Windows corre os hooks com sh, que não aceita `C:\...`. */
+function shellPath(file: string): string {
+  const normalized = file.replaceAll('\\', '/');
+  const drive = /^([A-Za-z]):\//.exec(normalized);
+  if (!drive?.[1]) return normalized;
+  return `/${drive[1].toLowerCase()}/${normalized.slice(3)}`;
+}
+
+const gitShim = `import { appendFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+const log = process.env.SOLLINE_GIT_LOG;
+const real = process.env.SOLLINE_REAL_GIT;
+appendFileSync(log, process.argv.slice(2).join(' ') + '\\n');
+const none = process.platform === 'win32' ? 'NUL' : '/dev/null';
+const result = spawnSync(real, process.argv.slice(2), {
+  env: { ...process.env, GIT_CONFIG_GLOBAL: none, GIT_CONFIG_SYSTEM: none, GIT_CONFIG_NOSYSTEM: '1' },
+  windowsHide: true,
+});
+if (result.stdout) process.stdout.write(result.stdout);
+if (result.stderr) process.stderr.write(result.stderr);
+process.exit(result.status ?? 1);
+`;
 
 async function gitHarness(): Promise<{
   root: string;
@@ -78,19 +130,10 @@ async function gitHarness(): Promise<{
   roots.push(root);
   const project = path.join(root, 'project');
   const log = path.join(root, 'git.log');
-  const git = path.join(root, 'git');
   await writeFile(log, '');
-  await writeFile(
-    git,
-    `#!/bin/sh
-printf '%s\\n' "$*" >> ${JSON.stringify(log)}
-export GIT_CONFIG_GLOBAL=/dev/null
-export GIT_CONFIG_SYSTEM=/dev/null
-export GIT_CONFIG_NOSYSTEM=1
-exec ${JSON.stringify(realGit())} "$@"
-`,
-  );
-  await chmod(git, 0o755);
+  process.env.SOLLINE_GIT_LOG = log;
+  process.env.SOLLINE_REAL_GIT = realGit();
+  const git = await installNodeCommand(root, 'git', gitShim);
   await mkdir(project);
   const run = (cwd: string, ...args: string[]) =>
     execFileSync(git, args, { cwd, encoding: 'utf8' }).trim();
@@ -118,9 +161,22 @@ describe('gh', () => {
     roots.push(root);
     const dir = path.join(root, 'bin');
     await mkdir(dir);
-    await writeFile(path.join(dir, 'gh'), '#!/bin/sh\nexit 0\n');
-    expect(resolveGh({ PATH: `rel:${dir}` })).toBe(path.normalize(path.join(dir, 'gh')));
-    expect(resolveGh({ PATH: 'rel:./bin' })).toBeNull();
+    const name = ghNames(
+      process.platform,
+      process.platform === 'win32' ? '.CMD;.EXE' : undefined,
+    )[0];
+    if (!name) throw new Error('sem nome para o gh');
+    await writeFile(
+      path.join(dir, name),
+      process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\nexit 0\n',
+    );
+    const env =
+      process.platform === 'win32'
+        ? { PATH: `rel${path.delimiter}${dir}`, PATHEXT: '.CMD;.EXE' }
+        : { PATH: `rel${path.delimiter}${dir}` };
+    expect(resolveGh(env)).toBe(path.normalize(path.join(dir, name)));
+    expect(resolveGh({ PATH: `rel${path.delimiter}.${path.sep}bin` })).toBeNull();
+    expect(ghNames('win32', '.EXE;.CMD')).toEqual(['gh.EXE', 'gh.CMD']);
   });
 
   it('sem gh a lista diz missing e não corre nada', async () => {
@@ -152,18 +208,20 @@ describe('gh', () => {
   it('lista com o gh absoluto e corta o corpo; sem sessão, diz logged-out', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'solline-gh-'));
     roots.push(root);
-    const gh = path.join(root, 'gh');
     const log = path.join(root, 'args.log');
     const body = `  texto  ${'x'.repeat(9000)}`;
     const payload = JSON.stringify([{ number: 42, title: '  O parser  ', body }]);
-    await writeFile(
-      gh,
-      `#!/bin/sh
-printf '%s\\n' "$*" >> ${JSON.stringify(log)}
-printf '%s' ${JSON.stringify(payload)}
+    const script = path.join(root, 'gh.mjs');
+    process.env.SOLLINE_GH_LOG = log;
+    process.env.SOLLINE_GH_PAYLOAD = payload;
+    const gh = await installNodeCommand(
+      root,
+      'gh',
+      `import { appendFileSync } from 'node:fs';
+appendFileSync(process.env.SOLLINE_GH_LOG, process.argv.slice(2).join(' ') + '\\n');
+process.stdout.write(process.env.SOLLINE_GH_PAYLOAD ?? '');
 `,
     );
-    await chmod(gh, 0o755);
     const cwd = path.join(root, 'repo');
     await mkdir(cwd);
     const listed = await listGithubIssues({ cwd, projectId: 'atelier', gh, run: runGh });
@@ -172,13 +230,14 @@ printf '%s' ${JSON.stringify(payload)}
     expect(listed.issues[0]).toMatchObject({ id: 'gh-42', key: '42', title: 'O parser' });
     expect(listed.issues[0]?.body.length).toBe(8_000);
     expect(listed.issues[0]?.body.endsWith('…')).toBe(true);
-    expect(await readFile(log, 'utf8')).toContain('issue list --json number,title,body --limit 100');
+    expect(await readFile(log, 'utf8')).toContain(
+      'issue list --json number,title,body --limit 100',
+    );
 
     await writeFile(
-      gh,
-      `#!/bin/sh
-echo "please run: gh auth login" >&2
-exit 4
+      script,
+      `process.stderr.write('please run: gh auth login\\n');
+process.exit(4);
 `,
     );
     const out = await listGithubIssues({ cwd, projectId: 'atelier', gh, run: runGh });
@@ -206,7 +265,7 @@ describe('commit da worktree', () => {
     const { project, git, log, root } = await gitHarness();
     const hook = path.join(project, '.git', 'hooks', 'pre-commit');
     const mark = path.join(root, 'hook-ran');
-    await writeFile(hook, `#!/bin/sh\necho ran > ${JSON.stringify(mark)}\n`);
+    await writeFile(hook, `#!/bin/sh\necho ran > ${JSON.stringify(shellPath(mark))}\n`);
     await chmod(hook, 0o755);
     const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
     const made = await worktrees.create(project, 'atelier');
@@ -255,7 +314,10 @@ describe('abrir uma issue', () => {
     const opened = await openListedIssue({
       project: projectInfo,
       issueId: 'gh-42',
-      list: { issues: [{ ...issue, body: 'Abrir a sessão já com este texto.' }], unavailable: null },
+      list: {
+        issues: [{ ...issue, body: 'Abrir a sessão já com este texto.' }],
+        unavailable: null,
+      },
       start: async (payload) => {
         start = payload;
         return (await manager.create(payload)).session.id;
@@ -411,9 +473,9 @@ describe('PR e CI', () => {
       }),
     ).rejects.toThrow('Não encontrei o gh.');
     expect(ran).toBe(false);
-    expect(mapChecks([{ name: 'lint', bucket: 'pass', state: 'SUCCESS', description: '' }])[0]?.state).toBe(
-      'passed',
-    );
+    expect(
+      mapChecks([{ name: 'lint', bucket: 'pass', state: 'SUCCESS', description: '' }])[0]?.state,
+    ).toBe('passed');
   });
 });
 

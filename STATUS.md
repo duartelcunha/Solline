@@ -29,7 +29,7 @@ cd packages/engine && SOLLINE_SKIP_SDK=1 ../../node_modules/.bin/vitest run
 cd apps/desktop && ../../node_modules/.bin/vitest run
 ```
 
-O `pnpm test` do desktop também constrói o Electron e corre o Playwright. Nesta máquina Linux isso não substitui o smoke de Windows.
+Os scripts da raiz chamam `corepack pnpm`, para funcionarem quando o pnpm só existe pelo Corepack. O `pnpm test` do desktop também constrói o Electron e corre o Playwright. Nesta máquina Linux isso não substitui o smoke de Windows.
 
 ## Pronto quando
 
