@@ -129,6 +129,9 @@ for (const theme of ['light', 'dark']) {
         await expect(controls).toHaveAttribute('data-open', 'true');
       }
       await page.mouse.move(400, 400);
+      // No primeiro frame em que data-open fica true a opacidade ainda é 0.
+      // A amostra só vale depois do fecho, senão o observador não vê a abertura.
+      await expect(controls).toHaveAttribute('data-open', 'false');
       await expect(page.locator('.window-actions')).toHaveCSS('opacity', '0');
       // Sample the browser's actual CSS transitions at 80ms, rather than relying
       // on screenshot transport timing. This instrument changes no application state.
@@ -145,7 +148,7 @@ for (const theme of ['light', 'dark']) {
         });
         observer.observe(el, { attributes: true, attributeFilter: ['data-open'] });
       });
-      await page.mouse.move(width - 2, 2);
+      await page.mouse.move(width - 2, 2, { steps: 12 });
       await expect(controls).toHaveAttribute('data-qa-sample', /^[1-9]\d*$/);
       const opacity = await page.locator('.window-actions').evaluate((el) => Number(getComputedStyle(el).opacity));
       expect(opacity).toBeGreaterThan(0);

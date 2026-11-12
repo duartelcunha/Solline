@@ -467,7 +467,11 @@ test.describe('catálogo MCP', () => {
     expect(set).toEqual([{ projectId: 'atelier', serverIds: ['docs', 'notas', 'ledger'] }]);
     await page.getByTestId('mcp-open-catalog').click();
     await expect(page.getByTestId('mcp-servers')).toBeVisible();
-    await expect(page.getByTestId('space-tab-rules')).toHaveCount(0);
+    // O catálogo é o separador MCP do Geral. O Geral tem Regras; o que sai é a lista do projeto.
+    await expect(page.getByTestId('mcp-project-row')).toHaveCount(0);
+    await expect(page.getByTestId('space-tab-rules')).toHaveCount(1);
+    await expect(page.getByTestId('space-tab-rules')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('space-tab-tools')).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('a sessão diz, em silêncio, que servidores ficaram de fora', async ({ page }) => {
