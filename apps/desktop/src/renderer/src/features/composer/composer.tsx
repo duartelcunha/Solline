@@ -225,7 +225,7 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
           </p>
         ) : null}
         {split.card}
-        <div className="composer @container rounded-xl border border-line bg-surface shadow-raised transition-[border-color,box-shadow] duration-200 focus-within:border-line-strong">
+        <div className="composer @container rounded-xl bg-surface shadow-raised transition-shadow duration-200">
           <textarea
             ref={input}
             value={text}

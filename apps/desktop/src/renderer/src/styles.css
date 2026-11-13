@@ -135,10 +135,9 @@ body {
   background: var(--sl-surface);
   box-shadow: var(--sl-shadow-raised);
 }
+/* O foco sobe o cartão. Um anel de 3px lia-se como contorno, no claro e no escuro. */
 .composer:focus-within {
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--sl-focus) 24%, transparent),
-    var(--sl-shadow-raised);
+  box-shadow: var(--sl-shadow-overlay);
 }
 .pill {
   border-color: transparent;
