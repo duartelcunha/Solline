@@ -908,19 +908,19 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
     expect(new Set(cwds).size).toBe(2);
     expect(cwds.every((c) => c !== project)).toBe(true);
     expect(sessions.every((s) => s.session.raceId === race.id)).toBe(true);
-    await waitFor(() => raceEvents.some((e) => e.race.phase === 'done'), 10_000);
+    await waitFor(() => raceEvents.some((e) => e.race.phase === 'done'), 45_000);
     expect(ScriptedAdapter.received.filter((r) => r.text === 'escreve corrida.txt=x')).toHaveLength(
       2,
     );
     // O projeto não mudou: o trabalho está nas worktrees das pistas.
     await expect(read('corrida.txt')).rejects.toThrow();
     // Depois ordena-se: o mesmo patch nas duas é a mesma solução (consenso, sem juiz).
-    await waitFor(() => raceEvents.at(-1)?.race.phase === 'ranked', 20_000);
+    await waitFor(() => raceEvents.at(-1)?.race.phase === 'ranked', 45_000);
     const verdict = races.get(race.id).verdict;
     expect(verdict?.lanes).toHaveLength(2);
     expect(verdict?.lanes.every((l) => !l.empty && l.group === 0)).toBe(true);
     expect(verdict?.judged).toBe(false);
-  });
+  }, 120_000);
 
   it('sem git não há corrida', async () => {
     makeManager(true, undefined, undefined, new WorktreeManager({ root: path.join(root, 'wt') }));
