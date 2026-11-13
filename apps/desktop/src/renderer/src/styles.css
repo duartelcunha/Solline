@@ -32,6 +32,7 @@
   --radius-md: var(--sl-radius-md);
   --radius-lg: var(--sl-radius-lg);
   --shadow-raised: var(--sl-shadow-raised);
+  --shadow-row: var(--sl-shadow-row);
   /* As transições do Tailwind (transition-colors, ...) usam a curva e a duração do motion system. */
   --default-transition-timing-function: var(--sl-ease-out);
   --default-transition-duration: var(--sl-dur-fast);
@@ -50,9 +51,9 @@ body {
   background: var(--sl-bg);
   color: var(--sl-text);
   font-family: var(--sl-font-sans);
-  font-size: 14px;
-  line-height: 1.47;
-  letter-spacing: -0.011em;
+  font-size: var(--sl-text-body);
+  line-height: var(--sl-leading-body);
+  letter-spacing: var(--sl-tracking-body);
   -webkit-font-smoothing: antialiased;
   user-select: none;
   /* A troca de tema suaviza em vez de piscar. */
@@ -93,8 +94,8 @@ body {
 
 /* Shared surfaces retain their own interaction logic and gain one visual language. */
 .app-shell {
-  padding: 10px;
-  gap: 10px;
+  padding: var(--sl-space-shell);
+  gap: var(--sl-space-shell);
   background: var(--sl-ground);
 }
 .app-shell > aside,
@@ -108,7 +109,7 @@ body {
 .app-shell > aside {
   padding-inline: 6px;
   border: 0;
-  border-radius: 22px;
+  border-radius: var(--sl-radius-lg);
   background: var(--sl-sidebar);
   -webkit-backdrop-filter: blur(40px) saturate(1.8);
   backdrop-filter: blur(40px) saturate(1.8);
@@ -117,7 +118,7 @@ body {
 .app-shell > main {
   overflow: hidden;
   border: 0;
-  border-radius: 22px;
+  border-radius: var(--sl-radius-lg);
   background: var(--sl-bg);
   box-shadow: var(--sl-shadow-material);
 }
@@ -126,13 +127,11 @@ body {
 }
 [data-testid='session-row'][aria-current='page'] {
   background: var(--sl-surface);
-  box-shadow:
-    inset 0 1px 0 var(--sl-glass-edge),
-    0 3px 8px #19181610;
+  box-shadow: var(--sl-shadow-row);
 }
 .composer {
   border: 0;
-  border-radius: 22px;
+  border-radius: var(--sl-radius-lg);
   background: var(--sl-surface);
   box-shadow: var(--sl-shadow-raised);
 }
