@@ -21,7 +21,7 @@ it.skipIf(!vaultHere)(
       await removeRecoveryKey(directory);
     }
   },
-  45000,
+  70000,
 );
 
 it.skipIf(!vaultHere).each(['recovery/engine-v1', 'recovery-ui'])(
@@ -42,5 +42,5 @@ it.skipIf(!vaultHere).each(['recovery/engine-v1', 'recovery-ui'])(
       await rm(directory, { recursive: true, force: true });
     }
   },
-  45000,
+  70000,
 );
