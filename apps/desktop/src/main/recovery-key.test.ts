@@ -5,7 +5,10 @@ import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { expect, it } from 'vitest';
 import { loadRecoveryKey, removeRecoveryKey } from './recovery-key.ts';
 
-it.skipIf(process.platform !== 'win32')(
+// O runner do Actions não tem cofre de credenciais de utilizador. Num Windows real corre.
+const vaultHere = process.platform === 'win32' && process.env.SOLLINE_VAULT !== 'skip';
+
+it.skipIf(!vaultHere)(
   'retains the recovery key in the Windows vault without a credential file',
   async () => {
     const directory = join(tmpdir(), `solline-vault-test-${randomUUID()}`);
@@ -21,7 +24,7 @@ it.skipIf(process.platform !== 'win32')(
   45000,
 );
 
-it.skipIf(process.platform !== 'win32').each(['recovery/engine-v1', 'recovery-ui'])(
+it.skipIf(!vaultHere).each(['recovery/engine-v1', 'recovery-ui'])(
   'never substitutes a lost vault key when encrypted %s data exists',
   async (relative) => {
     const directory = await mkdtemp(join(tmpdir(), 'solline-vault-test-'));
