@@ -292,5 +292,7 @@ function shadowEnv(gitDir: string, workTree: string): Record<string, string> {
     GIT_TERMINAL_PROMPT: '0',
     GIT_ATTR_NOSYSTEM: '1',
     LC_ALL: 'C',
+    MSYS_NO_PATHCONV: '1',
+    MSYS2_ARG_CONV_EXCL: '*',
   };
 }

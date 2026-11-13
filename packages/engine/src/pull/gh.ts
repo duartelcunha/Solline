@@ -42,13 +42,37 @@ export interface GhResult {
   stderr: string;
 }
 
+/** Um `.cmd`/`.bat` no Node 22 não arranca com `execFile` direto: o Node responde EINVAL. */
+function launchGh(executable: string, args: string[]): { file: string; args: string[] } {
+  if (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable)) {
+    const line = [executable, ...args]
+      .map((arg) => {
+        if (arg.length === 0) return '""';
+        return /[\s"&|<>^%]/.test(arg) ? `"${arg.replaceAll('"', '""')}"` : arg;
+      })
+      .join(' ');
+    return {
+      file: process.env.ComSpec ?? 'cmd.exe',
+      args: ['/d', '/s', '/c', `"${line}"`],
+    };
+  }
+  return { file: executable, args };
+}
+
 /** `execFile`, sem shell. O teste troca isto por um programa seu. */
 export function runGh(executable: string, args: string[], cwd: string): Promise<GhResult> {
+  const launch = launchGh(executable, args);
   return new Promise((resolve, reject) => {
     execFile(
-      executable,
-      args,
-      { cwd, windowsHide: true, timeout: 20_000, maxBuffer: 8 * 1024 * 1024 },
+      launch.file,
+      launch.args,
+      {
+        cwd,
+        windowsHide: true,
+        windowsVerbatimArguments: launch.file !== executable,
+        timeout: 20_000,
+        maxBuffer: 8 * 1024 * 1024,
+      },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== 'number') {
           reject(error);

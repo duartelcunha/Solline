@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { WorktreeStats } from '@solline/protocol';
@@ -111,7 +112,28 @@ function gitEnv(): NodeJS.ProcessEnv {
         !/^GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|COMMON_DIR|NAMESPACE)$/i.test(key),
     ),
   );
-  return { ...env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
+  return {
+    ...env,
+    GIT_TERMINAL_PROMPT: '0',
+    LC_ALL: 'C',
+    // O Git for Windows reescreve argumentos com `~` (o `RUNNER~1` do Actions). Os caminhos
+    // já vão absolutos.
+    MSYS_NO_PATHCONV: '1',
+    MSYS2_ARG_CONV_EXCL: '*',
+  };
+}
+
+/**
+ * O mesmo sítio no disco. O git pode devolver o nome longo (`runneradmin`) e o Node o
+ * nome curto (`RUNNER~1`): sem isto, `path.relative` sai da worktree.
+ */
+function diskPath(dir: string): string {
+  const resolved = path.resolve(dir.trim());
+  try {
+    return realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
 }
 
 export class WorktreeManager {
@@ -169,7 +191,7 @@ export class WorktreeManager {
     const top = await this.#run(dir, ['rev-parse', '--show-toplevel'], true).catch(() => null);
     if (!top || top.code !== 0) return null;
     const head = await this.#run(dir, ['rev-parse', '--verify', '--quiet', 'HEAD'], true);
-    return head.code === 0 ? path.resolve(top.out.trim()) : null;
+    return head.code === 0 ? diskPath(top.out) : null;
   }
 
   /** Cria a worktree de uma sessão a partir do HEAD do projeto; null se a pasta não for git. */
@@ -177,7 +199,7 @@ export class WorktreeManager {
     const top = await this.repoOf(projectPath);
     if (!top) return null;
     const base = (await this.#run(top, ['rev-parse', 'HEAD'])).out.trim();
-    return this.#add(top, path.relative(top, path.resolve(projectPath)), base, projectId);
+    return this.#add(top, path.relative(diskPath(top), diskPath(projectPath)), base, projectId);
   }
 
   /** Uma worktree irmã de outra: o mesmo projeto, a mesma pasta e o mesmo commit de partida. */
@@ -244,8 +266,10 @@ export class WorktreeManager {
     const relative = path.relative(this.#root, wt.path);
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative))
       throw new Error('A worktree recuperada está fora da pasta da Solline.');
-    const canonical = (value: string) =>
-      process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+    const canonical = (value: string) => {
+      const disk = diskPath(value);
+      return process.platform === 'win32' ? disk.toLowerCase() : disk;
+    };
     const top = (await this.#run(wt.path, ['rev-parse', '--show-toplevel'])).out.trim();
     if (canonical(top) !== canonical(wt.path))
       throw new Error('A worktree recuperada já não corresponde à pasta guardada.');
