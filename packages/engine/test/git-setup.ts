@@ -7,6 +7,11 @@ const base = Number(process.env.GIT_CONFIG_COUNT ?? '0');
 const extra: readonly (readonly [string, string])[] = [
   ['commit.gpgsign', 'false'],
   ['core.fsmonitor', 'false'],
+  // O autocrlf global (Git for Windows) avisava "LF will be replaced by CRLF"
+  // e sujava o diff das pistas. A linha de comando ganha ao ficheiro do utilizador.
+  ['core.autocrlf', 'false'],
+  ['core.safecrlf', 'false'],
+  ['core.eol', 'lf'],
 ];
 extra.forEach(([key, value], index) => {
   process.env[`GIT_CONFIG_KEY_${base + index}`] = key;

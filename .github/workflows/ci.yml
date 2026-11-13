@@ -6,11 +6,14 @@ on:
 
 jobs:
   check:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        # 22 é o mínimo do repo. 24 é o Node do Duarte: o EINVAL de um .cmd
+        # (CVE-2024-27980) tem de falhar aqui, não só na máquina dele.
+        node: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +22,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - name: Install
         run: corepack pnpm@10.34.6 install --frozen-lockfile
       - name: Typecheck

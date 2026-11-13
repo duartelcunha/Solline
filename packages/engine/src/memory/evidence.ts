@@ -4,6 +4,7 @@ import { realpath, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { FileCitation } from './keys.ts';
 import { resolveGit } from '../checkpoints/git.ts';
+import { launchArgs } from '../win-launch.ts';
 
 /** Mais do que isto não se cita (e não se lê para tirar o hash). */
 export const MAX_CITED_BYTES = 1_048_576;
@@ -96,10 +97,11 @@ export function gitCommitExists(cwd: string, sha: string): Promise<boolean> {
   const git = resolveGit();
   if (!git) return Promise.resolve(false);
   return new Promise((resolve) => {
+    const launched = launchArgs(git, ['cat-file', '-e', `${sha}^{commit}`]);
     execFile(
-      git,
-      ['cat-file', '-e', `${sha}^{commit}`],
-      { cwd, timeout: 5_000, windowsHide: true },
+      launched.file,
+      launched.args,
+      { cwd, timeout: 5_000, windowsHide: true, windowsVerbatimArguments: launched.verbatim },
       (error) => resolve(!error),
     );
   });

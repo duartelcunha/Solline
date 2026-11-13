@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import type { Project } from '@solline/protocol';
 import { digest } from './manager.ts';
 import { resolveGit } from '../checkpoints/git.ts';
+import { launchArgs } from '../win-launch.ts';
 
 export interface ContextSource {
   id: string;
@@ -58,25 +59,23 @@ export async function collectProject(
   try {
     const git = resolveGit();
     if (!git) throw new Error('Git is unavailable');
-    const result = await exec(
-      git,
-      [
-        '-c',
-        'core.fsmonitor=false',
-        '-c',
-        'core.untrackedCache=false',
-        'ls-files',
-        '-co',
-        '--exclude-standard',
-        '-z',
-      ],
-      {
-        cwd: root,
-        windowsHide: true,
-        timeout: 10_000,
-        maxBuffer: 2_000_000,
-      },
-    );
+    const launched = launchArgs(git, [
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.untrackedCache=false',
+      'ls-files',
+      '-co',
+      '--exclude-standard',
+      '-z',
+    ]);
+    const result = await exec(launched.file, launched.args, {
+      cwd: root,
+      windowsHide: true,
+      windowsVerbatimArguments: launched.verbatim,
+      timeout: 10_000,
+      maxBuffer: 2_000_000,
+    });
     names = result.stdout.split('\0').filter(Boolean);
   } catch {
     names = await fallback(root);

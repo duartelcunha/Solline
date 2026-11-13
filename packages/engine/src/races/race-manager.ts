@@ -174,7 +174,13 @@ export class RaceManager {
       race.lanes.map(async (lane) => {
         const outcome = await this.#sessions
           .outcome(lane.sessionId, signal)
-          .catch(() => ({ cwd: '', files: [], checks: [] }));
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            // Sem worktree a pista não tem patch. Um git que falha não é uma pista vazia:
+            // senão duas soluções iguais parecem divergir e a corrida não fecha.
+            if (message.includes('não tem worktree')) return { cwd: '', files: [], checks: [] };
+            throw error;
+          });
         return { sessionId: lane.sessionId, ...outcome };
       }),
     );

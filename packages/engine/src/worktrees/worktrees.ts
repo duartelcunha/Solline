@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/
 import path from 'node:path';
 import type { WorktreeStats } from '@solline/protocol';
 import { resolveGit } from '../checkpoints/git.ts';
+import { launchArgs } from '../win-launch.ts';
 import { repoFromRemote, worktreeBranch } from '../pull/repo.ts';
 import { parseRaw } from '../checkpoints/session-checkpoints.ts';
 import { parseNumstat, parsePatch, type RawFile } from '../checkpoints/unified-diff.ts';
@@ -60,6 +61,8 @@ const GIT_STABLE = [
   'core.autocrlf=false',
   '-c',
   'core.safecrlf=false',
+  '-c',
+  'core.eol=lf',
 ];
 /** Dois git ao mesmo tempo no Windows disputam o index.lock por um instante. */
 const TRANSIENT_GIT =
@@ -112,7 +115,7 @@ function gitEnv(): NodeJS.ProcessEnv {
         !/^GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|COMMON_DIR|NAMESPACE)$/i.test(key),
     ),
   );
-  return {
+  const next: NodeJS.ProcessEnv = {
     ...env,
     GIT_TERMINAL_PROMPT: '0',
     LC_ALL: 'C',
@@ -121,6 +124,20 @@ function gitEnv(): NodeJS.ProcessEnv {
     MSYS_NO_PATHCONV: '1',
     MSYS2_ARG_CONV_EXCL: '*',
   };
+  // O `-c` não chega a um git filho. Sem isto o autocrlf global converte o ficheiro e o
+  // diff de duas pistas deixa de ser o mesmo.
+  const base = Number(next.GIT_CONFIG_COUNT ?? '0');
+  const stable: readonly (readonly [string, string])[] = [
+    ['core.autocrlf', 'false'],
+    ['core.safecrlf', 'false'],
+    ['core.eol', 'lf'],
+  ];
+  stable.forEach(([key, value], index) => {
+    next[`GIT_CONFIG_KEY_${base + index}`] = key;
+    next[`GIT_CONFIG_VALUE_${base + index}`] = value;
+  });
+  next.GIT_CONFIG_COUNT = String(base + stable.length);
+  return next;
 }
 
 /**
@@ -163,13 +180,15 @@ export class WorktreeManager {
     return again(
       () =>
         new Promise((resolve, reject) => {
+          const launched = launchArgs(git, [...GIT_STABLE, ...args]);
           execFile(
-            git,
-            [...GIT_STABLE, ...args],
+            launched.file,
+            launched.args,
             {
               cwd,
               env: { ...gitEnv(), ...extraEnv },
               windowsHide: true,
+              windowsVerbatimArguments: launched.verbatim,
               timeout: TIMEOUT_MS,
               maxBuffer: 16 * 1024 * 1024,
             },
@@ -194,12 +213,28 @@ export class WorktreeManager {
     return head.code === 0 ? diskPath(top.out) : null;
   }
 
+  /**
+   * A pasta dentro do repositório (`app/src`), vinda do git em forma relativa.
+   * `--show-toplevel` no Windows devolve um caminho que o MSYS reescreve (`RUNNER~1`);
+   * juntá-lo com `path.relative` tira a sessão da worktree e o diff da corrida fica vazio.
+   */
+  async #prefix(dir: string): Promise<string> {
+    const prefix = await this.#run(dir, ['rev-parse', '--show-prefix'], true);
+    if (prefix.code !== 0) return '';
+    return prefix.out.trim().replace(/\\/g, '/').replace(/\/$/, '');
+  }
+
   /** Cria a worktree de uma sessão a partir do HEAD do projeto; null se a pasta não for git. */
   async create(projectPath: string, projectId: string): Promise<Worktree | null> {
-    const top = await this.repoOf(projectPath);
-    if (!top) return null;
-    const base = (await this.#run(top, ['rev-parse', 'HEAD'])).out.trim();
-    return this.#add(top, path.relative(diskPath(top), diskPath(projectPath)), base, projectId);
+    const head = await this.#run(projectPath, ['rev-parse', '--verify', '--quiet', 'HEAD'], true);
+    if (head.code !== 0) return null;
+    const prefix = await this.#prefix(projectPath);
+    const up = prefix.split('/').filter(Boolean);
+    const top = diskPath(
+      up.length === 0 ? projectPath : path.resolve(projectPath, ...up.map(() => '..')),
+    );
+    const base = (await this.#run(projectPath, ['rev-parse', 'HEAD'])).out.trim();
+    return this.#add(top, prefix, base, projectId);
   }
 
   /** Uma worktree irmã de outra: o mesmo projeto, a mesma pasta e o mesmo commit de partida. */
@@ -295,7 +330,14 @@ export class WorktreeManager {
   async diff(wt: Worktree): Promise<RawFile[]> {
     const file = `${wt.path}.${randomBytes(4).toString('hex')}.index`;
     const index = { GIT_INDEX_FILE: file };
-    const common = ['--cached', '--no-renames', '--no-ext-diff', '--no-textconv', wt.base];
+    const common = [
+      '--cached',
+      '--no-renames',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--ignore-cr-at-eol',
+      wt.base,
+    ];
     let raw: Buffer, numstat: Buffer, patch: Buffer;
     try {
       await this.#run(wt.path, ['read-tree', 'HEAD'], false, index);
@@ -387,13 +429,15 @@ export class WorktreeManager {
     return again(
       () =>
         new Promise((resolve, reject) => {
+          const launched = launchArgs(git, [...GIT_STABLE, ...args]);
           execFile(
-            git,
-            [...GIT_STABLE, ...args],
+            launched.file,
+            launched.args,
             {
               cwd,
               env: { ...gitEnv(), ...extraEnv },
               windowsHide: true,
+              windowsVerbatimArguments: launched.verbatim,
               timeout: TIMEOUT_MS,
               maxBuffer: 64 * 1024 * 1024,
               encoding: 'buffer',

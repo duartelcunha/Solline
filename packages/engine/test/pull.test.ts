@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,6 +12,7 @@ import type {
 } from '../src/adapters/types.ts';
 import { Engine } from '../src/engine.ts';
 import { resolveGit } from '../src/checkpoints/git.ts';
+import { launchArgs } from '../src/win-launch.ts';
 import { ghNames, resolveGh, runGh } from '../src/pull/gh.ts';
 import {
   IssueService,
@@ -135,8 +136,18 @@ async function gitHarness(): Promise<{
   process.env.SOLLINE_REAL_GIT = realGit();
   const git = await installNodeCommand(root, 'git', gitShim);
   await mkdir(project);
-  const run = (cwd: string, ...args: string[]) =>
-    execFileSync(git, args, { cwd, encoding: 'utf8' }).trim();
+  const run = (cwd: string, ...args: string[]) => {
+    const launched = launchArgs(git, args);
+    const result = spawnSync(launched.file, launched.args, {
+      cwd,
+      encoding: 'utf8',
+      windowsHide: true,
+      windowsVerbatimArguments: launched.verbatim,
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(result.stderr || `git ${args[0]} falhou`);
+    return result.stdout.trim();
+  };
   run(project, 'init', '-q', '-b', 'main');
   run(project, 'config', 'user.name', 'Solline QA');
   run(project, 'config', 'user.email', 'qa@solline.local');

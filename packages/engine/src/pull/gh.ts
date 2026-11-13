@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { launchArgs } from '../win-launch.ts';
 
 /**
  * Nomes por que o sistema procura o `gh`. No Windows a ordem é a do PATHEXT
@@ -42,26 +43,9 @@ export interface GhResult {
   stderr: string;
 }
 
-/** Um `.cmd`/`.bat` no Node 22 não arranca com `execFile` direto: o Node responde EINVAL. */
-function launchGh(executable: string, args: string[]): { file: string; args: string[] } {
-  if (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable)) {
-    const line = [executable, ...args]
-      .map((arg) => {
-        if (arg.length === 0) return '""';
-        return /[\s"&|<>^%]/.test(arg) ? `"${arg.replaceAll('"', '""')}"` : arg;
-      })
-      .join(' ');
-    return {
-      file: process.env.ComSpec ?? 'cmd.exe',
-      args: ['/d', '/s', '/c', `"${line}"`],
-    };
-  }
-  return { file: executable, args };
-}
-
-/** `execFile`, sem shell. O teste troca isto por um programa seu. */
+/** `execFile`, sem shell. Um `.cmd` passa pelo `cmd.exe` (ver `launchArgs`). */
 export function runGh(executable: string, args: string[], cwd: string): Promise<GhResult> {
-  const launch = launchGh(executable, args);
+  const launch = launchArgs(executable, args);
   return new Promise((resolve, reject) => {
     execFile(
       launch.file,
