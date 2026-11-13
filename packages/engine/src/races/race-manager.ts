@@ -170,6 +170,24 @@ export class RaceManager {
     const completed = this.#beforeEffect('race.rank', raceId);
     race.phase = 'ranking';
     this.#changed(race);
+    try {
+      return await this.#rankBody(race, signal, completed);
+    } catch (error) {
+      // Sem isto a corrida fica em "ranking" para sempre e quem espera o
+      // veredicto só vê o tempo a acabar.
+      if (race.phase === 'ranking') {
+        race.phase = 'done';
+        this.#changed(race);
+      }
+      throw error;
+    }
+  }
+
+  async #rankBody(
+    race: Race,
+    signal: AbortSignal,
+    completed: () => void,
+  ): Promise<Race> {
     const outcomes: (LaneOutcome & { cwd: string })[] = await Promise.all(
       race.lanes.map(async (lane) => {
         const outcome = await this.#sessions

@@ -118,6 +118,12 @@ function gitEnv(): NodeJS.ProcessEnv {
   const next: NodeJS.ProcessEnv = {
     ...env,
     GIT_TERMINAL_PROMPT: '0',
+    // Um pager (less, delta) lê o stdin, que o execFile deixa aberto: o diff não
+    // termina. O cat devolve o patch e sai.
+    GIT_PAGER: 'cat',
+    // O diff não fica à espera de um cadeado que só refresca o índice. O índice
+    // desta chamada acabou de ser escrito.
+    GIT_OPTIONAL_LOCKS: '0',
     LC_ALL: 'C',
     // O Git for Windows reescreve argumentos com `~` (o `RUNNER~1` do Actions). Os caminhos
     // já vão absolutos.
@@ -342,15 +348,16 @@ export class WorktreeManager {
     try {
       await this.#run(wt.path, ['read-tree', 'HEAD'], false, index);
       await this.#run(wt.path, ['add', '-A'], false, index);
-      [raw, numstat, patch] = await Promise.all([
-        this.#runBuffer(wt.path, ['diff', '--raw', '-z', ...common], index),
-        this.#runBuffer(wt.path, ['diff', '--numstat', '-z', ...common], index),
-        this.#runBuffer(
-          wt.path,
-          ['diff', '--no-color', '-U3', '--src-prefix=a/', '--dst-prefix=b/', ...common],
-          index,
-        ),
-      ]);
+      // Os três lêem o mesmo índice. Em paralelo disputam o index.lock: o git
+      // espera pelo cadeado em vez de falhar, e no Windows isso passa do tempo
+      // da corrida, que fica presa em "ranking".
+      raw = await this.#runBuffer(wt.path, ['diff', '--raw', '-z', ...common], index);
+      numstat = await this.#runBuffer(wt.path, ['diff', '--numstat', '-z', ...common], index);
+      patch = await this.#runBuffer(
+        wt.path,
+        ['diff', '--no-color', '-U3', '--src-prefix=a/', '--dst-prefix=b/', ...common],
+        index,
+      );
     } finally {
       await rm(file, { force: true }).catch(() => undefined);
     }

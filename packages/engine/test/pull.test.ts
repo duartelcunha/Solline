@@ -12,7 +12,6 @@ import type {
 } from '../src/adapters/types.ts';
 import { Engine } from '../src/engine.ts';
 import { resolveGit } from '../src/checkpoints/git.ts';
-import { launchArgs } from '../src/win-launch.ts';
 import { ghNames, resolveGh, runGh } from '../src/pull/gh.ts';
 import {
   IssueService,
@@ -67,6 +66,7 @@ class Talker implements AgentAdapter {
 const roots: string[] = [];
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  restoreGitEnv();
   await Promise.all(closers.splice(0).map((close) => close().catch(() => undefined)));
   await Promise.all(
     roots.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 })),
@@ -79,7 +79,12 @@ function realGit(): string {
   return git;
 }
 
-/** Um programa que o `execFile` consegue arrancar nesta plataforma. No Windows é um .cmd. */
+/**
+ * Um programa que o `execFile` consegue arrancar nesta plataforma. No Windows é um .cmd,
+ * e por isso só serve para o `gh` (uma chamada). O git de teste não passa por aqui: cada
+ * chamada acrescentava um cmd.exe e o Defender voltava a analisar o .cmd, e os testes de
+ * commit — onze a dezassete git — passavam dos 5 s. A app usa o git.exe de `resolveGit()`.
+ */
 async function installNodeCommand(root: string, base: string, source: string): Promise<string> {
   const script = path.join(root, `${base}.mjs`);
   await writeFile(script, source);
@@ -105,45 +110,48 @@ function shellPath(file: string): string {
   return `/${drive[1].toLowerCase()}/${normalized.slice(3)}`;
 }
 
-const gitShim = `import { appendFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-const log = process.env.SOLLINE_GIT_LOG;
-const real = process.env.SOLLINE_REAL_GIT;
-appendFileSync(log, process.argv.slice(2).join(' ') + '\\n');
-const none = process.platform === 'win32' ? 'NUL' : '/dev/null';
-const result = spawnSync(real, process.argv.slice(2), {
-  env: { ...process.env, GIT_CONFIG_GLOBAL: none, GIT_CONFIG_SYSTEM: none, GIT_CONFIG_NOSYSTEM: '1' },
-  windowsHide: true,
-});
-if (result.stdout) process.stdout.write(result.stdout);
-if (result.stderr) process.stderr.write(result.stderr);
-process.exit(result.status ?? 1);
-`;
+const savedGitEnv = {
+  GIT_TRACE: process.env.GIT_TRACE,
+  GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+  GIT_CONFIG_SYSTEM: process.env.GIT_CONFIG_SYSTEM,
+  GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM,
+};
+
+function restoreGitEnv(): void {
+  if (savedGitEnv.GIT_TRACE === undefined) delete process.env.GIT_TRACE;
+  else process.env.GIT_TRACE = savedGitEnv.GIT_TRACE;
+  if (savedGitEnv.GIT_CONFIG_GLOBAL === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+  else process.env.GIT_CONFIG_GLOBAL = savedGitEnv.GIT_CONFIG_GLOBAL;
+  if (savedGitEnv.GIT_CONFIG_SYSTEM === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+  else process.env.GIT_CONFIG_SYSTEM = savedGitEnv.GIT_CONFIG_SYSTEM;
+  if (savedGitEnv.GIT_CONFIG_NOSYSTEM === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+  else process.env.GIT_CONFIG_NOSYSTEM = savedGitEnv.GIT_CONFIG_NOSYSTEM;
+}
 
 async function gitHarness(): Promise<{
   root: string;
   project: string;
-  git: string;
   log: string;
   run: (cwd: string, ...args: string[]) => string;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), 'solline-pull-'));
   roots.push(root);
   const project = path.join(root, 'project');
-  const log = path.join(root, 'git.log');
+  const log = path.join(root, 'git.trace');
+  const blank = path.join(root, 'gitconfig');
   await writeFile(log, '');
-  process.env.SOLLINE_GIT_LOG = log;
-  process.env.SOLLINE_REAL_GIT = realGit();
-  const git = await installNodeCommand(root, 'git', gitShim);
+  await writeFile(blank, '');
+  // O mesmo git.exe da app. O rasto diz que comandos correram, sem um processo
+  // à frente de cada chamada. A configuração global fica vazia: o teste é que
+  // decide se há email.
+  process.env.GIT_TRACE = log;
+  process.env.GIT_CONFIG_GLOBAL = blank;
+  process.env.GIT_CONFIG_SYSTEM = blank;
+  process.env.GIT_CONFIG_NOSYSTEM = '1';
+  const git = realGit();
   await mkdir(project);
   const run = (cwd: string, ...args: string[]) => {
-    const launched = launchArgs(git, args);
-    const result = spawnSync(launched.file, launched.args, {
-      cwd,
-      encoding: 'utf8',
-      windowsHide: true,
-      windowsVerbatimArguments: launched.verbatim,
-    });
+    const result = spawnSync(git, args, { cwd, encoding: 'utf8', windowsHide: true });
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(result.stderr || `git ${args[0]} falhou`);
     return result.stdout.trim();
@@ -154,7 +162,7 @@ async function gitHarness(): Promise<{
   await writeFile(path.join(project, 'base.txt'), 'base\n');
   run(project, 'add', '.');
   run(project, 'commit', '-qm', 'base');
-  return { root, project, git, log, run };
+  return { root, project, log, run };
 }
 
 const issue = {
@@ -258,27 +266,27 @@ process.exit(4);
 
 describe('commit da worktree', () => {
   it('sem email falha e não grava', async () => {
-    const { project, git, log, run, root } = await gitHarness();
+    const { project, log, run, root } = await gitHarness();
     run(project, 'config', '--unset', 'user.email');
-    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt') });
     const made = await worktrees.create(project, 'atelier');
     if (!made) throw new Error('sem worktree');
     await writeFile(path.join(made.path, 'novo.txt'), 'novo\n');
     await writeFile(log, '');
     await expect(worktrees.commitMessage(made, 'fix: o parser')).rejects.toThrow(/user\.email/);
     const trace = await readFile(log, 'utf8');
-    expect(trace).not.toMatch(/\bcommit\b/);
-    expect(trace).not.toMatch(/\bpush\b/);
-    expect(trace).not.toMatch(/\bmerge\b/);
+    expect(trace).not.toMatch(/git commit\b/);
+    expect(trace).not.toMatch(/git push\b/);
+    expect(trace).not.toMatch(/git merge\b/);
   });
 
   it('grava com a mensagem, corre o hook e não faz merge nem push', async () => {
-    const { project, git, log, root } = await gitHarness();
+    const { project, log, root } = await gitHarness();
     const hook = path.join(project, '.git', 'hooks', 'pre-commit');
     const mark = path.join(root, 'hook-ran');
     await writeFile(hook, `#!/bin/sh\necho ran > ${JSON.stringify(shellPath(mark))}\n`);
     await chmod(hook, 0o755);
-    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt') });
     const made = await worktrees.create(project, 'atelier');
     if (!made) throw new Error('sem worktree');
     await writeFile(path.join(made.path, 'novo.txt'), 'novo\n');
@@ -287,9 +295,9 @@ describe('commit da worktree', () => {
     expect(saved.sha).toMatch(/^[0-9a-f]{7,40}$/);
     expect(await readFile(mark, 'utf8')).toBe('ran\n');
     const trace = await readFile(log, 'utf8');
-    expect(trace).toContain('commit -m fix: o parser');
-    expect(trace).not.toMatch(/\bpush\b/);
-    expect(trace).not.toMatch(/\bmerge\b/);
+    expect(trace).toMatch(/git commit -m ['"]fix: o parser['"]/);
+    expect(trace).not.toMatch(/git push\b/);
+    expect(trace).not.toMatch(/git merge\b/);
     const clean = await worktrees.commitMessage(made, 'outra');
     expect(clean.sha).toBeNull();
   });
@@ -304,8 +312,8 @@ describe('abrir uma issue', () => {
   });
 
   it('abre a sessão na worktree com o título da issue', async () => {
-    const { project, git, root } = await gitHarness();
-    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const { project, root } = await gitHarness();
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt') });
     const manager = new SessionManager({
       emit: () => {},
       registry: testRegistry({
@@ -393,18 +401,18 @@ describe('PR e CI', () => {
   });
 
   it('envia só o branch da worktree, sem merge', async () => {
-    const { project, git, log, run, root } = await gitHarness();
+    const { project, log, run, root } = await gitHarness();
     const bare = path.join(root, 'origin.git');
     run(project, 'init', '--bare', '-q', bare);
     run(project, 'remote', 'add', 'origin', bare);
-    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt') });
     const made = await worktrees.create(project, 'atelier');
     if (!made) throw new Error('sem worktree');
     await writeFile(log, '');
     await worktrees.pushBranch(made);
     const trace = await readFile(log, 'utf8');
     expect(trace).toContain(`push --set-upstream origin ${made.branch}`);
-    expect(trace).not.toMatch(/\bmerge\b/);
+    expect(trace).not.toMatch(/git merge\b/);
     expect(trace).not.toContain('--force');
   });
 

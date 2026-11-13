@@ -1382,6 +1382,9 @@ export class SessionManager {
     signal?: AbortSignal,
   ): Promise<{ cwd: string; files: RawFile[]; checks: CheckVerdict[] }> {
     const { info } = this.#get(sessionId);
+    // O nome do branch ainda está a correr um git. O diff a seguir usa o mesmo
+    // repositório: esperar evita dois cadeados e um git parado até ao timeout.
+    await this.#memory.get(sessionId)?.naming;
     const worktree = this.worktreeOf(sessionId);
     const worktrees = this.#worktrees;
     if (!worktree || !worktrees) throw new Error('Esta sessão não tem worktree');
