@@ -4,64 +4,90 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // Only code is placed on the command line. Key bytes travel through anonymous pipes;
-// the OS vault is the only persistent location. No temporary script or credential file.
+// the OS vault is the only persistent location. In-memory Reflection.Emit P/Invoke avoids
+// spawning csc.exe or writing temporary assemblies to disk.
 const script = `
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class SollineCredential {
-  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
-  public struct Credential {
-    public uint Flags, Type;
-    public string TargetName, Comment;
-    public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
-    public uint CredentialBlobSize;
-    public IntPtr CredentialBlob;
-    public uint Persist, AttributeCount;
-    public IntPtr Attributes;
-    public string TargetAlias, UserName;
-  }
-  [DllImport("advapi32.dll", EntryPoint="CredReadW", CharSet=CharSet.Unicode, SetLastError=true)]
-  public static extern bool Read(string target, uint type, uint flags, out IntPtr credential);
-  [DllImport("advapi32.dll", EntryPoint="CredWriteW", CharSet=CharSet.Unicode, SetLastError=true)]
-  public static extern bool Write(ref Credential credential, uint flags);
-  [DllImport("advapi32.dll")] public static extern void CredFree(IntPtr credential);
-  [DllImport("advapi32.dll", EntryPoint="CredDeleteW", CharSet=CharSet.Unicode, SetLastError=true)]
-  public static extern bool Delete(string target, uint type, uint flags);
+$asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName 'SollineVault'), [Reflection.Emit.AssemblyBuilderAccess]::Run)
+$mod = $asm.DefineDynamicModule('SollineVault')
+$tb = $mod.DefineType('SollineCredStruct', 'Public, SequentialLayout, Sealed, BeforeFieldInit, UnicodeClass', [ValueType])
+$null = $tb.DefineField('Flags', [uint32], 'Public')
+$null = $tb.DefineField('Type', [uint32], 'Public')
+$null = $tb.DefineField('TargetName', [string], 'Public')
+$null = $tb.DefineField('Comment', [string], 'Public')
+$null = $tb.DefineField('LastWritten', [Runtime.InteropServices.ComTypes.FILETIME], 'Public')
+$null = $tb.DefineField('CredentialBlobSize', [uint32], 'Public')
+$null = $tb.DefineField('CredentialBlob', [IntPtr], 'Public')
+$null = $tb.DefineField('Persist', [uint32], 'Public')
+$null = $tb.DefineField('AttributeCount', [uint32], 'Public')
+$null = $tb.DefineField('Attributes', [IntPtr], 'Public')
+$null = $tb.DefineField('TargetAlias', [string], 'Public')
+$null = $tb.DefineField('UserName', [string], 'Public')
+$credType = $tb.CreateType()
+$dllCtor = [Runtime.InteropServices.DllImportAttribute].GetConstructor(@([string]))
+$entryField = [Runtime.InteropServices.DllImportAttribute].GetField('EntryPoint')
+$charSetField = [Runtime.InteropServices.DllImportAttribute].GetField('CharSet')
+$setLastErrField = [Runtime.InteropServices.DllImportAttribute].GetField('SetLastError')
+function Add-VaultImport($typeBuilder, $name, $entry, $ret, $params) {
+  $m = $typeBuilder.DefineMethod($name, 'Public, Static, PinvokeImpl', $ret, $params)
+  $m.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder(
+    $dllCtor,
+    @('advapi32.dll'),
+    @($entryField, $charSetField, $setLastErrField),
+    @($entry, [Runtime.InteropServices.CharSet]::Unicode, $true)
+  )))
 }
-'@
+$api = $mod.DefineType('SollineAdvapi', 'Public, Abstract, Sealed')
+Add-VaultImport $api 'Read' 'CredReadW' ([bool]) @([string], [uint32], [uint32], [IntPtr].MakeByRefType())
+Add-VaultImport $api 'Write' 'CredWriteW' ([bool]) @([IntPtr], [uint32])
+Add-VaultImport $api 'Delete' 'CredDeleteW' ([bool]) @([string], [uint32], [uint32])
+Add-VaultImport $api 'CredFree' 'CredFree' ([void]) @([IntPtr])
+$advapi = $api.CreateType()
 $inputData = [Console]::In.ReadToEnd() | ConvertFrom-Json
-if ($inputData.mode -eq 'read') {
+if ($inputData.mode -eq 'ensure') {
   $pointer = [IntPtr]::Zero
-  if (![SollineCredential]::Read($inputData.target, 1, 0, [ref]$pointer)) {
+  if ($advapi::Read($inputData.target, 1, 0, [ref]$pointer)) {
+    try {
+      $credential = [Runtime.InteropServices.Marshal]::PtrToStructure($pointer, [Type]$credType)
+      if ($credential.CredentialBlobSize -ne 32) { throw 'Invalid recovery key length' }
+      $bytes = New-Object byte[] 32
+      [Runtime.InteropServices.Marshal]::Copy($credential.CredentialBlob, $bytes, 0, 32)
+      [Console]::Out.Write('existing:' + [Convert]::ToBase64String($bytes))
+      [Array]::Clear($bytes, 0, 32)
+    } finally { $advapi::CredFree($pointer) }
+  } else {
     $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-    if ($code -eq 1168) { [Console]::Out.Write('missing'); exit 0 }
-    throw "Credential read failed ($code)"
+    if ($code -ne 1168) { throw "Credential read failed ($code)" }
+    if (-not $inputData.key) { [Console]::Out.Write('missing'); exit 0 }
+    $bytes = [Convert]::FromBase64String($inputData.key)
+    if ($bytes.Length -ne 32) { throw 'Invalid recovery key length' }
+    $mem = [Runtime.InteropServices.Marshal]::AllocHGlobal(32)
+    $credPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf([Type]$credType))
+    $credMarshaled = $false
+    try {
+      [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $mem, 32)
+      $credential = [Activator]::CreateInstance($credType)
+      $credential.Type = 1
+      $credential.TargetName = $inputData.target
+      $credential.CredentialBlobSize = 32
+      $credential.CredentialBlob = $mem
+      $credential.Persist = 2
+      $credential.UserName = 'Solline recovery'
+      [Runtime.InteropServices.Marshal]::StructureToPtr($credential, $credPtr, $false)
+      $credMarshaled = $true
+      if (-not $advapi::Write($credPtr, 0)) { throw 'Credential write failed' }
+      [Console]::Out.Write('saved')
+    } finally {
+      if ($credMarshaled) { [Runtime.InteropServices.Marshal]::DestroyStructure($credPtr, [Type]$credType) }
+      [Runtime.InteropServices.Marshal]::FreeHGlobal($credPtr)
+      [Runtime.InteropServices.Marshal]::Copy((New-Object byte[] 32), 0, $mem, 32)
+      [Runtime.InteropServices.Marshal]::FreeHGlobal($mem)
+      [Array]::Clear($bytes, 0, 32)
+    }
   }
-  try {
-    $credential = [Runtime.InteropServices.Marshal]::PtrToStructure($pointer, [type][SollineCredential+Credential])
-    if ($credential.CredentialBlobSize -ne 32) { throw 'Invalid recovery key length' }
-    $bytes = New-Object byte[] 32
-    [Runtime.InteropServices.Marshal]::Copy($credential.CredentialBlob, $bytes, 0, 32)
-    [Console]::Out.Write([Convert]::ToBase64String($bytes))
-  } finally { [SollineCredential]::CredFree($pointer) }
-} elseif ($inputData.mode -eq 'write') {
-  $bytes = [Convert]::FromBase64String($inputData.key)
-  if ($bytes.Length -ne 32) { throw 'Invalid recovery key length' }
-  $pointer = [Runtime.InteropServices.Marshal]::AllocHGlobal(32)
-  try {
-    [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $pointer, 32)
-    $credential = New-Object SollineCredential+Credential
-    $credential.Type = 1; $credential.TargetName = $inputData.target
-    $credential.CredentialBlobSize = 32; $credential.CredentialBlob = $pointer
-    $credential.Persist = 2; $credential.UserName = 'Solline recovery'
-    if (![SollineCredential]::Write([ref]$credential, 0)) { throw 'Credential write failed' }
-    [Console]::Out.Write('saved')
-  } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($pointer) }
 } elseif ($inputData.mode -eq 'delete') {
-  if (![SollineCredential]::Delete($inputData.target, 1, 0)) {
+  if (-not $advapi::Delete($inputData.target, 1, 0)) {
     if ([Runtime.InteropServices.Marshal]::GetLastWin32Error() -ne 1168) { throw 'Credential deletion failed' }
   }
   [Console]::Out.Write('deleted')
@@ -73,7 +99,7 @@ export function recoveryTarget(directory: string): string {
 }
 
 function vault(input: {
-  mode: 'read' | 'write' | 'delete';
+  mode: 'ensure' | 'delete';
   target: string;
   key?: string;
 }): Promise<string> {
@@ -124,12 +150,6 @@ function vault(input: {
 
 export async function loadRecoveryKey(directory: string): Promise<Buffer> {
   const target = recoveryTarget(directory);
-  const saved = await vault({ mode: 'read', target });
-  if (saved !== 'missing') {
-    const key = Buffer.from(saved, 'base64');
-    if (key.length !== 32) throw new Error('Chave de recuperação inválida');
-    return key;
-  }
   const existing = await Promise.all(
     ['recovery/engine-v1', 'recovery-ui'].map((relative) =>
       readdir(join(directory, relative)).catch((error: NodeJS.ErrnoException) => {
@@ -138,14 +158,34 @@ export async function loadRecoveryKey(directory: string): Promise<Buffer> {
       }),
     ),
   );
-  if (existing.some((entries) => entries.length > 0))
+  const hasExistingData = existing.some((entries) => entries.length > 0);
+  const candidate = hasExistingData ? undefined : randomBytes(32);
+  let reply: string;
+  try {
+    reply = await vault({
+      mode: 'ensure',
+      target,
+      ...(candidate ? { key: candidate.toString('base64') } : {}),
+    });
+  } catch (error) {
+    candidate?.fill(0);
+    throw error;
+  }
+  if (reply === 'saved') {
+    if (!candidate) throw new Error('A chave não foi guardada no cofre.');
+    return candidate;
+  }
+  candidate?.fill(0);
+  if (reply === 'missing')
     throw new Error(
       'A chave dos dados existentes não está no cofre. Os dados foram preservados; não foi criada uma chave substituta.',
     );
-  const key = randomBytes(32);
-  if ((await vault({ mode: 'write', target, key: key.toString('base64') })) !== 'saved')
-    throw new Error('A chave não foi guardada no cofre.');
-  return key;
+  if (reply.startsWith('existing:')) {
+    const key = Buffer.from(reply.slice('existing:'.length), 'base64');
+    if (key.length !== 32) throw new Error('Chave de recuperação inválida');
+    return key;
+  }
+  throw new Error('A chave não foi guardada no cofre.');
 }
 
 /** Used by isolated test fixture cleanup only, never during normal session cleanup. */
