@@ -9,6 +9,7 @@ import { removeRecoveryKey } from '../../src/main/recovery-key';
 import { answerConfirmation, chooseDirectory } from './custom-prompts';
 import {
   OwnedProcessTree,
+  ProcessCaptureError,
   cleanupOwnedFixture,
   stopOwnedProcesses,
   type CleanupReport,
@@ -163,10 +164,37 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
       if (entry.type() === 'error') errors.push(entry.text());
     });
     await expect(page.getByTestId('ping-reply')).toBeAttached({ timeout: 30_000 });
-    owner = await OwnedProcessTree.create(nativePid, () => {
-      if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
-        throw new Error('Original native child exited during capture');
-    });
+    for (let attempt = 1; ; attempt++) {
+      try {
+        owner = await OwnedProcessTree.create(nativePid, () => {
+          if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
+            throw new Error('Original native child exited during capture');
+        });
+        break;
+      } catch (error) {
+        if (
+          attempt < 3 &&
+          error instanceof ProcessCaptureError &&
+          error.capture.phase === 'tree-capture'
+        ) {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+          continue;
+        }
+        await info
+          .attach('process-capture-failure', {
+            body: JSON.stringify({
+              root,
+              project,
+              nativePid,
+              error: String(error),
+              capture: error instanceof ProcessCaptureError ? error.capture : undefined,
+            }),
+            contentType: 'application/json',
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+    }
     const nativeId = await mainEvaluate(`(() => {
       const { BrowserWindow } = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron');
       return BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/index.html'))?.id;

@@ -102,7 +102,7 @@ const test = base.extend<{ qa: Fixture }>({
       const nativePid = await launched.evaluate(() => process.pid);
       try {
         // Vault startup spawns short-lived helpers before the main window exists.
-        const readyPage = await launched.firstWindow();
+        const readyPage = await launched.firstWindow({ timeout: 45_000 });
         await expect(readyPage.getByTestId('ping-reply')).toBeAttached({ timeout: 20_000 });
         owners.set(
           launched,

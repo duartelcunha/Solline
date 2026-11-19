@@ -9,7 +9,8 @@ import { join } from 'node:path';
 const script = `
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName 'SollineVault'), [Reflection.Emit.AssemblyBuilderAccess]::Run)
+$PSModuleAutoLoadingPreference = 'None'
+$asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly([Reflection.AssemblyName]::new('SollineVault'), [Reflection.Emit.AssemblyBuilderAccess]::Run)
 $mod = $asm.DefineDynamicModule('SollineVault')
 $tb = $mod.DefineType('SollineCredStruct', 'Public, SequentialLayout, Sealed, BeforeFieldInit, UnicodeClass', [ValueType])
 $null = $tb.DefineField('Flags', [uint32], 'Public')
@@ -31,12 +32,12 @@ $charSetField = [Runtime.InteropServices.DllImportAttribute].GetField('CharSet')
 $setLastErrField = [Runtime.InteropServices.DllImportAttribute].GetField('SetLastError')
 function Add-VaultImport($typeBuilder, $name, $entry, $ret, $params) {
   $m = $typeBuilder.DefineMethod($name, 'Public, Static, PinvokeImpl', $ret, $params)
-  $m.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder(
+  $m.SetCustomAttribute([Reflection.Emit.CustomAttributeBuilder]::new(
     $dllCtor,
     @('advapi32.dll'),
     @($entryField, $charSetField, $setLastErrField),
     @($entry, [Runtime.InteropServices.CharSet]::Unicode, $true)
-  )))
+  ))
 }
 $api = $mod.DefineType('SollineAdvapi', 'Public, Abstract, Sealed')
 Add-VaultImport $api 'Read' 'CredReadW' ([bool]) @([string], [uint32], [uint32], [IntPtr].MakeByRefType())
@@ -44,14 +45,17 @@ Add-VaultImport $api 'Write' 'CredWriteW' ([bool]) @([IntPtr], [uint32])
 Add-VaultImport $api 'Delete' 'CredDeleteW' ([bool]) @([string], [uint32], [uint32])
 Add-VaultImport $api 'CredFree' 'CredFree' ([void]) @([IntPtr])
 $advapi = $api.CreateType()
-$inputData = [Console]::In.ReadToEnd() | ConvertFrom-Json
-if ($inputData.mode -eq 'ensure') {
+$lines = [Console]::In.ReadToEnd().Replace([string][char]13, '').Split([char]10)
+$mode = if ($lines.Length -gt 0) { $lines[0] } else { '' }
+$target = if ($lines.Length -gt 1) { $lines[1] } else { '' }
+$keyB64 = if ($lines.Length -gt 2) { $lines[2] } else { '' }
+if ($mode -eq 'ensure') {
   $pointer = [IntPtr]::Zero
-  if ($advapi::Read($inputData.target, 1, 0, [ref]$pointer)) {
+  if ($advapi::Read($target, 1, 0, [ref]$pointer)) {
     try {
       $credential = [Runtime.InteropServices.Marshal]::PtrToStructure($pointer, [Type]$credType)
       if ($credential.CredentialBlobSize -ne 32) { throw 'Invalid recovery key length' }
-      $bytes = New-Object byte[] 32
+      $bytes = [byte[]]::new(32)
       [Runtime.InteropServices.Marshal]::Copy($credential.CredentialBlob, $bytes, 0, 32)
       [Console]::Out.Write('existing:' + [Convert]::ToBase64String($bytes))
       [Array]::Clear($bytes, 0, 32)
@@ -59,8 +63,8 @@ if ($inputData.mode -eq 'ensure') {
   } else {
     $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
     if ($code -ne 1168) { throw "Credential read failed ($code)" }
-    if (-not $inputData.key) { [Console]::Out.Write('missing'); exit 0 }
-    $bytes = [Convert]::FromBase64String($inputData.key)
+    if (-not $keyB64) { [Console]::Out.Write('missing'); exit 0 }
+    $bytes = [Convert]::FromBase64String($keyB64)
     if ($bytes.Length -ne 32) { throw 'Invalid recovery key length' }
     $mem = [Runtime.InteropServices.Marshal]::AllocHGlobal(32)
     $credPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf([Type]$credType))
@@ -69,7 +73,7 @@ if ($inputData.mode -eq 'ensure') {
       [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $mem, 32)
       $credential = [Activator]::CreateInstance($credType)
       $credential.Type = 1
-      $credential.TargetName = $inputData.target
+      $credential.TargetName = $target
       $credential.CredentialBlobSize = 32
       $credential.CredentialBlob = $mem
       $credential.Persist = 2
@@ -81,13 +85,13 @@ if ($inputData.mode -eq 'ensure') {
     } finally {
       if ($credMarshaled) { [Runtime.InteropServices.Marshal]::DestroyStructure($credPtr, [Type]$credType) }
       [Runtime.InteropServices.Marshal]::FreeHGlobal($credPtr)
-      [Runtime.InteropServices.Marshal]::Copy((New-Object byte[] 32), 0, $mem, 32)
+      [Runtime.InteropServices.Marshal]::Copy(([byte[]]::new(32)), 0, $mem, 32)
       [Runtime.InteropServices.Marshal]::FreeHGlobal($mem)
       [Array]::Clear($bytes, 0, 32)
     }
   }
-} elseif ($inputData.mode -eq 'delete') {
-  if (-not $advapi::Delete($inputData.target, 1, 0)) {
+} elseif ($mode -eq 'delete') {
+  if (-not $advapi::Delete($target, 1, 0)) {
     if ([Runtime.InteropServices.Marshal]::GetLastWin32Error() -ne 1168) { throw 'Credential deletion failed' }
   }
   [Console]::Out.Write('deleted')
@@ -121,7 +125,7 @@ function vault(input: {
       {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { SystemRoot: systemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP },
+        env: { SystemRoot: systemRoot, PSModulePath: '', TEMP: process.env.TEMP, TMP: process.env.TMP },
       },
     );
     let output = '';
@@ -144,7 +148,7 @@ function vault(input: {
       else resolve(output.trim());
     });
     child.stdin.on('error', () => undefined);
-    child.stdin.end(JSON.stringify(input));
+    child.stdin.end(`${input.mode}\n${input.target}\n${input.key ?? ''}`);
   });
 }
 

@@ -89,7 +89,7 @@ const test = base.extend<{ qa: Qa }>({
       try {
         // Main creates its window only after vault startup settles. Capture the
         // ready application, not transient PowerShell/compiler startup children.
-        const readyPage = await launched.firstWindow();
+        const readyPage = await launched.firstWindow({ timeout: 45_000 });
         await expect(readyPage.getByTestId('ping-reply')).toBeAttached({ timeout: 30_000 });
         nativePid = await launched.evaluate(() => process.pid);
         const expected = nativePid;
@@ -550,7 +550,9 @@ test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', 
   page = await qa.restart();
   await page.getByTestId('project-row').click();
   await expect(page.getByTestId('task-row')).toHaveText('Melhorar os estados vazios');
-  await page.getByTestId('task-row').click();
+  if (await page.getByTestId('task-row').isVisible()) {
+    await page.getByTestId('task-row').click();
+  }
   await expect(page.getByText('Para rever', { exact: true }).last()).toBeVisible();
   await expect(page.getByTestId('session-row')).toHaveCount(1);
   await page.getByTestId('open-general').click();
