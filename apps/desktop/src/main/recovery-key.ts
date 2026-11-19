@@ -102,7 +102,7 @@ function vault(input: {
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error('O cofre de recuperação não respondeu.'));
-    }, 15000);
+    }, 30000);
     child.stdout.on('data', (chunk: Buffer) => {
       output += chunk.toString();
     });

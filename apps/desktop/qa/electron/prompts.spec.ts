@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -26,8 +27,9 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await readFile(resolve('out/qa-electron/main/engine.js'), 'utf8')).toContain(
       'solline-scripted-qa-agent',
     );
-    const root = await mkdtemp(join(tmpdir(), 'solline-prompt-qa-'));
-    if (dirname(root) !== resolve(tmpdir()) || !basename(root).startsWith('solline-prompt-qa-'))
+    const tempBase = realpathSync.native(tmpdir());
+    const root = await mkdtemp(join(tempBase, 'solline-prompt-qa-'));
+    if (dirname(root) !== resolve(tempBase) || !basename(root).startsWith('solline-prompt-qa-'))
       throw new Error('Unsafe fixture path');
     const project = join(root, 'project');
     await mkdir(project);

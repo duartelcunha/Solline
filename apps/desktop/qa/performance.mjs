@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import {
   cp,
   mkdir,
@@ -83,8 +84,9 @@ await writeFile(
     2,
   ),
 );
-const scratch = await mkdtemp(join(tmpdir(), 'solline-performance-'));
-const scratchRelative = relative(resolve(tmpdir()), scratch);
+const tempBase = realpathSync.native(tmpdir());
+const scratch = await mkdtemp(join(tempBase, 'solline-performance-'));
+const scratchRelative = relative(resolve(tempBase), scratch);
 assert(
   !scratchRelative.startsWith('..') &&
     !scratchRelative.includes(sep) &&
@@ -717,6 +719,6 @@ try {
     assert(relative(scratch, junction).endsWith('node_modules'));
     await rm(junction, { force: true });
   }
-  assert(resolve(scratch).startsWith(resolve(tmpdir()) + sep));
+  assert(resolve(scratch).startsWith(resolve(tempBase) + sep));
   await rm(scratch, { recursive: true, force: true });
 }

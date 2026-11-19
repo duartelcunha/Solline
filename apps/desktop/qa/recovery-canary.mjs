@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { cp, mkdtemp, mkdir, readFile, writeFile, symlink, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, sep } from 'node:path';
@@ -11,10 +12,11 @@ if (!label || !/^[a-z0-9-]{1,48}$/.test(label)) throw new Error('Supply a unique
 const output = join(desktop, 'qa-evidence', label);
 await mkdir(dirname(output), { recursive: true });
 await mkdir(output, { recursive: false });
-const scratch = await mkdtemp(join(tmpdir(), 'solline-recovery-canary-'));
+const tempBase = realpathSync.native(tmpdir());
+const scratch = await mkdtemp(join(tempBase, 'solline-recovery-canary-'));
 if (
-  dirname(scratch) !== resolve(tmpdir()) ||
-  !scratch.startsWith(resolve(tmpdir()) + sep + 'solline-recovery-canary-')
+  dirname(scratch) !== resolve(tempBase) ||
+  !scratch.startsWith(resolve(tempBase) + sep + 'solline-recovery-canary-')
 )
   throw new Error('Unsafe cleanup');
 const desktopCopy = join(scratch, 'apps/desktop');
