@@ -98,11 +98,13 @@ test('revisão: âmbitos e ações por hunk/ficheiro preservam os alvos não esc
     await expect(page.getByTestId('diff-hunk')).toHaveCount(3);
     if (name !== 'Por rever') await expect(page.getByTestId('accept-hunk')).toHaveCount(0);
   }
-  // O servidor de QA corre em desenvolvimento: o React monta o efeito duas vezes,
-  // por isso o âmbito que está aberto quando o painel aparece é lido duas vezes.
-  // As três leituras seguintes são as escolhas, por esta ordem.
-  expect(await commands(page, 'review.diff')).toEqual([
-    { sessionId: 'session-1', scope: { kind: 'review' } },
+  const diffCalls = await commands(page, 'review.diff');
+  // Em dev (StrictMode) o efeito inicial corre duas vezes; em preview de produção (SOLLINE_QA_FRESH=1) corre uma vez.
+  const normalizedDiffCalls =
+    diffCalls.length === 5 && JSON.stringify(diffCalls[0]) === JSON.stringify(diffCalls[1])
+      ? diffCalls.slice(1)
+      : diffCalls;
+  expect(normalizedDiffCalls).toEqual([
     { sessionId: 'session-1', scope: { kind: 'review' } },
     { sessionId: 'session-1', scope: { kind: 'session' } },
     { sessionId: 'session-1', scope: { kind: 'turn', turnId: 'user-1' } },

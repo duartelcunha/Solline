@@ -1,0 +1,45 @@
+name: qa-full
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [labeled]
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: qa-full-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Windows full QA (verify.mjs)
+    if: github.event_name != 'pull_request' || github.event.label.name == 'full-qa'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install
+        run: corepack pnpm@10.34.6 install --frozen-lockfile
+      - name: Install Playwright Chromium
+        working-directory: apps/desktop
+        run: corepack pnpm exec playwright install chromium
+      - name: Run full QA verification
+        working-directory: apps/desktop
+        run: node qa/verify.mjs ci-${{ github.run_id }}-${{ github.run_attempt }}
+        env:
+          SOLLINE_VAULT: skip
+      - name: Upload QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-evidence-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: apps/desktop/qa-evidence/ci-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14

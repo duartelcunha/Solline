@@ -13,6 +13,8 @@
     "qa:renderer": "playwright test --config playwright.qa.config.ts",
     "qa:electron": "playwright test --config playwright.electron-qa.config.ts",
     "qa:canary": "node qa/canary.mjs",
+    "qa:recovery-canary": "node qa/recovery-canary.mjs",
+    "qa:distribution": "node qa/distribution.mjs",
     "qa:verify": "node qa/verify.mjs",
     "test": "vitest run && electron-vite build && playwright test",
     "dist": "electron-vite build && electron-builder --win nsis --x64 --config electron-builder.config.mjs"

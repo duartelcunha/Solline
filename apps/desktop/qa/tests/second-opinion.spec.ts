@@ -226,6 +226,8 @@ test.describe('passar a…', () => {
         sessionId: 'session-1',
         agent: 'claude',
         model: 'opus',
+        goal: 'executa a fase 1 do plano',
+        draftedBy: 'mechanical',
         text: '## Objetivo\nexecuta a fase 1 do plano\n\nSó a navegação.',
       },
     ]);

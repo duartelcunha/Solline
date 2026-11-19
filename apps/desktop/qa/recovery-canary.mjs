@@ -9,6 +9,7 @@ const root = resolve(desktop, '../..');
 const label = process.argv[2];
 if (!label || !/^[a-z0-9-]{1,48}$/.test(label)) throw new Error('Supply a unique evidence label');
 const output = join(desktop, 'qa-evidence', label);
+await mkdir(dirname(output), { recursive: true });
 await mkdir(output, { recursive: false });
 const scratch = await mkdtemp(join(tmpdir(), 'solline-recovery-canary-'));
 if (
@@ -47,7 +48,7 @@ try {
     {
       name: 'out-of-order-event',
       cwd: desktopCopy,
-      file: 'src/renderer/src/stores/app.ts',
+      file: 'src/renderer/src/stores/app/recovery.ts',
       before: 'if (event.sequence !== sequence + 1) return false;',
       after: '/* canary: gap accepted */',
       test: 'src/renderer/src/stores/recovery.test.ts',
@@ -75,6 +76,8 @@ try {
       [
         join(root, 'node_modules/vitest/vitest.mjs'),
         'run',
+        '--configLoader',
+        'runner',
         entry.test,
         '-t',
         entry.title,

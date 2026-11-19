@@ -156,3 +156,20 @@ for (const theme of ['light', 'dark'])
       true,
     );
   });
+
+test('definições verifica atualizações sem erros e regista no protocolo', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/?scene=conversation');
+  await page.getByTestId('navigation-settings').click();
+  await page.getByTestId('check-updates').click();
+  await expect(page.getByText(/O Solline está atualizado/)).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      (window as unknown as { qa: { journal: { name: string }[] } }).qa.journal
+        .filter((x) => x.name === 'app.checkUpdate')
+        .map((x) => x.name),
+    ),
+  ).toEqual(['app.checkUpdate']);
+  expect(errors).toEqual([]);
+});

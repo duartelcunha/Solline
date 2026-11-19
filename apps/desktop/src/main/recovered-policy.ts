@@ -8,6 +8,7 @@ const INSPECTION = new Set<CommandName>([
   'engine.ping',
   'engine.health',
   'session.taskState',
+  'app.checkUpdate',
   'agents.list',
   'agents.keyCandidates',
   'mcp.list',
@@ -36,6 +37,7 @@ const GLOBAL = new Set<CommandName>([
   'agents.loginCancel',
   'agents.setKeys',
   'projects.add',
+  'app.installUpdate',
   // O catálogo de servidores MCP é global: não pertence a um projeto.
   'mcp.probe',
 ]);

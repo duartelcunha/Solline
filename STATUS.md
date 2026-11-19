@@ -2,13 +2,13 @@
 
 **Em uma frase:** app pessoal de Windows para trabalhar com agentes de código (Claude Code, Codex, ACP) no mesmo espaço.
 
-**Estado:** M9 concluído em `main` (sobre a Fase 1 / `omp acp` v19.0.0): microkernel interno, circuit breakers nas fronteiras externas, `CanonicalTaskState` com fecho do bug M5 no revisor do handoff e decomposição de `engine.ts`, `session-manager.ts` e `stores/app.ts`.
+**Estado:** M9, pipeline contínuo de QA em 3 camadas, automação de updates (Dependabot + `agent-watch.yml` + release NSIS/SHA-256) e verificador seguro de atualizações na app integrados em `main`.
 
 **Última atualização:** 2026-11-19, por Duarte
 
 ## Onde está
 
-- `main` inclui `omp acp` (`19.0.0`, overlay `always-ask`, `_session/steering`), harness M8.5 (`evaluatePilotGate`) e o M9 completo: contratos `kernel.ts` / `task-state.ts`, microkernel (`packages/engine/src/kernel/*` + `modules/*`), coordenadores em `packages/engine/src/sessions/*`, circuit breakers (MCP, `ProjectChecks`, arranque de adaptadores e `WindowsCredentialStore`) e fachada `stores/app/*`.
+- `main` inclui `omp acp` (`19.0.0`), M9 (microkernel interno, `CanonicalTaskState`, circuit breakers e decomposição), pipeline QA em 3 camadas (`ci.yml` `qa-fast`, `qa-full.yml`, `release.yml`), vigilância de dependências/agentes (`dependabot.yml`, `dependabot-automerge.yml`, `agent-watch.yml` + `scripts/check-updates.mjs`), harness QA reparado (`recovery-canary.mjs`, `verify.mjs`, `performance.mjs`) e verificador seguro de atualizações (`app.checkUpdate` / `app.installUpdate` em `Definições` com verificação SHA-256 e `PromptWindows`).
 - Regras nativas, fora da pasta. A Solline não lê `CLAUDE.md` nem `AGENTS.md`. Memórias externas não se aprovam em lote.
 - Do pedido ao PR: issue do GitHub, commit sem push, confirmação nativa antes do push, CI só de leitura, sessão arquivada quando o PR entra. Linear não está ligado.
 - Roadmap e gates em `docs/ADR-roadmap-m9-m11.md` (M10 e M11 continuam bloqueados pelo gate empírico M8.5).
@@ -42,4 +42,4 @@ Os scripts da raiz chamam `corepack pnpm`, para funcionarem quando o pnpm só ex
 - 2026-10-29: `STATUS.md` é o ponto de retoma. O git do motor passa por `resolveGit()`.
 - 2026-11-06: regras nativas, consulta sem Bash, consulta sem testemunho, memórias externas uma a uma. O M7 segue só com o GitHub.
 - 2026-11-06: no M8, a métrica é trabalho aceite por hora de atenção; o modelo por omissão mantém-se; intenção e plano são objetos locais.
-- 2026-11-19: `omp acp` com overlay `always-ask`; M9 autorizado e implementado como endurecimento estrutural mantendo o gate M8.5 para M10–M11. Detalhe em `DECISIONS.md`.
+- 2026-11-19: `omp acp` com overlay `always-ask`; M9 (`c97099a`), pipeline QA em 3 camadas, Dependabot/`agent-watch.yml` e verificador SHA-256 na app integrados em `main`. Detalhe em `DECISIONS.md`.

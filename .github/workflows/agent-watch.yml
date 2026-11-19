@@ -1,0 +1,79 @@
+name: agent-watch
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  watch:
+    name: Check upstream agent SDKs, binaries & MCP versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check upstream versions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/check-updates.mjs --json > updates.json
+          node scripts/check-updates.mjs --markdown > updates.md
+          cat updates.md
+      - name: Sync GitHub tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const { spawnSync } = require("node:child_process");
+            const report = JSON.parse(fs.readFileSync("updates.json", "utf8"));
+            const body = fs.readFileSync("updates.md", "utf8");
+            const title = "[updates] Novas versões de agentes/MCP para auditoria";
+            const runGh = (args) => {
+              const res = spawnSync("gh", args, { encoding: "utf8" });
+              if (res.status !== 0) {
+                throw new Error(`gh ${args.join(" ")} failed: ${res.stderr ?? res.stdout}`);
+              }
+              return res.stdout.trim();
+            };
+            const listRaw = runGh([
+              "issue",
+              "list",
+              "--state",
+              "open",
+              "--search",
+              `${title} in:title`,
+              "--json",
+              "number,title",
+            ]);
+            const existing = JSON.parse(listRaw).find((issue) => issue.title === title);
+            if (report.updatesAvailable || report.driftDetected) {
+              spawnSync("gh", ["label", "create", "updates", "--color", "0e8a16", "--description", "Upstream agent and MCP updates pending audit", "--force"], {
+                encoding: "utf8",
+              });
+              if (existing) {
+                runGh(["issue", "edit", String(existing.number), "--body-file", "updates.md"]);
+                console.log(`Updated tracking issue #${existing.number}`);
+              } else {
+                const url = runGh(["issue", "create", "--title", title, "--label", "updates", "--body-file", "updates.md"]);
+                console.log(`Created tracking issue: ${url}`);
+              }
+            } else if (existing) {
+              runGh([
+                "issue",
+                "close",
+                String(existing.number),
+                "--comment",
+                "Todas as versões revistas de agentes e servidores MCP encontram-se alinhadas e atualizadas.",
+              ]);
+              console.log(`Closed tracking issue #${existing.number}`);
+            } else {
+              console.log("All pinned agent/MCP versions are up to date; no tracking issue needed.");
+            }
+          '

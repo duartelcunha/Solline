@@ -1,0 +1,60 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: UTC
+    open-pull-requests-limit: 6
+    ignore:
+      # Audited separately by agent-watch.yml (protocol typegen + fixture checks).
+      - dependency-name: '@anthropic-ai/claude-agent-sdk'
+      - dependency-name: '@openai/codex'
+    groups:
+      dev-tooling:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+        patterns:
+          - 'eslint*'
+          - '@eslint/*'
+          - 'typescript-eslint'
+          - 'prettier'
+          - '@types/*'
+          - 'vitest'
+      ui-and-build:
+        patterns:
+          - 'react*'
+          - 'lucide-react'
+          - '@radix-ui/*'
+          - 'tailwindcss'
+          - '@tailwindcss/*'
+          - 'vite'
+          - '@vitejs/*'
+          - 'react-markdown'
+          - 'remark-*'
+          - 'rehype-*'
+          - 'zustand'
+      electron-stack:
+        patterns:
+          - 'electron'
+          - 'electron-builder'
+          - 'electron-vite'
+          - '@electron/*'
+          - '@playwright/test'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: UTC
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns:
+          - '*'
