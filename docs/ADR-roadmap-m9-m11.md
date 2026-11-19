@@ -1,7 +1,7 @@
 # ADR: Solline Roadmap M8.5 → M11 (Microkernel, Generative UI, Self-Learning & Self-Healing)
 
 **Date:** 2026-11-19  
-**Status:** Accepted (Phase 1 active; M9–M11 gated on M8.5 empirical evidence)  
+**Status:** Active (Phase 1 merged; M9 implemented ahead of M8.5 by explicit authorization; M10–M11 remain gated on M8.5 empirical evidence)  
 **Scope:** Establishes objective entry gates and architectural boundaries from Phase 1 (`omp acp` + M8.5) through M11 while preserving the 2026-11-10 anti-bloat discipline.
 
 ---
@@ -39,6 +39,8 @@ flowchart LR
 ---
 
 ## M9: Internal Microkernel & Canonical Task State Packet
+
+> **Authorization note (2026-11-19):** M9 was explicitly authorized and implemented on `feat/m9-microkernel` ahead of the M8.5 pilot run because it executes pure structural hardening and closes the open M5 handoff reviewer bug without adding speculative autonomy. The M8.5 10-task frozen pilot gate remains **mandatory** before entering M10 or M11.
 
 - **Architecture:** A lightweight (~200–400 LOC) internal typed event bus and module registry inside `packages/engine` (`init` / `start` / `dispose` lifecycle + Zod capability manifests in `packages/protocol`). **Do not adopt Cordis** and **do not load unreviewed third-party code or UI plugins dynamically at runtime** (preserves Electron fuses and reviewed-in-commit security). "Hot-reload" means clean `enable`/`disable` of reviewed internal modules (plus process reload in dev).
 - **Decomposition target:** Split `engine.ts`, `session-manager.ts`, and `apps/desktop/src/renderer/src/stores/app.ts` into domain modules/slices before M10 lands.

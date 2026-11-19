@@ -117,13 +117,13 @@ export const CATALOG: readonly CatalogEntry[] = [
       content: OMP_OVERLAY_CONTENT,
     },
     args: ['acp'],
-    reviewedVersion: '18.22.2',
+    reviewedVersion: '19.0.0',
     envPolicy: {
       base: 'no-secrets',
     },
     untrustedProjects: 'refused',
     loginHint: 'omp login',
-    install: 'Instala o OMP 18.22.2 e entra com: omp login',
+    install: 'Instala o OMP 19.0.0 e entra com: omp login',
   },
 ];
 

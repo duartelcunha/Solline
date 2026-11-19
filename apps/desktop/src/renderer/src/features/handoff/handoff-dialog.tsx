@@ -106,6 +106,8 @@ function HandoffBody({ sessionId }: { sessionId: string }) {
     const ok = await actions.startHandoff(sessionId, target.agent, state.text.trim(), {
       ...(target.model ? { model: target.model } : {}),
       ...(state.effort ? { effort: state.effort } : {}),
+      ...(state.goal.trim() ? { goal: state.goal.trim() } : {}),
+      ...(state.drafted ? { draftedBy: state.drafted } : {}),
     });
     if (ok) actions.closeHandoff();
     else {

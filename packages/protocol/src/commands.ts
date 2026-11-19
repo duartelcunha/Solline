@@ -33,6 +33,8 @@ import { DelegateTask, memoryCommandSchemas, spacesCommandSchemas } from './spac
 import { rulesCommandSchemas, rulesInternalSchemas } from './rules.ts';
 import { PullRequest, pullCommandSchemas } from './pull.ts';
 import { mcpCommandSchemas, mcpInternalSchemas } from './mcp-catalog.ts';
+import { kernelCommandSchemas, kernelInternalSchemas } from './kernel.ts';
+import { taskStateCommandSchemas } from './task-state.ts';
 
 /**
  * Contrato dos comandos da Ponte: interface -> main -> motor.
@@ -372,6 +374,8 @@ export const commandSchemas = {
   ...handoffCommandSchemas,
   ...forkCommandSchemas,
   ...consultCommandSchemas,
+  ...kernelCommandSchemas,
+  ...taskStateCommandSchemas,
 } as const;
 
 /**
@@ -422,6 +426,7 @@ export const CommandNameSchema = z.enum(commandNames as [CommandName, ...Command
 export const internalCommandSchemas = {
   ...rulesInternalSchemas,
   ...mcpInternalSchemas,
+  ...kernelInternalSchemas,
   'spaces.dispatch': {
     payload: DelegateTask.extend({ start: SessionStartPayload.optional() }).strict(),
     result: spacesCommandSchemas['spaces.delegate'].result,

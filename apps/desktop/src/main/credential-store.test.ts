@@ -26,6 +26,55 @@ describe('cofre de segredos (testes sem o Windows)', () => {
     const store = new UnavailableSecretStore('Sem cofre');
     await expect(store.get()).rejects.toThrow('Sem cofre');
   });
+
+  it('circuit breaker do cofre abre após 3 falhas reais, ignora validação e ERROR_NOT_FOUND, e recupera após resetMs', async () => {
+    let now = 1_000;
+    let mode: 'missing' | 'fail' | 'ok' = 'missing';
+    let calls = 0;
+    const store = new WindowsCredentialStore({
+      now: () => now,
+      threshold: 3,
+      resetMs: 30_000,
+      run: async () => {
+        calls += 1;
+        if (mode === 'missing') return ['N'];
+        if (mode === 'fail') throw new Error('O Gestor de Credenciais não respondeu');
+        return ['V|' + Buffer.from('segredo', 'utf8').toString('base64')];
+      },
+    });
+    const target = mcpSecretTarget('srv', 'API_KEY');
+
+    // Erros de validação saem antes do breaker e não contam como falhas.
+    await expect(store.get('Microsoft/Outlook')).rejects.toThrow('inválido');
+    await expect(store.set(target, '')).rejects.toThrow('entre 1 e 1000');
+    expect(calls).toBe(0);
+    expect(store.circuitSnapshot()).toMatchObject({ state: 'closed', failures: 0 });
+
+    // ERROR_NOT_FOUND ('N') devolve null e mantém o circuito fechado e saudável.
+    expect(await store.get(target)).toBeNull();
+    expect(calls).toBe(1);
+    expect(store.circuitSnapshot()).toMatchObject({ state: 'closed', failures: 0 });
+
+    // 3 falhas seguidas abrem o circuito.
+    mode = 'fail';
+    for (let i = 0; i < 3; i += 1) {
+      await expect(store.get(target)).rejects.toThrow('não respondeu');
+    }
+    expect(calls).toBe(4);
+    expect(store.circuitSnapshot()).toMatchObject({ state: 'open', failures: 3 });
+
+    // Enquanto aberto, falha depressa sem chamar o PowerShell runner.
+    await expect(store.get(target)).rejects.toThrow('temporariamente indisponível');
+    expect(calls).toBe(4);
+
+    // Após resetMs entra em half-open e recupera ao primeiro sucesso.
+    now += 30_000;
+    expect(store.circuitSnapshot().state).toBe('half-open');
+    mode = 'ok';
+    expect(await store.get(target)).toBe('segredo');
+    expect(calls).toBe(5);
+    expect(store.circuitSnapshot()).toMatchObject({ state: 'closed', failures: 0 });
+  });
 });
 
 // Toca no Gestor de Credenciais de verdade (escreve e apaga um segredo de teste com um alvo

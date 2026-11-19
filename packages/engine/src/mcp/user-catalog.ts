@@ -11,6 +11,7 @@ import {
   type McpSearchResult,
   type McpServerDescriptor,
 } from '@solline/protocol';
+import { CircuitOpenError, CircuitRegistry } from '../kernel/circuit-breaker.ts';
 import type { McpCatalog, McpLaunch } from './catalog.ts';
 import { McpLaunchError, resolveCommand, type Resolved } from './launch.ts';
 import { PROBE_TIMEOUT_MS, probeMcpServer, type ProbeFn } from './probe.ts';
@@ -37,6 +38,8 @@ export interface UserCatalogOptions {
   builtinIds?: () => Promise<readonly string[]>;
   onChange?: (state: McpCatalogState) => void;
   now?: () => number;
+  circuits?: CircuitRegistry | undefined;
+  breakerResetMs?: number | undefined;
 }
 
 function invalid(error: { issues?: { path: PropertyKey[]; message: string }[] }): Error {
@@ -78,6 +81,8 @@ export class UserMcpCatalog {
   readonly #builtinIds: () => Promise<readonly string[]>;
   readonly #onChange: ((state: McpCatalogState) => void) | undefined;
   readonly #now: () => number;
+  readonly #circuits: CircuitRegistry;
+  readonly #breakerResetMs: number;
   readonly #data: StoredCatalog;
   /** Servidores já verificados nesta execução (a sonda corre na primeira entrega). */
   readonly #verified = new Set<string>();
@@ -99,6 +104,8 @@ export class UserMcpCatalog {
     this.#builtinIds = options.builtinIds ?? (async () => []);
     this.#onChange = options.onChange;
     this.#now = options.now ?? Date.now;
+    this.#circuits = options.circuits ?? new CircuitRegistry();
+    this.#breakerResetMs = options.breakerResetMs ?? 60_000;
     this.#data = this.#file.load();
   }
 
@@ -226,6 +233,7 @@ export class UserMcpCatalog {
       stored.pending = null;
       this.#verified.delete(id);
       this.#errors.delete(id);
+      this.#circuits.reset(`mcp-probe:${id}`);
     }
     this.#changed();
     return this.#view(stored);
@@ -242,6 +250,7 @@ export class UserMcpCatalog {
     );
     this.#verified.delete(id);
     this.#errors.delete(id);
+    this.#circuits.reset(`mcp-probe:${id}`);
     this.#changed();
     return true;
   }
@@ -306,6 +315,7 @@ export class UserMcpCatalog {
         'needs-approval',
         `${stored.spec.label}: precisa de aprovação antes de arrancar`,
       );
+    this.#circuits.reset(`mcp-probe:${id}`);
     const { env, values } = await this.#environment(stored);
     const resolved = this.#resolved(stored);
     await this.#verify(id, resolved, env, values);
@@ -386,17 +396,27 @@ export class UserMcpCatalog {
     const run = (async (): Promise<'ok' | 'changed'> => {
       const stored = this.#find(id);
       const label = stored.spec.label;
+      const breaker = this.#circuits.getOrCreate(`mcp-probe:${id}`, {
+        threshold: 3,
+        resetMs: this.#breakerResetMs,
+        now: this.#now,
+      });
       let result;
       try {
-        result = await this.#probe(
-          { command: resolved.command, args: resolved.args, env },
-          { timeoutMs: this.#probeTimeout, secrets },
+        result = await breaker.execute(() =>
+          this.#probe(
+            { command: resolved.command, args: resolved.args, env },
+            { timeoutMs: this.#probeTimeout, secrets },
+          ),
         );
       } catch (error) {
-        const message = cleanText(
-          redact(error instanceof Error ? error.message : String(error), secrets),
-          300,
-        );
+        const message =
+          error instanceof CircuitOpenError
+            ? 'demasiadas falhas seguidas na sonda; tenta novamente dentro de momentos'
+            : cleanText(
+                redact(error instanceof Error ? error.message : String(error), secrets),
+                300,
+              );
         this.#errors.set(id, message);
         this.#onChange?.(this.state());
         throw new McpLaunchError('error', `${label}: ${message}`);

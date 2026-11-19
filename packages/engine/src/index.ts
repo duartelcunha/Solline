@@ -197,3 +197,30 @@ export { probeMcpServer, type ProbeFn, type ProbeResult, type ProbeTarget } from
 export { HostLink, secretReaderFrom, type McpSecretReader } from './mcp/secrets.ts';
 export { UserMcpCatalog, combinedCatalog, type UserCatalogOptions } from './mcp/user-catalog.ts';
 export { commandLine, fingerprint, redact, toolsFingerprint } from './mcp/spec.ts';
+export {
+  CircuitBreaker,
+  CircuitOpenError,
+  CircuitRegistry,
+  type CircuitBreakerOptions,
+} from './kernel/circuit-breaker.ts';
+export {
+  EngineEventBus,
+  type EngineEventFilter,
+  type EngineEventHandler,
+} from './kernel/event-bus.ts';
+export {
+  EngineKernel,
+  createToken,
+  type EngineCommandHandler,
+  type KernelContext,
+  type KernelModule,
+  type ServiceToken,
+} from './kernel/kernel.ts';
+export {
+  buildHandoffTaskState,
+  createTaskState,
+  reviewerRequestFor,
+  syncTaskState,
+  trimTaskStateToTurn,
+  verificationFromChecks,
+} from './sessions/task-state.ts';

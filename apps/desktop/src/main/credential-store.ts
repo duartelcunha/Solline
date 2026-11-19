@@ -1,6 +1,12 @@
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
-import { SECRET_MAX_LENGTH, assertSecretTarget, type SecretStore } from '@solline/protocol';
+import {
+  SECRET_MAX_LENGTH,
+  assertSecretTarget,
+  type CircuitSnapshot,
+  type CircuitState,
+  type SecretStore,
+} from '@solline/protocol';
 
 /**
  * O Gestor de Credenciais do Windows como cofre dos segredos dos servidores MCP. Sem dependências
@@ -179,7 +185,87 @@ function failure(line: string): Error {
   );
 }
 
+export interface WindowsCredentialStoreOptions {
+  run?: ((operations: readonly Operation[], timeoutMs?: number) => Promise<string[]>) | undefined;
+  threshold?: number | undefined;
+  resetMs?: number | undefined;
+  now?: (() => number) | undefined;
+}
+
+const VAULT_THRESHOLD = 3;
+const VAULT_RESET_MS = 30_000;
+
 export class WindowsCredentialStore implements SecretStore {
+  readonly #run: (operations: readonly Operation[], timeoutMs?: number) => Promise<string[]>;
+  readonly #threshold: number;
+  readonly #resetMs: number;
+  readonly #now: () => number;
+  #state: CircuitState = 'closed';
+  #failures = 0;
+  #lastError: string | null = null;
+  #openedAt: number | null = null;
+  #nextAttemptAt: number | null = null;
+  #halfOpenInFlight = false;
+
+  constructor(options: WindowsCredentialStoreOptions = {}) {
+    this.#run = options.run ?? run;
+    this.#threshold = options.threshold ?? VAULT_THRESHOLD;
+    this.#resetMs = options.resetMs ?? VAULT_RESET_MS;
+    this.#now = options.now ?? Date.now;
+  }
+
+  circuitSnapshot(): CircuitSnapshot {
+    const state: CircuitState =
+      this.#state === 'open' && this.#nextAttemptAt !== null && this.#now() >= this.#nextAttemptAt
+        ? 'half-open'
+        : this.#state;
+    return {
+      id: 'windows-vault',
+      state,
+      failures: this.#failures,
+      lastError: this.#lastError,
+      openedAt: this.#openedAt,
+      nextAttemptAt: this.#nextAttemptAt,
+    };
+  }
+
+  async #execute<T>(operations: readonly Operation[], interpret: (lines: string[]) => T): Promise<T> {
+    const now = this.#now();
+    if (this.#state === 'open') {
+      const next = this.#nextAttemptAt ?? now;
+      if (now < next)
+        throw new Error('O Gestor de Credenciais está temporariamente indisponível depois de falhas repetidas');
+      this.#state = 'half-open';
+    }
+    if (this.#state === 'half-open') {
+      if (this.#halfOpenInFlight)
+        throw new Error('O Gestor de Credenciais está temporariamente indisponível depois de falhas repetidas');
+      this.#halfOpenInFlight = true;
+    }
+    try {
+      const lines = await this.#run(operations);
+      const result = interpret(lines);
+      this.#state = 'closed';
+      this.#failures = 0;
+      this.#lastError = null;
+      this.#openedAt = null;
+      this.#nextAttemptAt = null;
+      this.#halfOpenInFlight = false;
+      return result;
+    } catch (error) {
+      const failedAt = this.#now();
+      this.#failures += 1;
+      this.#lastError = error instanceof Error ? error.message : String(error);
+      this.#halfOpenInFlight = false;
+      if (this.#state === 'half-open' || this.#failures >= this.#threshold) {
+        this.#state = 'open';
+        this.#openedAt = failedAt;
+        this.#nextAttemptAt = failedAt + this.#resetMs;
+      }
+      throw error;
+    }
+  }
+
   async get(target: string): Promise<string | null> {
     return (await this.getMany([target]))[0] ?? null;
   }
@@ -187,28 +273,36 @@ export class WindowsCredentialStore implements SecretStore {
   async getMany(targets: readonly string[]): Promise<(string | null)[]> {
     if (targets.length === 0) return [];
     for (const target of targets) assertSecretTarget(target);
-    const lines = await run(targets.map((target) => ({ op: 'R' as const, target })));
-    return lines.map((line) => {
-      if (line === 'N') return null;
-      if (line.startsWith('V|')) return Buffer.from(line.slice(2), 'base64').toString('utf8');
-      throw failure(line);
-    });
+    return this.#execute(
+      targets.map((target) => ({ op: 'R' as const, target })),
+      (lines) =>
+        lines.map((line) => {
+          if (line === 'N') return null;
+          if (line.startsWith('V|')) return Buffer.from(line.slice(2), 'base64').toString('utf8');
+          throw failure(line);
+        }),
+    );
   }
 
   async set(target: string, value: string): Promise<void> {
     assertSecretTarget(target);
     if (value.length === 0 || value.length > SECRET_MAX_LENGTH)
       throw new Error('O valor do segredo tem de ter entre 1 e 1000 caracteres');
-    const [line] = await run([{ op: 'W', target, value }]);
-    if (line !== 'K') throw failure(line ?? 'E');
+    await this.#execute([{ op: 'W', target, value }], ([line]) => {
+      if (line !== 'K') throw failure(line ?? 'E');
+    });
   }
 
   async remove(targets: readonly string[]): Promise<void> {
     if (targets.length === 0) return;
     for (const target of targets) assertSecretTarget(target);
-    const lines = await run(targets.map((target) => ({ op: 'D' as const, target })));
-    const bad = lines.find((line) => line !== 'K');
-    if (bad) throw failure(bad);
+    await this.#execute(
+      targets.map((target) => ({ op: 'D' as const, target })),
+      (lines) => {
+        const bad = lines.find((line) => line !== 'K');
+        if (bad) throw failure(bad);
+      },
+    );
   }
 }
 

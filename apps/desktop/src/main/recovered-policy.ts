@@ -6,6 +6,8 @@ import type { ProjectLookup } from './session-policy.ts';
 const INSPECTION = new Set<CommandName>([
   'engine.snapshot',
   'engine.ping',
+  'engine.health',
+  'session.taskState',
   'agents.list',
   'agents.keyCandidates',
   'mcp.list',

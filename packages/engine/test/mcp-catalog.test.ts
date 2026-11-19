@@ -608,6 +608,31 @@ describe('catálogo do utilizador', () => {
     expect(env.changes.length).toBeGreaterThan(0);
     expect(JSON.stringify(env.changes)).not.toContain(SECRET);
   });
+
+  it('o circuit breaker da sonda abre após 3 falhas seguidas e limpa com probe manual', async () => {
+    const env = build({ dataDir: tempDir() });
+    await approved(env);
+    const fresh = env.make();
+    env.control.fail = 'timeout da sonda';
+    const before = env.calls.length;
+
+    await expect(fresh.launch('srv1')).rejects.toMatchObject({ reason: 'error' });
+    await expect(fresh.launch('srv1')).rejects.toMatchObject({ reason: 'error' });
+    await expect(fresh.launch('srv1')).rejects.toMatchObject({ reason: 'error' });
+    expect(env.calls.length - before).toBe(3);
+
+    // 4ª tentativa automática entra no circuito aberto sem chamar #probe.
+    const blocked = await fresh.launch('srv1').catch((e: unknown) => e);
+    expect(blocked).toMatchObject({ reason: 'error' });
+    expect((blocked as Error).message).toContain('demasiadas falhas seguidas');
+    expect(env.calls.length - before).toBe(3);
+
+    // Sonda manual (probe) reinicia o circuito e volta a arrancar o servidor.
+    env.control.fail = '';
+    const ok = await fresh.probe('srv1');
+    expect(ok.status).toBe('ready');
+    expect(env.calls.length - before).toBe(4);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------
