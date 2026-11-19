@@ -255,30 +255,32 @@ export function Composer({ sessionId, above }: { sessionId: string; above?: Reac
             data-testid="composer-input"
             className="block max-h-64 min-h-12 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-[1.5] outline-none [field-sizing:content] placeholder:text-subtle disabled:cursor-default"
           />
-          <div className="flex items-center gap-3 px-2.5 pt-1 pb-2.5">
-            {/* Estreito (painel de rever aberto): as pílulas ficam numa linha e saem os números. */}
-            {capabilities ? (
-              <RacePill
-                agent={agent}
-                settings={settings}
-                capabilities={capabilities}
-                lanes={lanes}
-                onLanes={setLanes}
-                disabled={offline || busy}
-              />
-            ) : null}
-            {capabilities ? split.pill : null}
-            {capabilities ? (
-              <SettingsPills
-                settings={settings}
-                capabilities={capabilities}
-                disabled={offline}
-                onModel={(model) => void actions.setModel(sessionId, model)}
-                onEffort={(effort) => void actions.setEffort(sessionId, effort)}
-                onMode={(mode) => void actions.setMode(sessionId, mode)}
-              />
-            ) : null}
-            <div className="ml-auto flex items-center gap-3 text-[12px] text-muted">
+          <div className="flex items-end gap-2 px-2.5 pt-1 pb-2.5">
+            {/* Estreito (painel de rever aberto): as pílulas ocupam a largura e o enviar fica à parte. */}
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              {capabilities ? (
+                <RacePill
+                  agent={agent}
+                  settings={settings}
+                  capabilities={capabilities}
+                  lanes={lanes}
+                  onLanes={setLanes}
+                  disabled={offline || busy}
+                />
+              ) : null}
+              {capabilities ? split.pill : null}
+              {capabilities ? (
+                <SettingsPills
+                  settings={settings}
+                  capabilities={capabilities}
+                  disabled={offline}
+                  onModel={(model) => void actions.setModel(sessionId, model)}
+                  onEffort={(effort) => void actions.setEffort(sessionId, effort)}
+                  onMode={(mode) => void actions.setMode(sessionId, mode)}
+                />
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-3 pb-0.5 text-[12px] text-muted">
               {usage.context && features?.context !== false ? (
                 <ContextMeter
                   used={usage.context.usedTokens}

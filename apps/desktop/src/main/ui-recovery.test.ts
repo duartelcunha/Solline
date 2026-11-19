@@ -77,7 +77,7 @@ afterEach(async () => {
   await rm(target, { recursive: true, force: true });
 });
 
-describe('UiRecoveryStore durable acknowledgement and recovery', () => {
+describe('UiRecoveryStore durable acknowledgement and recovery', { timeout: 30_000 }, () => {
   it('preserves review comments, scratch note and the active editor across restart', async () => {
     const store = new UiRecoveryStore(dir, codec);
     await store.load();

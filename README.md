@@ -52,6 +52,8 @@ pnpm lint
 pnpm test
 ```
 
+The root scripts invoke `corepack pnpm`, so the same commands work when pnpm is not on `PATH`.
+
 Engine integration tests can use real agent accounts. Set `SOLLINE_SKIP_SDK=1` for an offline
 run; `SOLLINE_AGENTS` selects real agents (`packages/engine/test/real-agents.ts:3`).
 The paired-trial baseline is `packages/engine/src/pilot`. Two arms, the same model:

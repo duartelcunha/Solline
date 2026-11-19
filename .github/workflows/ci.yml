@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # 22 é o mínimo do repo. 24 é o Node do Duarte: o EINVAL de um .cmd
+        # (CVE-2024-27980) tem de falhar aqui, não só na máquina dele.
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # O corpus do M8 aponta para commits antigos. Um clone raso não os tem.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install
+        run: corepack pnpm@10.34.6 install --frozen-lockfile
+      - name: Typecheck
+        run: corepack pnpm typecheck
+      - name: Lint
+        run: corepack pnpm lint
+      - name: Engine
+        working-directory: packages/engine
+        run: corepack pnpm exec vitest run
+        env:
+          SOLLINE_SKIP_SDK: '1'
+      - name: Desktop
+        working-directory: apps/desktop
+        run: corepack pnpm exec vitest run
+        env:
+          # O cofre de credenciais do Windows não existe neste runner.
+          SOLLINE_VAULT: ${{ runner.os == 'Windows' && 'skip' || '' }}

@@ -170,11 +170,35 @@ export class RaceManager {
     const completed = this.#beforeEffect('race.rank', raceId);
     race.phase = 'ranking';
     this.#changed(race);
+    try {
+      return await this.#rankBody(race, signal, completed);
+    } catch (error) {
+      // Sem isto a corrida fica em "ranking" para sempre e quem espera o
+      // veredicto só vê o tempo a acabar.
+      if (race.phase === 'ranking') {
+        race.phase = 'done';
+        this.#changed(race);
+      }
+      throw error;
+    }
+  }
+
+  async #rankBody(
+    race: Race,
+    signal: AbortSignal,
+    completed: () => void,
+  ): Promise<Race> {
     const outcomes: (LaneOutcome & { cwd: string })[] = await Promise.all(
       race.lanes.map(async (lane) => {
         const outcome = await this.#sessions
           .outcome(lane.sessionId, signal)
-          .catch(() => ({ cwd: '', files: [], checks: [] }));
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            // Sem worktree a pista não tem patch. Um git que falha não é uma pista vazia:
+            // senão duas soluções iguais parecem divergir e a corrida não fecha.
+            if (message.includes('não tem worktree')) return { cwd: '', files: [], checks: [] };
+            throw error;
+          });
         return { sessionId: lane.sessionId, ...outcome };
       }),
     );

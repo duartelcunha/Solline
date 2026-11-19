@@ -7,12 +7,12 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "dev": "pnpm --filter @solline/desktop dev",
-    "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
-    "dist": "pnpm --filter @solline/desktop dist",
+    "dev": "corepack pnpm --filter @solline/desktop dev",
+    "build": "corepack pnpm -r build",
+    "typecheck": "corepack pnpm -r typecheck",
+    "lint": "corepack pnpm -r lint",
+    "test": "corepack pnpm -r test",
+    "dist": "corepack pnpm --filter @solline/desktop dist",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

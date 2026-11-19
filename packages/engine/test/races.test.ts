@@ -63,6 +63,9 @@ describe('ordenar uma corrida', () => {
     expect(patchKey([file('a.ts', ['const x = 1;'])])).not.toBe(
       patchKey([file('a.ts', ['const x = 2;'])]),
     );
+    expect(patchKey([file('a.ts', ['const x = 1;\r'])])).toBe(
+      patchKey([file('a.ts', ['const x = 1;'])]),
+    );
   });
 
   it('a execução manda: quem parte uma verificação desce, e as que já falhavam não contam', () => {

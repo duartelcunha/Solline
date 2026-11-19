@@ -831,7 +831,7 @@ for (const scenario of ['empate', 'falha'] as const) {
     await page.getByTestId('pill-race').click();
     await page.getByTestId('race-lane-claude-opus').click();
     await page.keyboard.press('Escape');
-    await expect(page.getByTestId('pill-race')).toContainText('2×');
+    await expect(page.getByTestId('pill-race')).toContainText('2 pistas');
     await send(page, `QA: corrida com ${scenario}`);
     await expect(page.getByTestId('race-lane')).toHaveCount(2);
     await expect(page.getByTestId('race-allow-all')).toBeVisible();
@@ -1199,7 +1199,8 @@ for (const failure of ['crash', 'interrupt'] as const) {
       await info.attach('race-stage-timings', {
         body: JSON.stringify({
           failure,
-          scope: 'Observed functional stage durations, not an isolated performance benchmark. Separate deadlines increase the possible composite budget.',
+          scope:
+            'Observed functional stage durations, not an isolated performance benchmark. Separate deadlines increase the possible composite budget.',
           stages,
         }),
         contentType: 'application/json',

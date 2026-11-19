@@ -59,7 +59,9 @@ const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
  * ficheiro com mais de uma secção fica sem hunks; quem chama já o deixa de fora.
  */
 export function parsePatch(patch: Buffer, files: readonly FileEntry[]): RawFile[] {
-  const lines = patch.toString('latin1').split('\n');
+  // O Git for Windows pode escrever o patch com CRLF. O `\r` colado ao caminho
+  // faz a secção não casar com o --raw e o hunk desaparece.
+  const lines = patch.toString('latin1').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   if (lines.at(-1) === '') lines.pop();
   const byPath = new Map<string, string[][]>();
   let current: string[] | undefined;

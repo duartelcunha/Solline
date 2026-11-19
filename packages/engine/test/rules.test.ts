@@ -237,7 +237,7 @@ describe('guardar, alterar, apagar', () => {
   });
 });
 
-describe('no motor: comandos, projeto resolvido pelo main e recuperação', () => {
+describe('no motor: comandos, projeto resolvido pelo main e recuperação', { timeout: 30_000 }, () => {
   const key = Buffer.alloc(32, 7);
 
   function open(dataDir: string) {

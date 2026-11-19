@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { launchArgs } from '../win-launch.ts';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -164,10 +165,12 @@ export class ShadowGit {
     const okCodes = options.okCodes ?? [0];
     if (!this.#executable) return Promise.reject(new GitError(MISSING, null, ''));
     return new Promise((resolve, reject) => {
-      const child = spawn(this.#executable, args, {
+      const launched = launchArgs(this.#executable, args);
+      const child = spawn(launched.file, launched.args, {
         cwd: options.bare ? this.gitDir : this.workTree,
         env,
         windowsHide: true,
+        windowsVerbatimArguments: launched.verbatim,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       const out: Buffer[] = [];
@@ -212,11 +215,20 @@ export class ShadowGit {
     };
     if (!this.#executable) return Promise.reject(new GitError(MISSING, null, ''));
     return new Promise((resolve, reject) => {
-      const child = spawn(
-        this.#executable,
-        ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-        { cwd: this.workTree, env, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] },
-      );
+      const launched = launchArgs(this.#executable, [
+        'ls-files',
+        '--cached',
+        '--others',
+        '--exclude-standard',
+        '-z',
+      ]);
+      const child = spawn(launched.file, launched.args, {
+        cwd: this.workTree,
+        env,
+        windowsHide: true,
+        windowsVerbatimArguments: launched.verbatim,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
       let count = 0;
       let settled = false;
       const done = (value: number) => {
@@ -292,5 +304,7 @@ function shadowEnv(gitDir: string, workTree: string): Record<string, string> {
     GIT_TERMINAL_PROMPT: '0',
     GIT_ATTR_NOSYSTEM: '1',
     LC_ALL: 'C',
+    MSYS_NO_PATHCONV: '1',
+    MSYS2_ARG_CONV_EXCL: '*',
   };
 }

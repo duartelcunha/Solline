@@ -8,7 +8,9 @@ architecture and agent rules. Historical decisions remain in [DECISIONS.md](DECI
 
 Node >=22.18; pnpm 10.34.6 (`package.json`). From the repository root:
 `pnpm install --frozen-lockfile`, `pnpm dev`, `pnpm typecheck`, `pnpm lint`, `pnpm test`,
-`pnpm dist`. If pnpm is not installed, use `corepack pnpm@10.34.6 install --frozen-lockfile`.
+`pnpm dist`. The root scripts call `corepack pnpm`, so they still run when pnpm is not on
+`PATH` and only Corepack can start it. If pnpm is not installed, use
+`corepack pnpm@10.34.6 install --frozen-lockfile`.
 
 With dependencies installed, PowerShell checks without pnpm:
 

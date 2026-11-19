@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { WorktreeStats } from '@solline/protocol';
 import { resolveGit } from '../checkpoints/git.ts';
+import { launchArgs } from '../win-launch.ts';
 import { repoFromRemote, worktreeBranch } from '../pull/repo.ts';
 import { parseRaw } from '../checkpoints/session-checkpoints.ts';
 import { parseNumstat, parsePatch, type RawFile } from '../checkpoints/unified-diff.ts';
@@ -51,6 +53,42 @@ export interface BringResult {
 
 const TIMEOUT_MS = 60_000;
 const NO_STATS: WorktreeStats = { files: 0, additions: 0, deletions: 0 };
+/** O diff de uma corrida não pode depender do autocrlf de quem instalou o Git. */
+const GIT_STABLE = [
+  '-c',
+  'core.quotepath=false',
+  '-c',
+  'core.autocrlf=false',
+  '-c',
+  'core.safecrlf=false',
+  '-c',
+  'core.eol=lf',
+];
+/** Dois git ao mesmo tempo no Windows disputam o index.lock por um instante. */
+const TRANSIENT_GIT =
+  /index\.lock|unable to create|being used by another process|permission denied|resource busy|ebusy/i;
+
+function gitFailureText(error: unknown): string {
+  if (!error || typeof error !== 'object') return String(error);
+  const detail = error as { message?: string; stderr?: Buffer | string };
+  const stderr =
+    typeof detail.stderr === 'string' ? detail.stderr : (detail.stderr?.toString() ?? '');
+  return `${detail.message ?? ''} ${stderr}`;
+}
+
+async function again<T>(run: () => Promise<T>): Promise<T> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await run();
+    } catch (error) {
+      last = error;
+      if (attempt === 4 || !TRANSIENT_GIT.test(gitFailureText(error))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+    }
+  }
+  throw last;
+}
 
 /** O título em minúsculas, sem acentos, até quatro palavras ligadas por hífen. */
 export function slug(title: string): string {
@@ -77,7 +115,48 @@ function gitEnv(): NodeJS.ProcessEnv {
         !/^GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|COMMON_DIR|NAMESPACE)$/i.test(key),
     ),
   );
-  return { ...env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' };
+  const next: NodeJS.ProcessEnv = {
+    ...env,
+    GIT_TERMINAL_PROMPT: '0',
+    // Um pager (less, delta) lê o stdin, que o execFile deixa aberto: o diff não
+    // termina. O cat devolve o patch e sai.
+    GIT_PAGER: 'cat',
+    // O diff não fica à espera de um cadeado que só refresca o índice. O índice
+    // desta chamada acabou de ser escrito.
+    GIT_OPTIONAL_LOCKS: '0',
+    LC_ALL: 'C',
+    // O Git for Windows reescreve argumentos com `~` (o `RUNNER~1` do Actions). Os caminhos
+    // já vão absolutos.
+    MSYS_NO_PATHCONV: '1',
+    MSYS2_ARG_CONV_EXCL: '*',
+  };
+  // O `-c` não chega a um git filho. Sem isto o autocrlf global converte o ficheiro e o
+  // diff de duas pistas deixa de ser o mesmo.
+  const base = Number(next.GIT_CONFIG_COUNT ?? '0');
+  const stable: readonly (readonly [string, string])[] = [
+    ['core.autocrlf', 'false'],
+    ['core.safecrlf', 'false'],
+    ['core.eol', 'lf'],
+  ];
+  stable.forEach(([key, value], index) => {
+    next[`GIT_CONFIG_KEY_${base + index}`] = key;
+    next[`GIT_CONFIG_VALUE_${base + index}`] = value;
+  });
+  next.GIT_CONFIG_COUNT = String(base + stable.length);
+  return next;
+}
+
+/**
+ * O mesmo sítio no disco. O git pode devolver o nome longo (`runneradmin`) e o Node o
+ * nome curto (`RUNNER~1`): sem isto, `path.relative` sai da worktree.
+ */
+function diskPath(dir: string): string {
+  const resolved = path.resolve(dir.trim());
+  try {
+    return realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
 }
 
 export class WorktreeManager {
@@ -104,27 +183,32 @@ export class WorktreeManager {
     const git = this.#git;
     if (!git)
       return Promise.reject(new Error('Não encontrei o git: instala o Git para ter worktrees'));
-    return new Promise((resolve, reject) => {
-      execFile(
-        git,
-        ['-c', 'core.quotepath=false', ...args],
-        {
-          cwd,
-          env: { ...gitEnv(), ...extraEnv },
-          windowsHide: true,
-          timeout: TIMEOUT_MS,
-          maxBuffer: 16 * 1024 * 1024,
-        },
-        (error, stdout, stderr) => {
-          const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-          if (code !== 0 && !allowFail) {
-            reject(new Error(`git ${args[0]}: ${(stderr || String(error?.message)).trim()}`));
-            return;
-          }
-          resolve({ code, out: stdout });
-        },
-      );
-    });
+    return again(
+      () =>
+        new Promise((resolve, reject) => {
+          const launched = launchArgs(git, [...GIT_STABLE, ...args]);
+          execFile(
+            launched.file,
+            launched.args,
+            {
+              cwd,
+              env: { ...gitEnv(), ...extraEnv },
+              windowsHide: true,
+              windowsVerbatimArguments: launched.verbatim,
+              timeout: TIMEOUT_MS,
+              maxBuffer: 16 * 1024 * 1024,
+            },
+            (error, stdout, stderr) => {
+              const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+              if (code !== 0 && !allowFail) {
+                reject(new Error(`git ${args[0]}: ${(stderr || String(error?.message)).trim()}`));
+                return;
+              }
+              resolve({ code, out: stdout });
+            },
+          );
+        }),
+    );
   }
 
   /** A raiz do repositório de uma pasta, ou null se não for git (ou ainda não tiver commits). */
@@ -132,15 +216,31 @@ export class WorktreeManager {
     const top = await this.#run(dir, ['rev-parse', '--show-toplevel'], true).catch(() => null);
     if (!top || top.code !== 0) return null;
     const head = await this.#run(dir, ['rev-parse', '--verify', '--quiet', 'HEAD'], true);
-    return head.code === 0 ? path.resolve(top.out.trim()) : null;
+    return head.code === 0 ? diskPath(top.out) : null;
+  }
+
+  /**
+   * A pasta dentro do repositório (`app/src`), vinda do git em forma relativa.
+   * `--show-toplevel` no Windows devolve um caminho que o MSYS reescreve (`RUNNER~1`);
+   * juntá-lo com `path.relative` tira a sessão da worktree e o diff da corrida fica vazio.
+   */
+  async #prefix(dir: string): Promise<string> {
+    const prefix = await this.#run(dir, ['rev-parse', '--show-prefix'], true);
+    if (prefix.code !== 0) return '';
+    return prefix.out.trim().replace(/\\/g, '/').replace(/\/$/, '');
   }
 
   /** Cria a worktree de uma sessão a partir do HEAD do projeto; null se a pasta não for git. */
   async create(projectPath: string, projectId: string): Promise<Worktree | null> {
-    const top = await this.repoOf(projectPath);
-    if (!top) return null;
-    const base = (await this.#run(top, ['rev-parse', 'HEAD'])).out.trim();
-    return this.#add(top, path.relative(top, path.resolve(projectPath)), base, projectId);
+    const head = await this.#run(projectPath, ['rev-parse', '--verify', '--quiet', 'HEAD'], true);
+    if (head.code !== 0) return null;
+    const prefix = await this.#prefix(projectPath);
+    const up = prefix.split('/').filter(Boolean);
+    const top = diskPath(
+      up.length === 0 ? projectPath : path.resolve(projectPath, ...up.map(() => '..')),
+    );
+    const base = (await this.#run(projectPath, ['rev-parse', 'HEAD'])).out.trim();
+    return this.#add(top, prefix, base, projectId);
   }
 
   /** Uma worktree irmã de outra: o mesmo projeto, a mesma pasta e o mesmo commit de partida. */
@@ -207,8 +307,10 @@ export class WorktreeManager {
     const relative = path.relative(this.#root, wt.path);
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative))
       throw new Error('A worktree recuperada está fora da pasta da Solline.');
-    const canonical = (value: string) =>
-      process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+    const canonical = (value: string) => {
+      const disk = diskPath(value);
+      return process.platform === 'win32' ? disk.toLowerCase() : disk;
+    };
     const top = (await this.#run(wt.path, ['rev-parse', '--show-toplevel'])).out.trim();
     if (canonical(top) !== canonical(wt.path))
       throw new Error('A worktree recuperada já não corresponde à pasta guardada.');
@@ -234,20 +336,28 @@ export class WorktreeManager {
   async diff(wt: Worktree): Promise<RawFile[]> {
     const file = `${wt.path}.${randomBytes(4).toString('hex')}.index`;
     const index = { GIT_INDEX_FILE: file };
-    const common = ['--cached', '--no-renames', '--no-ext-diff', '--no-textconv', wt.base];
+    const common = [
+      '--cached',
+      '--no-renames',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--ignore-cr-at-eol',
+      wt.base,
+    ];
     let raw: Buffer, numstat: Buffer, patch: Buffer;
     try {
       await this.#run(wt.path, ['read-tree', 'HEAD'], false, index);
       await this.#run(wt.path, ['add', '-A'], false, index);
-      [raw, numstat, patch] = await Promise.all([
-        this.#runBuffer(wt.path, ['diff', '--raw', '-z', ...common], index),
-        this.#runBuffer(wt.path, ['diff', '--numstat', '-z', ...common], index),
-        this.#runBuffer(
-          wt.path,
-          ['diff', '--no-color', '-U3', '--src-prefix=a/', '--dst-prefix=b/', ...common],
-          index,
-        ),
-      ]);
+      // Os três lêem o mesmo índice. Em paralelo disputam o index.lock: o git
+      // espera pelo cadeado em vez de falhar, e no Windows isso passa do tempo
+      // da corrida, que fica presa em "ranking".
+      raw = await this.#runBuffer(wt.path, ['diff', '--raw', '-z', ...common], index);
+      numstat = await this.#runBuffer(wt.path, ['diff', '--numstat', '-z', ...common], index);
+      patch = await this.#runBuffer(
+        wt.path,
+        ['diff', '--no-color', '-U3', '--src-prefix=a/', '--dst-prefix=b/', ...common],
+        index,
+      );
     } finally {
       await rm(file, { force: true }).catch(() => undefined);
     }
@@ -323,21 +433,26 @@ export class WorktreeManager {
     const git = this.#git;
     if (!git)
       return Promise.reject(new Error('Não encontrei o git: instala o Git para ter worktrees'));
-    return new Promise((resolve, reject) => {
-      execFile(
-        git,
-        ['-c', 'core.quotepath=false', ...args],
-        {
-          cwd,
-          env: { ...gitEnv(), ...extraEnv },
-          windowsHide: true,
-          timeout: TIMEOUT_MS,
-          maxBuffer: 64 * 1024 * 1024,
-          encoding: 'buffer',
-        },
-        (error, stdout) => (error ? reject(error) : resolve(stdout)),
-      );
-    });
+    return again(
+      () =>
+        new Promise((resolve, reject) => {
+          const launched = launchArgs(git, [...GIT_STABLE, ...args]);
+          execFile(
+            launched.file,
+            launched.args,
+            {
+              cwd,
+              env: { ...gitEnv(), ...extraEnv },
+              windowsHide: true,
+              windowsVerbatimArguments: launched.verbatim,
+              timeout: TIMEOUT_MS,
+              maxBuffer: 64 * 1024 * 1024,
+              encoding: 'buffer',
+            },
+            (error, stdout) => (error ? reject(error) : resolve(stdout)),
+          );
+        }),
+    );
   }
 
   /** O que a sessão mudou desde a base, contando os ficheiros por gravar e os novos. */

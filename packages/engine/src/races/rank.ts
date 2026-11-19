@@ -19,7 +19,7 @@ export interface LaneOutcome {
 export function changedLines(hunk: Hunk): string[] {
   return hunk.lines
     .filter((l) => l.kind !== 'context' && l.text.trim() !== '')
-    .map((l) => `${l.kind === 'add' ? '+' : '-'}${l.text.trim()}`);
+    .map((l) => `${l.kind === 'add' ? '+' : '-'}${l.text.replace(/\r/g, '').trim()}`);
 }
 
 /** O patch sem o que não muda o comportamento (espaços nas pontas, linhas vazias, ordem dos ficheiros). */

@@ -300,7 +300,6 @@ button.border-line-strong,
   }
   .composer > div {
     gap: 6px;
-    flex-wrap: wrap;
   }
 }
 @media (max-height: 640px) {
@@ -569,6 +568,7 @@ button.border-line-strong,
 }
 .menu-content[data-state='closed'] {
   animation: sl-pop-out var(--sl-dur-exit) var(--sl-ease-out) forwards;
+  pointer-events: none;
 }
 @keyframes sl-fade {
   from {

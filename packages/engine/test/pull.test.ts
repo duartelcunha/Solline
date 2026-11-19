@@ -1,13 +1,24 @@
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentCapabilities, Project, SessionStartPayload } from '@solline/protocol';
-import type { AdapterSink, AgentAdapter, AgentStartOptions, SendOptions } from '../src/adapters/types.ts';
+import type {
+  AdapterSink,
+  AgentAdapter,
+  AgentStartOptions,
+  SendOptions,
+} from '../src/adapters/types.ts';
 import { Engine } from '../src/engine.ts';
-import { resolveGh, runGh } from '../src/pull/gh.ts';
-import { IssueService, issuePrompt, listGithubIssues, openListedIssue } from '../src/pull/issues.ts';
+import { resolveGit } from '../src/checkpoints/git.ts';
+import { ghNames, resolveGh, runGh } from '../src/pull/gh.ts';
+import {
+  IssueService,
+  issuePrompt,
+  listGithubIssues,
+  openListedIssue,
+} from '../src/pull/issues.ts';
 import { PullService, mapChecks } from '../src/pull/pull.ts';
 import { repoFromRemote } from '../src/pull/repo.ts';
 import { SessionManager } from '../src/session-manager.ts';
@@ -23,9 +34,7 @@ const caps: AgentCapabilities = {
 };
 
 class Talker implements AgentAdapter {
-  constructor(
-    private readonly sink: AdapterSink,
-  ) {}
+  constructor(private readonly sink: AdapterSink) {}
   async start() {
     this.sink.state('idle');
     return { settings: { model: null, effort: null, mode: null }, capabilities: caps };
@@ -57,6 +66,7 @@ class Talker implements AgentAdapter {
 const roots: string[] = [];
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  restoreGitEnv();
   await Promise.all(closers.splice(0).map((close) => close().catch(() => undefined)));
   await Promise.all(
     roots.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 })),
@@ -64,43 +74,95 @@ afterEach(async () => {
 });
 
 function realGit(): string {
-  return execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  const git = resolveGit();
+  if (!git) throw new Error('Não encontrei o git.');
+  return git;
+}
+
+/**
+ * Um programa que o `execFile` consegue arrancar nesta plataforma. No Windows é um .cmd,
+ * e por isso só serve para o `gh` (uma chamada). O git de teste não passa por aqui: cada
+ * chamada acrescentava um cmd.exe e o Defender voltava a analisar o .cmd, e os testes de
+ * commit — onze a dezassete git — passavam dos 5 s. A app usa o git.exe de `resolveGit()`.
+ */
+async function installNodeCommand(root: string, base: string, source: string): Promise<string> {
+  const script = path.join(root, `${base}.mjs`);
+  await writeFile(script, source);
+  if (process.platform === 'win32') {
+    const cmd = path.join(root, `${base}.cmd`);
+    await writeFile(cmd, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`);
+    return cmd;
+  }
+  const bin = path.join(root, base);
+  await writeFile(
+    bin,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`,
+  );
+  await chmod(bin, 0o755);
+  return bin;
+}
+
+/** O Git para Windows corre os hooks com sh, que não aceita `C:\...`. */
+function shellPath(file: string): string {
+  const normalized = file.replaceAll('\\', '/');
+  const drive = /^([A-Za-z]):\//.exec(normalized);
+  if (!drive?.[1]) return normalized;
+  return `/${drive[1].toLowerCase()}/${normalized.slice(3)}`;
+}
+
+const savedGitEnv = {
+  GIT_TRACE: process.env.GIT_TRACE,
+  GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+  GIT_CONFIG_SYSTEM: process.env.GIT_CONFIG_SYSTEM,
+  GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM,
+};
+
+function restoreGitEnv(): void {
+  if (savedGitEnv.GIT_TRACE === undefined) delete process.env.GIT_TRACE;
+  else process.env.GIT_TRACE = savedGitEnv.GIT_TRACE;
+  if (savedGitEnv.GIT_CONFIG_GLOBAL === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+  else process.env.GIT_CONFIG_GLOBAL = savedGitEnv.GIT_CONFIG_GLOBAL;
+  if (savedGitEnv.GIT_CONFIG_SYSTEM === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+  else process.env.GIT_CONFIG_SYSTEM = savedGitEnv.GIT_CONFIG_SYSTEM;
+  if (savedGitEnv.GIT_CONFIG_NOSYSTEM === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+  else process.env.GIT_CONFIG_NOSYSTEM = savedGitEnv.GIT_CONFIG_NOSYSTEM;
 }
 
 async function gitHarness(): Promise<{
   root: string;
   project: string;
-  git: string;
   log: string;
   run: (cwd: string, ...args: string[]) => string;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), 'solline-pull-'));
   roots.push(root);
   const project = path.join(root, 'project');
-  const log = path.join(root, 'git.log');
-  const git = path.join(root, 'git');
+  const log = path.join(root, 'git.trace');
+  const blank = path.join(root, 'gitconfig');
   await writeFile(log, '');
-  await writeFile(
-    git,
-    `#!/bin/sh
-printf '%s\\n' "$*" >> ${JSON.stringify(log)}
-export GIT_CONFIG_GLOBAL=/dev/null
-export GIT_CONFIG_SYSTEM=/dev/null
-export GIT_CONFIG_NOSYSTEM=1
-exec ${JSON.stringify(realGit())} "$@"
-`,
-  );
-  await chmod(git, 0o755);
+  await writeFile(blank, '');
+  // O mesmo git.exe da app. O rasto diz que comandos correram, sem um processo
+  // à frente de cada chamada. A configuração global fica vazia: o teste é que
+  // decide se há email.
+  process.env.GIT_TRACE = log;
+  process.env.GIT_CONFIG_GLOBAL = blank;
+  process.env.GIT_CONFIG_SYSTEM = blank;
+  process.env.GIT_CONFIG_NOSYSTEM = '1';
+  const git = realGit();
   await mkdir(project);
-  const run = (cwd: string, ...args: string[]) =>
-    execFileSync(git, args, { cwd, encoding: 'utf8' }).trim();
+  const run = (cwd: string, ...args: string[]) => {
+    const result = spawnSync(git, args, { cwd, encoding: 'utf8', windowsHide: true });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(result.stderr || `git ${args[0]} falhou`);
+    return result.stdout.trim();
+  };
   run(project, 'init', '-q', '-b', 'main');
   run(project, 'config', 'user.name', 'Solline QA');
   run(project, 'config', 'user.email', 'qa@solline.local');
   await writeFile(path.join(project, 'base.txt'), 'base\n');
   run(project, 'add', '.');
   run(project, 'commit', '-qm', 'base');
-  return { root, project, git, log, run };
+  return { root, project, log, run };
 }
 
 const issue = {
@@ -118,9 +180,22 @@ describe('gh', () => {
     roots.push(root);
     const dir = path.join(root, 'bin');
     await mkdir(dir);
-    await writeFile(path.join(dir, 'gh'), '#!/bin/sh\nexit 0\n');
-    expect(resolveGh({ PATH: `rel:${dir}` })).toBe(path.normalize(path.join(dir, 'gh')));
-    expect(resolveGh({ PATH: 'rel:./bin' })).toBeNull();
+    const name = ghNames(
+      process.platform,
+      process.platform === 'win32' ? '.CMD;.EXE' : undefined,
+    )[0];
+    if (!name) throw new Error('sem nome para o gh');
+    await writeFile(
+      path.join(dir, name),
+      process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\nexit 0\n',
+    );
+    const env =
+      process.platform === 'win32'
+        ? { PATH: `rel${path.delimiter}${dir}`, PATHEXT: '.CMD;.EXE' }
+        : { PATH: `rel${path.delimiter}${dir}` };
+    expect(resolveGh(env)).toBe(path.normalize(path.join(dir, name)));
+    expect(resolveGh({ PATH: `rel${path.delimiter}.${path.sep}bin` })).toBeNull();
+    expect(ghNames('win32', '.EXE;.CMD')).toEqual(['gh.EXE', 'gh.CMD']);
   });
 
   it('sem gh a lista diz missing e não corre nada', async () => {
@@ -152,18 +227,20 @@ describe('gh', () => {
   it('lista com o gh absoluto e corta o corpo; sem sessão, diz logged-out', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'solline-gh-'));
     roots.push(root);
-    const gh = path.join(root, 'gh');
     const log = path.join(root, 'args.log');
     const body = `  texto  ${'x'.repeat(9000)}`;
     const payload = JSON.stringify([{ number: 42, title: '  O parser  ', body }]);
-    await writeFile(
-      gh,
-      `#!/bin/sh
-printf '%s\\n' "$*" >> ${JSON.stringify(log)}
-printf '%s' ${JSON.stringify(payload)}
+    const script = path.join(root, 'gh.mjs');
+    process.env.SOLLINE_GH_LOG = log;
+    process.env.SOLLINE_GH_PAYLOAD = payload;
+    const gh = await installNodeCommand(
+      root,
+      'gh',
+      `import { appendFileSync } from 'node:fs';
+appendFileSync(process.env.SOLLINE_GH_LOG, process.argv.slice(2).join(' ') + '\\n');
+process.stdout.write(process.env.SOLLINE_GH_PAYLOAD ?? '');
 `,
     );
-    await chmod(gh, 0o755);
     const cwd = path.join(root, 'repo');
     await mkdir(cwd);
     const listed = await listGithubIssues({ cwd, projectId: 'atelier', gh, run: runGh });
@@ -172,13 +249,14 @@ printf '%s' ${JSON.stringify(payload)}
     expect(listed.issues[0]).toMatchObject({ id: 'gh-42', key: '42', title: 'O parser' });
     expect(listed.issues[0]?.body.length).toBe(8_000);
     expect(listed.issues[0]?.body.endsWith('…')).toBe(true);
-    expect(await readFile(log, 'utf8')).toContain('issue list --json number,title,body --limit 100');
+    expect(await readFile(log, 'utf8')).toContain(
+      'issue list --json number,title,body --limit 100',
+    );
 
     await writeFile(
-      gh,
-      `#!/bin/sh
-echo "please run: gh auth login" >&2
-exit 4
+      script,
+      `process.stderr.write('please run: gh auth login\\n');
+process.exit(4);
 `,
     );
     const out = await listGithubIssues({ cwd, projectId: 'atelier', gh, run: runGh });
@@ -188,27 +266,27 @@ exit 4
 
 describe('commit da worktree', () => {
   it('sem email falha e não grava', async () => {
-    const { project, git, log, run, root } = await gitHarness();
+    const { project, log, run, root } = await gitHarness();
     run(project, 'config', '--unset', 'user.email');
-    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt') });
     const made = await worktrees.create(project, 'atelier');
     if (!made) throw new Error('sem worktree');
     await writeFile(path.join(made.path, 'novo.txt'), 'novo\n');
     await writeFile(log, '');
     await expect(worktrees.commitMessage(made, 'fix: o parser')).rejects.toThrow(/user\.email/);
     const trace = await readFile(log, 'utf8');
-    expect(trace).not.toMatch(/\bcommit\b/);
-    expect(trace).not.toMatch(/\bpush\b/);
-    expect(trace).not.toMatch(/\bmerge\b/);
+    expect(trace).not.toMatch(/git commit\b/);
+    expect(trace).not.toMatch(/git push\b/);
+    expect(trace).not.toMatch(/git merge\b/);
   });
 
   it('grava com a mensagem, corre o hook e não faz merge nem push', async () => {
-    const { project, git, log, root } = await gitHarness();
+    const { project, log, root } = await gitHarness();
     const hook = path.join(project, '.git', 'hooks', 'pre-commit');
     const mark = path.join(root, 'hook-ran');
-    await writeFile(hook, `#!/bin/sh\necho ran > ${JSON.stringify(mark)}\n`);
+    await writeFile(hook, `#!/bin/sh\necho ran > ${JSON.stringify(shellPath(mark))}\n`);
     await chmod(hook, 0o755);
-    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt') });
     const made = await worktrees.create(project, 'atelier');
     if (!made) throw new Error('sem worktree');
     await writeFile(path.join(made.path, 'novo.txt'), 'novo\n');
@@ -217,9 +295,9 @@ describe('commit da worktree', () => {
     expect(saved.sha).toMatch(/^[0-9a-f]{7,40}$/);
     expect(await readFile(mark, 'utf8')).toBe('ran\n');
     const trace = await readFile(log, 'utf8');
-    expect(trace).toContain('commit -m fix: o parser');
-    expect(trace).not.toMatch(/\bpush\b/);
-    expect(trace).not.toMatch(/\bmerge\b/);
+    expect(trace).toMatch(/git commit -m ['"]fix: o parser['"]/);
+    expect(trace).not.toMatch(/git push\b/);
+    expect(trace).not.toMatch(/git merge\b/);
     const clean = await worktrees.commitMessage(made, 'outra');
     expect(clean.sha).toBeNull();
   });
@@ -234,8 +312,8 @@ describe('abrir uma issue', () => {
   });
 
   it('abre a sessão na worktree com o título da issue', async () => {
-    const { project, git, root } = await gitHarness();
-    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const { project, root } = await gitHarness();
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt') });
     const manager = new SessionManager({
       emit: () => {},
       registry: testRegistry({
@@ -255,7 +333,10 @@ describe('abrir uma issue', () => {
     const opened = await openListedIssue({
       project: projectInfo,
       issueId: 'gh-42',
-      list: { issues: [{ ...issue, body: 'Abrir a sessão já com este texto.' }], unavailable: null },
+      list: {
+        issues: [{ ...issue, body: 'Abrir a sessão já com este texto.' }],
+        unavailable: null,
+      },
       start: async (payload) => {
         start = payload;
         return (await manager.create(payload)).session.id;
@@ -320,18 +401,18 @@ describe('PR e CI', () => {
   });
 
   it('envia só o branch da worktree, sem merge', async () => {
-    const { project, git, log, run, root } = await gitHarness();
+    const { project, log, run, root } = await gitHarness();
     const bare = path.join(root, 'origin.git');
     run(project, 'init', '--bare', '-q', bare);
     run(project, 'remote', 'add', 'origin', bare);
-    const worktrees = new WorktreeManager({ root: path.join(root, 'wt'), git });
+    const worktrees = new WorktreeManager({ root: path.join(root, 'wt') });
     const made = await worktrees.create(project, 'atelier');
     if (!made) throw new Error('sem worktree');
     await writeFile(log, '');
     await worktrees.pushBranch(made);
     const trace = await readFile(log, 'utf8');
     expect(trace).toContain(`push --set-upstream origin ${made.branch}`);
-    expect(trace).not.toMatch(/\bmerge\b/);
+    expect(trace).not.toMatch(/git merge\b/);
     expect(trace).not.toContain('--force');
   });
 
@@ -411,9 +492,9 @@ describe('PR e CI', () => {
       }),
     ).rejects.toThrow('Não encontrei o gh.');
     expect(ran).toBe(false);
-    expect(mapChecks([{ name: 'lint', bucket: 'pass', state: 'SUCCESS', description: '' }])[0]?.state).toBe(
-      'passed',
-    );
+    expect(
+      mapChecks([{ name: 'lint', bucket: 'pass', state: 'SUCCESS', description: '' }])[0]?.state,
+    ).toBe('passed');
   });
 });
 

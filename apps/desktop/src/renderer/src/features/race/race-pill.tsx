@@ -8,15 +8,16 @@ import { laneKey, laneOptions, type LaneOption } from './lane-options.ts';
 
 /** Pastilha do compositor (o mesmo desenho das outras). */
 const pillClass =
-  'pill inline-flex h-7 shrink-0 items-center gap-1.5 rounded-control border border-line px-2.5 text-[12px] whitespace-nowrap text-muted outline-none sl-press hover:border-line-strong hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] disabled:opacity-50 data-[state=open]:border-line-strong data-[state=open]:bg-surface-hover data-[state=open]:text-fg';
+  'pill inline-flex h-7 shrink-0 items-center gap-1.5 rounded-control px-2.5 text-[12px] whitespace-nowrap text-muted outline-none sl-press hover:bg-surface-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-[var(--sl-focus)] disabled:opacity-50 data-[state=open]:bg-surface-hover data-[state=open]:text-fg';
 
 export const MAX_LANES = 4;
 
 type Option = LaneOption;
 
 /**
- * "N×": o mesmo pedido em várias pistas. A primeira é sempre a sessão como está (agente e
- * modelo); marcam-se até mais três, de qualquer agente pronto. 1× é uma mensagem normal.
+ * O mesmo pedido em várias pistas. A primeira é sempre a sessão como está (agente e
+ * modelo); marcam-se até mais três, de qualquer agente pronto. Uma pista é uma mensagem
+ * normal ("Corrida"); duas ou mais dizem "N pistas".
  */
 export function RacePill({
   agent,
@@ -61,7 +62,7 @@ export function RacePill({
           disabled={disabled}
           data-testid="pill-race"
           aria-label={count === 1 ? 'Corrida, 1 pista. Mudar' : `${count} pistas. Mudar`}
-          className={`${pillClass} ${count > 1 ? 'border-line-strong text-fg' : ''}`}
+          className={`${pillClass} ${count > 1 ? 'text-fg' : ''}`}
         >
           <Layers size={13} />
           <span>{count === 1 ? 'Corrida' : `${count} pistas`}</span>

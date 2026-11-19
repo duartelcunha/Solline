@@ -49,7 +49,7 @@ export function SettingsPills({
   const [helpDismissed, setHelpDismissed] = useState(false);
   return (
     <div
-      className="inline-flex min-w-0 flex-wrap items-stretch rounded-control border border-line"
+      className="flex w-full flex-wrap items-stretch rounded-control @[22rem]:w-auto @[22rem]:flex-nowrap"
       role="group"
       aria-label="Modelo, esforço e modo"
     >

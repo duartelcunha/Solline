@@ -219,7 +219,11 @@ export function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> 
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const tick = () => {
-      if (check()) return resolve();
+      try {
+        if (check()) return resolve();
+      } catch (error) {
+        return reject(error instanceof Error ? error : new Error(String(error)));
+      }
       if (Date.now() - started > timeoutMs) return reject(new Error('waitFor: tempo esgotado'));
       setTimeout(tick, 5);
     };
