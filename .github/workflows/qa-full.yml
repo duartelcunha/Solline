@@ -20,10 +20,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Install
@@ -38,7 +38,7 @@ jobs:
           SOLLINE_VAULT: skip
       - name: Upload QA evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qa-evidence-ci-${{ github.run_id }}-${{ github.run_attempt }}
           path: apps/desktop/qa-evidence/ci-${{ github.run_id }}-${{ github.run_attempt }}
