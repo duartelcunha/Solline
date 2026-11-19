@@ -721,7 +721,12 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
         { workspace: { kind: string; branch?: string; stats?: { files: number } } } | undefined;
 
     await turn(second, 'escreve f.txt=da-worktree');
-    await waitFor(() => infoOf(second)?.workspace.stats?.files === 1, 10_000);
+    await waitFor(
+      () =>
+        infoOf(second)?.workspace.stats?.files === 1 &&
+        /^solline\/escreve-f-txt-da-/.test(infoOf(second)?.workspace.branch ?? ''),
+      10_000,
+    );
     expect(infoOf(second)!.workspace.branch).toMatch(/^solline\/escreve-f-txt-da-/);
     // O projeto continua como estava até se trazer.
     expect(await read('f.txt')).toBe('v0\n');
@@ -816,6 +821,16 @@ describe('uma worktree por sessão a mais', { timeout: 60_000 }, () => {
     await startSession();
     const second = await startSession();
     await turn(second, 'escreve guardado.txt=sim');
+    await waitFor(
+      () =>
+        events.some(
+          (e) =>
+            e.type === 'session.workspace' &&
+            e.sessionId === second &&
+            Boolean((e as { workspace: { branch?: string } }).workspace.branch),
+        ),
+      10_000,
+    );
     const branch = (
       [...events]
         .reverse()

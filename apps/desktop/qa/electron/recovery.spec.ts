@@ -711,9 +711,10 @@ base(
           }
         } finally {
           if (owner) {
+            const owned = owner;
             await cleanupOwnedFixture(
               () =>
-                stopOwnedProcesses([owner], async (report) => {
+                stopOwnedProcesses([owned], async (report) => {
                   await info.attach('owned-process-cleanup', {
                     body: JSON.stringify(report),
                     contentType: 'application/json',
