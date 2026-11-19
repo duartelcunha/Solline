@@ -8,6 +8,7 @@ import { CORPUS, FROZEN_SEAL, corpusSeal } from '../src/pilot/corpus.ts';
 import {
   ATTENTION_PROXY,
   baselineRun,
+  evaluatePilotGate,
   focusedMinutesPerAccepted,
   measured,
   notMeasured,
@@ -27,6 +28,10 @@ function slot(partial: Partial<Slot> & Pick<Slot, 'accepted' | 'focusedMinutes'>
     taskId: 't01',
     arm: 'solline-reference',
     order: 0,
+    wallMinutes: absent,
+    manualRecoveries: absent,
+    peakRssMb: absent,
+    coldStartMs: absent,
     freshInputTokens: absent,
     cachedInputTokens: absent,
     outputTokens: absent,
@@ -60,6 +65,7 @@ describe('linha de base do M8', () => {
     expect(byId.get('model-routing')).toBe('absent');
     expect(byId.get('consult-no-bash')).toBe('present');
     expect(byId.get('no-md-autoload')).toBe('present');
+    expect(byId.get('acp-omp')).toBe('present');
   });
 
   it('o smoke de código confirma as proteções que a matriz diz presentes', () => {
@@ -187,5 +193,105 @@ describe('linha de base do M8', () => {
     expect(base.lever).toBeNull();
     expect(next).toEqual({ id: 'baseline+contexto', lever: 'contexto', report });
     expect(() => withLever(next, 'outra', report)).toThrow(/uma alavanca/);
+  });
+
+  it('agrega métricas do M8.5 sem converter ausências em zero e avalia o portão M9 + gatilho Tauri', () => {
+    const empty = runBaseline({ clients: { native: false, solline: false }, recordedAt: '2026-11-19' });
+    expect(evaluatePilotGate(empty)).toEqual({
+      status: 'incomplete',
+      reasons: ['Faltam leituras de aceitação em pelo menos um dos braços.'],
+      tauriShellReviewRecommended: false,
+    });
+
+    const partial = runBaseline({
+      tasks: CORPUS.slice(0, 3),
+      clients: { native: true, solline: true },
+      recordedAt: '2026-11-19',
+      observe: () => ({ accepted: true, wallMinutes: 10, manualRecoveries: 0 }),
+    });
+    expect(evaluatePilotGate(partial).status).toBe('incomplete');
+
+    const regression = runBaseline({
+      clients: { native: true, solline: true },
+      recordedAt: '2026-11-19',
+      observe: ({ task, arm }) => ({
+        accepted: arm === 'native-reference' || task.id !== 't01',
+        wallMinutes: arm === 'native-reference' ? 10 : 5,
+        manualRecoveries: 0,
+        peakRssMb: 900,
+        coldStartMs: 1200,
+      }),
+    });
+    expect(evaluatePilotGate(regression)).toMatchObject({
+      status: 'fail',
+      tauriShellReviewRecommended: false,
+    });
+
+    const stagnant = runBaseline({
+      clients: { native: true, solline: true },
+      recordedAt: '2026-11-19',
+      observe: ({ arm }) => ({
+        accepted: true,
+        wallMinutes: arm === 'native-reference' ? 10 : 9.5,
+        manualRecoveries: 1,
+        peakRssMb: 800,
+        coldStartMs: 1000,
+      }),
+    });
+    expect(evaluatePilotGate(stagnant).status).toBe('fail');
+
+    const passWall = runBaseline({
+      clients: { native: true, solline: true },
+      recordedAt: '2026-11-19',
+      observe: ({ arm }) => ({
+        accepted: true,
+        wallMinutes: arm === 'native-reference' ? 10 : 8.5,
+        manualRecoveries: 1,
+        peakRssMb: 1200,
+        coldStartMs: 2000,
+      }),
+    });
+    expect(passWall.sollinePeakRssMbMax).toEqual({ status: 'measured', value: 1200 });
+    expect(passWall.sollineColdStartMsMedian).toEqual({ status: 'measured', value: 2000 });
+    expect(evaluatePilotGate(passWall)).toMatchObject({
+      status: 'pass',
+      tauriShellReviewRecommended: false,
+    });
+
+    const passRecoveriesWithShellTrigger = runBaseline({
+      clients: { native: true, solline: true },
+      recordedAt: '2026-11-19',
+      observe: ({ arm }) => ({
+        accepted: true,
+        wallMinutes: 10,
+        manualRecoveries: arm === 'native-reference' ? 2 : 0,
+        peakRssMb: arm === 'solline-reference' ? 1650 : null,
+        coldStartMs: arm === 'solline-reference' ? 2500 : null,
+      }),
+    });
+    expect(passRecoveriesWithShellTrigger.sollineManualRecoveriesTotal).toEqual({
+      status: 'measured',
+      value: 0,
+    });
+    expect(evaluatePilotGate(passRecoveriesWithShellTrigger)).toMatchObject({
+      status: 'pass',
+      tauriShellReviewRecommended: true,
+    });
+
+    const slowColdStart = runBaseline({
+      clients: { native: true, solline: true },
+      recordedAt: '2026-11-19',
+      observe: ({ arm }) => ({
+        accepted: true,
+        wallMinutes: arm === 'native-reference' ? 10 : 7,
+        manualRecoveries: 0,
+        peakRssMb: 900,
+        coldStartMs: arm === 'solline-reference' ? 5400 : null,
+      }),
+    });
+    expect(evaluatePilotGate(slowColdStart)).toMatchObject({
+      status: 'pass',
+      tauriShellReviewRecommended: true,
+    });
   });
 });

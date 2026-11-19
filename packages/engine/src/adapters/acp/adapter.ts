@@ -98,6 +98,11 @@ function isAuthRequired(error: unknown): boolean {
   );
 }
 
+function supportsAcpSteering(init: InitializeResponse | undefined): boolean {
+  const meta = (init as { _meta?: { steering?: { supported?: unknown } } } | undefined)?._meta;
+  return meta?.steering?.supported === true;
+}
+
 /**
  * Um agente qualquer que fale ACP v1 por stdio. Não anuncia fs nem terminal: o agente faz o
  * trabalho dele e a Solline mostra e aprova.
@@ -107,6 +112,7 @@ export class AcpAdapter implements AgentAdapter {
   readonly #sink: AdapterSink;
   readonly #normalizer = new AcpNormalizer();
   readonly #stderr = new StderrTail();
+  readonly #steers = new Map<string, { turnId: string; text: string }>();
   #transport: AcpTransport | undefined;
   #peer: JsonRpcPeer | undefined;
   #sessionId: string | null;
@@ -235,6 +241,45 @@ export class AcpAdapter implements AgentAdapter {
     this.#normalizer.markInterrupted();
     this.#shell.interrupted();
     this.#peer.notify('session/cancel', { sessionId: this.#sessionId });
+  }
+
+  /** Guia o turno ativo com `_session/steering`; fora de curso ou sem suporte volta `too-late` para a fila. */
+  async steer(text: string, id: string): Promise<'joined' | 'too-late'> {
+    const peer = this.#peer;
+    if (
+      !peer ||
+      peer.isClosed ||
+      this.#shell.crashed ||
+      !this.#sessionId ||
+      !this.#shell.running ||
+      !supportsAcpSteering(this.#init)
+    ) {
+      return 'too-late';
+    }
+    let response: { outcome?: string } | undefined;
+    try {
+      response = await withTimeout(
+        peer.request<{ outcome?: string }>('_session/steering', {
+          sessionId: this.#sessionId,
+          prompt: [{ type: 'text', text }],
+          _meta: { steering: { idleBehavior: 'promptRequired' } },
+        }),
+        CONTROL_TIMEOUT_MS,
+        'Guiar o turno',
+      );
+    } catch {
+      return 'too-late';
+    }
+    if (response?.outcome !== 'injected' && response?.outcome !== 'queued') {
+      return 'too-late';
+    }
+    const { turnId, deltas } = this.#normalizer.ensureAssistantTurn();
+    this.#emit([
+      ...deltas,
+      { type: 'block.upsert', turnId, block: { kind: 'steer', id, text, status: 'waiting' } },
+    ]);
+    this.#steers.set(id, { turnId, text });
+    return 'joined';
   }
 
   async setMode(mode: string): Promise<void> {
@@ -433,12 +478,35 @@ export class AcpAdapter implements AgentAdapter {
     this.#capabilities = capabilitiesFromAcp(this.#config, {
       resume: Boolean(caps?.sessionCapabilities?.resume || caps?.loadSession),
       cost,
+      steer: supportsAcpSteering(this.#init),
     });
+  }
+
+  #absorbSteers(): void {
+    if (this.#steers.size === 0) return;
+    for (const [id, steer] of this.#steers) {
+      this.#emit([
+        {
+          type: 'block.upsert',
+          turnId: steer.turnId,
+          block: { kind: 'steer', id, text: steer.text, status: 'absorbed' },
+        },
+      ]);
+    }
+    this.#steers.clear();
   }
 
   #onUpdate(notification: SessionNotification): void {
     if (notification.sessionId !== this.#sessionId) return;
     const update = notification.update;
+    if (
+      update.sessionUpdate === 'agent_message_chunk' ||
+      update.sessionUpdate === 'agent_thought_chunk' ||
+      update.sessionUpdate === 'tool_call' ||
+      update.sessionUpdate === 'user_message_chunk'
+    ) {
+      this.#absorbSteers();
+    }
     if (update.sessionUpdate === 'config_option_update') {
       this.#updateConfig(update.configOptions);
       Object.assign(this.#settings, acpSettings(this.#config));
@@ -504,6 +572,7 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   #endTurn(stopReason: PromptResponse['stopReason'] | 'error', message?: string): void {
+    this.#absorbSteers();
     this.#emit(this.#normalizer.end(stopReason, message));
     this.#shell.turnEnded({ cancelAsks: true });
   }
@@ -561,6 +630,7 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   #crash(error: unknown): void {
+    this.#steers.clear();
     if (!this.#shell.crash(crashMessage(this.#options.label))) return;
     console.error(`[acp] ${this.#options.label} caiu: ${this.#withStderr(error)}`);
   }

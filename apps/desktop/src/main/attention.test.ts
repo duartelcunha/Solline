@@ -152,6 +152,7 @@ describe('avisos fora da app', () => {
 
   it('o nome do agente', () => {
     expect(agentLabel('codex')).toBe('Codex');
+    expect(agentLabel('omp')).toBe('OMP');
     expect(agentLabel('opencode')).toBe('Opencode');
   });
 });

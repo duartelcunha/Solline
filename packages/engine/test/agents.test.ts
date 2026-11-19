@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -8,16 +8,19 @@ import {
   Engine,
   LoginManager,
   REVIEWED_CODEX_VERSION,
+  catalogArgs,
   catalogDefinition,
   claudeDefinition,
   codexDefinition,
   codexNeedsLogin,
   fileAgentSettings,
+  findBinaryAgent,
   memoryAgentSettings,
   registryOf,
   startCodexLogin,
   withFactories,
   type AgentStartOptions,
+  type BinaryVersionCacheEntry,
   type LoginFlow,
 } from '../src/index.ts';
 import { fakeCodexServer } from './codex-fakes.ts';
@@ -402,5 +405,132 @@ describe('variáveis escolhidas para os agentes ACP', () => {
     const backups = (await readdir(dir)).filter((f) => f.endsWith('.bak'));
     expect(backups).toHaveLength(1);
     expect(await readFile(path.join(dir, backups[0]!), 'utf8')).toContain('a b');
+  });
+});
+
+describe('catálogo de binários nativos (omp acp)', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  it('procura apenas em pastas absolutas, recusa .cmd/.bat, usa fallbackPaths e faz cache por mtimeMs', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'solline-bin-'));
+    dirs.push(dir);
+    const pathBin = path.join(dir, 'bin');
+    const localAppData = path.join(dir, 'localappdata');
+    await mkdir(pathBin, { recursive: true });
+    await mkdir(path.join(localAppData, 'omp'), { recursive: true });
+
+    // Um .cmd no PATH tem de ser recusado no Windows; cai para fallbackPaths (%LOCALAPPDATA%\omp\omp.exe).
+    await writeFile(path.join(pathBin, 'omp.cmd'), '@echo off\n');
+    const fallbackExe = path.join(localAppData, 'omp', 'omp.exe');
+    await writeFile(fallbackExe, 'bin');
+
+    const omp = CATALOG.find((e) => e.id === 'omp')!;
+    const cache = new Map<string, BinaryVersionCacheEntry>();
+    let calls = 0;
+    const exec = () => {
+      calls += 1;
+      return `omp/${omp.reviewedVersion}\n`;
+    };
+
+    // Ignora entrada relativa no PATH.
+    expect(
+      findBinaryAgent(omp, {
+        pathEnv: 'relativo',
+        env: {},
+        platform: 'win32',
+        exec,
+        cache,
+      }),
+    ).toBeNull();
+    expect(calls).toBe(0);
+
+    // .cmd no PATH é ignorado; encontra fallbackExe e usa cache na segunda leitura.
+    const first = findBinaryAgent(omp, {
+      pathEnv: ['relativo', pathBin].join(path.delimiter),
+      env: { LOCALAPPDATA: localAppData },
+      platform: 'win32',
+      exec,
+      cache,
+    });
+    expect(first).toEqual({ binary: fallbackExe, version: omp.reviewedVersion });
+    expect(calls).toBe(1);
+
+    const second = findBinaryAgent(omp, {
+      pathEnv: pathBin,
+      env: { LOCALAPPDATA: localAppData },
+      platform: 'win32',
+      exec,
+      cache,
+    });
+    expect(second).toEqual(first);
+    expect(calls).toBe(1);
+
+    // Mudar mtimeMs invalida a cache; refresh: true também força nova leitura.
+    const future = new Date(Date.now() + 5_000);
+    await utimes(fallbackExe, future, future);
+    findBinaryAgent(omp, {
+      pathEnv: pathBin,
+      env: { LOCALAPPDATA: localAppData },
+      platform: 'win32',
+      exec,
+      cache,
+    });
+    expect(calls).toBe(2);
+
+    findBinaryAgent(omp, {
+      pathEnv: pathBin,
+      env: { LOCALAPPDATA: localAppData },
+      platform: 'win32',
+      refresh: true,
+      exec,
+      cache,
+    });
+    expect(calls).toBe(3);
+
+    // Binário no PATH absoluto prevalece sobre fallbackPaths e valida versão não revista.
+    const exeInPath = path.join(pathBin, 'omp.exe');
+    await writeFile(exeInPath, 'bin');
+    const mismatched = findBinaryAgent(omp, {
+      pathEnv: pathBin,
+      env: { LOCALAPPDATA: localAppData },
+      platform: 'win32',
+      exec: () => 'omp/99.0.0\n',
+      cache,
+    });
+    expect(mismatched).toEqual({ binary: exeInPath, version: '99.0.0' });
+    const def = catalogDefinition(omp, () => mismatched);
+    expect(await def.detect()).toMatchObject({ status: 'unreviewed' });
+  });
+
+  it('materializa o overlay always-ask de forma atómica e exige projeto de confiança', async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), 'solline-omp-data-'));
+    dirs.push(dataDir);
+    const omp = CATALOG.find((e) => e.id === 'omp')!;
+    expect(CATALOG[0]!.id).toBe('opencode');
+    expect(omp.untrustedProjects).toBe('refused');
+    expect(omp.envPolicy.base).toBe('no-secrets');
+
+    const args = catalogArgs(omp, dataDir);
+    const overlayPath = path.join(dataDir, 'agents', 'omp-solline-overlay.yml');
+    expect(args).toEqual(['--config', overlayPath, 'acp']);
+
+    const yaml = await readFile(overlayPath, 'utf8');
+    expect(yaml).toContain('approvalMode: always-ask');
+    expect(yaml).toContain('memory:\n  backend: off');
+    expect(yaml).toContain('memories:\n  enabled: false');
+    expect(yaml).toContain('autolearn:\n  enabled: false');
+    expect(yaml).toContain('checkpoint:\n  enabled: false');
+    expect(yaml).toContain('advisor:\n  enabled: false');
+    expect(yaml).toContain('startup:\n  checkUpdate: false');
+    expect(yaml).toContain('update:\n  auto: false');
+    expect(yaml).toContain('collab:\n  autoStart: off');
+    expect(yaml).toContain('contextFiles:\n  extra: []');
+
+    // Segunda chamada preserva o ficheiro sem deixar temporários.
+    expect(catalogArgs(omp, dataDir)).toEqual(['--config', overlayPath, 'acp']);
+    expect(await readdir(path.join(dataDir, 'agents'))).toEqual(['omp-solline-overlay.yml']);
   });
 });

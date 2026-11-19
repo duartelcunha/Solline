@@ -253,6 +253,6 @@ export function builtinRegistry(options: BuiltinOptions = {}): AgentRegistry {
   return registryOf([
     claudeDefinition(options),
     codexDefinition({ packaged: options.packaged }),
-    ...CATALOG.map((entry) => catalogDefinition(entry)),
+    ...CATALOG.map((entry) => catalogDefinition(entry, { dataDir: options.dataDir })),
   ]);
 }

@@ -108,7 +108,22 @@ export {
 } from './adapters/acp/adapter.ts';
 export { AcpNormalizer } from './adapters/acp/normalizer.ts';
 export { capabilitiesFromAcp, classifyModeRisk, acpConfig } from './adapters/acp/capabilities.ts';
-export { CATALOG, catalogDefinition, findNpmAgent, type CatalogEntry } from './agents/catalog.ts';
+export {
+  CATALOG,
+  catalogArgs,
+  catalogDefinition,
+  findBinaryAgent,
+  findNpmAgent,
+  type BinaryVersionCacheEntry,
+  type CatalogDefinitionOptions,
+  type CatalogEntry,
+  type CatalogFinder,
+  type ConfigOverlaySpec,
+  type FindBinaryOptions,
+  type InstalledAgent,
+  type NativeBinarySpec,
+  type NpmBinarySpec,
+} from './agents/catalog.ts';
 export {
   Brain,
   sourceShimPath,
