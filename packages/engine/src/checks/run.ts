@@ -12,6 +12,8 @@ export interface CommandOutcome {
   /** O fim da saída, sem cores; null quando passou. */
   tail: string | null;
   durationMs: number;
+  /** Verdadeiro quando o processo nem sequer conseguiu arrancar (ex.: ENOENT). */
+  infraError?: boolean | undefined;
 }
 
 export type RunCommand = (
@@ -99,7 +101,13 @@ export const runCommand: RunCommand = (
     child.on('error', (error) => {
       finish();
       if (signal.aborted) reject(new Error('cancelled'));
-      else resolve({ state: 'failed', tail: tailOf(String(error.message)), durationMs: 0 });
+      else
+        resolve({
+          state: 'failed',
+          tail: tailOf(String(error.message)),
+          durationMs: 0,
+          infraError: true,
+        });
     });
     child.on('close', (code) => {
       finish();

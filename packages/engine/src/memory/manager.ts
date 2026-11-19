@@ -77,6 +77,7 @@ export interface MemoryOptions {
   now?: (() => number) | undefined;
   files?: ProjectFiles | undefined;
   commitExists?: ((cwd: string, sha: string) => Promise<boolean>) | undefined;
+  onMemoryUsed?: ((sessionId: string, memoryIds: readonly string[]) => void) | undefined;
 }
 
 export interface MemoryProposal {
@@ -121,6 +122,7 @@ export class MemoryService {
   readonly #now: () => number;
   readonly #files: ProjectFiles;
   readonly #commitExists: (cwd: string, sha: string) => Promise<boolean>;
+  readonly #onMemoryUsed: ((sessionId: string, memoryIds: readonly string[]) => void) | undefined;
   readonly #perSession = new Map<string, number>();
   readonly #perTurn = new Map<string, number>();
   #lastSweep = Number.NEGATIVE_INFINITY;
@@ -131,6 +133,7 @@ export class MemoryService {
     this.#now = options.now ?? Date.now;
     this.#files = options.files ?? nodeFiles;
     this.#commitExists = options.commitExists ?? gitCommitExists;
+    this.#onMemoryUsed = options.onMemoryUsed;
   }
 
   // ---- o que os agentes fazem ----
@@ -289,7 +292,9 @@ export class MemoryService {
       SEARCH_LIMIT,
     );
     if (hits.length === 0) return 'Nenhuma memória aprovada responde a isto.';
-    this.#touch(hits.map((m) => m.id));
+    const ids = hits.map((m) => m.id);
+    this.#touch(ids);
+    this.#onMemoryUsed?.(caller.sessionId, ids);
     return hits.map(renderHit).join('\n');
   }
 
@@ -306,6 +311,7 @@ export class MemoryService {
     if (!memory)
       throw new BrainToolError('Não há nenhuma memória aprovada com esse id neste projeto.');
     this.#touch([memory.id]);
+    this.#onMemoryUsed?.(caller.sessionId, [memory.id]);
     return renderRead(memory);
   }
 

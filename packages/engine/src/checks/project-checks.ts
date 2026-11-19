@@ -1,6 +1,20 @@
 import type { CheckResult, CheckSpec, Checks } from '@solline/protocol';
+import { CircuitOpenError, CircuitRegistry } from '../kernel/circuit-breaker.ts';
 import { detectChecks } from './detect.ts';
-import { runCommand, type RunCommand } from './run.ts';
+import { runCommand, type CommandOutcome, type RunCommand } from './run.ts';
+
+class CheckInfraError extends Error {
+  readonly outcome: CommandOutcome;
+
+  constructor(outcome: CommandOutcome) {
+    super(outcome.tail ?? 'Falha ao arrancar a verificação');
+    this.outcome = outcome;
+  }
+}
+
+const DEFAULT_RESET_MS = 60_000;
+const OPEN_MESSAGE =
+  'A verificação falhou a arrancar várias vezes seguidas; em pausa temporária. Usa "Correr agora" para tentar de novo.';
 
 /**
  * As verificações de um projeto, partilhadas pelas suas sessões: uma ronda de cada vez (uma
@@ -12,6 +26,9 @@ export class ProjectChecks {
   readonly #detect: (cwd: string) => Promise<CheckSpec[]>;
   readonly #emit: (checks: Checks) => void;
   readonly #env: Record<string, string>;
+  readonly #circuits: CircuitRegistry;
+  readonly #now: () => number;
+  readonly #breakerResetMs: number;
   #saved: CheckSpec[] | null;
   #state: Checks;
   #running: AbortController | null = null;
@@ -26,6 +43,9 @@ export class ProjectChecks {
     run?: RunCommand;
     detect?: (cwd: string) => Promise<CheckSpec[]>;
     recovery?: Checks;
+    circuits?: CircuitRegistry | undefined;
+    now?: (() => number) | undefined;
+    breakerResetMs?: number | undefined;
   }) {
     this.#cwd = options.cwd;
     this.#saved = options.saved;
@@ -33,6 +53,9 @@ export class ProjectChecks {
     this.#env = options.env ?? {};
     this.#run = options.run ?? runCommand;
     this.#detect = options.detect ?? detectChecks;
+    this.#circuits = options.circuits ?? new CircuitRegistry();
+    this.#now = options.now ?? Date.now;
+    this.#breakerResetMs = options.breakerResetMs ?? DEFAULT_RESET_MS;
     this.#state = options.recovery ?? {
       trusted: options.trusted,
       specs: options.saved ?? [],
@@ -60,6 +83,7 @@ export class ProjectChecks {
 
   /** Guardaste uma lista nova (null: volta à do package.json). Os resultados antigos caem. */
   async configure(saved: CheckSpec[] | null): Promise<void> {
+    for (const spec of this.#state.specs) this.#circuits.reset(`check:${spec.id}`);
     this.#saved = saved;
     this.reset();
     await this.refresh();
@@ -88,7 +112,7 @@ export class ProjectChecks {
   }
 
   /** Corre as verificações ligadas, todas ao mesmo tempo. Sem confiança, não corre nada. */
-  async run(turnId: string | null): Promise<void> {
+  async run(turnId: string | null, options?: { manual?: boolean | undefined }): Promise<void> {
     if (!this.#state.trusted) return;
     this.#running?.abort();
     const abort = new AbortController();
@@ -96,6 +120,9 @@ export class ProjectChecks {
     await this.refresh();
     if (abort.signal.aborted) return;
     const enabled = this.#state.specs.filter((s) => s.enabled);
+    if (options?.manual) {
+      for (const spec of enabled) this.#circuits.reset(`check:${spec.id}`);
+    }
     this.#set({
       ...this.#state,
       turnId,
@@ -103,16 +130,49 @@ export class ProjectChecks {
     });
     await Promise.all(
       enabled.map(async (spec) => {
+        const breaker = this.#circuits.getOrCreate(`check:${spec.id}`, {
+          threshold: 2,
+          resetMs: this.#breakerResetMs,
+          now: this.#now,
+        });
         let result: CheckResult;
         try {
-          const outcome = await this.#run(spec.command, {
-            cwd: this.#cwd,
-            signal: abort.signal,
-            env: this.#env,
-          });
-          result = { id: spec.id, ...outcome };
-        } catch {
-          return; // Cancelada: a ronda nova (ou o reset) já tratou do estado.
+          const outcome = await breaker.execute(
+            async () => {
+              const ran = await this.#run(spec.command, {
+                cwd: this.#cwd,
+                signal: abort.signal,
+                env: this.#env,
+              });
+              if (ran.infraError) throw new CheckInfraError(ran);
+              return ran;
+            },
+            {
+              tripOn: (error) =>
+                !abort.signal.aborted &&
+                !(error instanceof Error && error.message === 'cancelled'),
+            },
+          );
+          result = {
+            id: spec.id,
+            state: outcome.state,
+            tail: outcome.tail,
+            durationMs: outcome.durationMs,
+          };
+        } catch (error) {
+          if (abort.signal.aborted) return;
+          if (error instanceof CheckInfraError) {
+            result = {
+              id: spec.id,
+              state: error.outcome.state,
+              tail: error.outcome.tail,
+              durationMs: error.outcome.durationMs,
+            };
+          } else if (error instanceof CircuitOpenError) {
+            result = { id: spec.id, state: 'failed', tail: OPEN_MESSAGE, durationMs: 0 };
+          } else {
+            return;
+          }
         }
         if (abort.signal.aborted) return;
         this.#set({

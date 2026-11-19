@@ -144,18 +144,19 @@ export const QuestionBlock = z.object({
   status: AskStatus,
 });
 
+export const TodoEntry = z.object({
+  id: z.string().optional(),
+  content: z.string(),
+  status: z.enum(['pending', 'in_progress', 'completed']),
+  priority: z.enum(['high', 'medium', 'low']).optional(),
+});
+export type TodoEntry = z.infer<typeof TodoEntry>;
+
 /** A lista de tarefas do agente; cada atualização substitui a lista toda. */
 export const TodoBlock = z.object({
   kind: z.literal('todo'),
   id: z.string(),
-  entries: z.array(
-    z.object({
-      id: z.string().optional(),
-      content: z.string(),
-      status: z.enum(['pending', 'in_progress', 'completed']),
-      priority: z.enum(['high', 'medium', 'low']).optional(),
-    }),
-  ),
+  entries: z.array(TodoEntry),
 });
 
 export const NoticeBlock = z.object({

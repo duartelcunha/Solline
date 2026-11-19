@@ -1,60 +1,80 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  RequestEnvelope,
   RecoveryOperationDetails,
+  RequestEnvelope,
   engineCommandSchemas,
   type AgentId,
   type EngineCommandName,
-  type EngineCommandPayload,
-  type EngineCommandResult,
   type EngineEvent,
-  type ResponseEnvelope,
   type EngineSnapshot,
   type RecoveryOperation,
+  type ResponseEnvelope,
 } from '@solline/protocol';
+import type { AgentAdapterFactory } from './adapters/types.ts';
+import type { LoginManager } from './agents/login.ts';
+import type { AgentRegistry } from './agents/registry.ts';
+import { fileAgentSettings, memoryAgentSettings, type AgentSettings } from './agents/settings.ts';
+import type { BrainOptions } from './brain/brain.ts';
+import { CheckpointStore, type CheckpointStoreOptions } from './checkpoints/store.ts';
+import type { ConsultManager } from './consult/manager.ts';
+import type { Drafter } from './handoff/drafter.ts';
+import { claudeDrafter } from './handoff/drafter.ts';
+import { CircuitRegistry } from './kernel/circuit-breaker.ts';
+import { EngineEventBus } from './kernel/event-bus.ts';
+import { EngineKernel } from './kernel/kernel.ts';
+import { mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
+import type { McpSecretReader } from './mcp/secrets.ts';
+import type { UserCatalogOptions, UserMcpCatalog } from './mcp/user-catalog.ts';
+import type { MemoryService } from './memory/manager.ts';
+import {
+  AGENT_REGISTRY,
+  ANALYSIS_MANAGER,
+  CONSULT_MANAGER,
+  ISSUE_SERVICE,
+  LOGIN_MANAGER,
+  MEMORY_SERVICE,
+  PULL_SERVICE,
+  RACE_MANAGER,
+  RACE_REGISTRY,
+  RULES_MANAGER,
+  SESSION_MANAGER,
+  SPACES_MANAGER,
+  SPLIT_MANAGER,
+  USER_MCP,
+  agentsModule,
+  analysisModule,
+  brainModule,
+  consultModule,
+  mcpModule,
+  memoryModule,
+  pullModule,
+  racesModule,
+  recoveryModule,
+  rulesModule,
+  sessionsModule,
+  spacesModule,
+  splitsModule,
+  type EngineRuntime,
+} from './modules/index.ts';
+import type { IssueService } from './pull/issues.ts';
+import type { PullService } from './pull/pull.ts';
+import { codexAvailability } from './quality/codex-reviewer.ts';
+import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
+import { routeReviewer, type ReviewerPicker } from './quality/routing.ts';
+import type { Planner } from './races/planner.ts';
+import { claudePlanner } from './races/planner.ts';
+import type { RaceManager } from './races/race-manager.ts';
+import type { RaceRegistry } from './races/race-registry.ts';
+import type { SplitManager } from './races/split-manager.ts';
 import { DurableJournal } from './recovery/journal.ts';
 import { RecoveryRecord, replay } from './recovery/records.ts';
 import type { RecoveryState } from './recovery/state.ts';
-import type { AgentAdapterFactory } from './adapters/types.ts';
-import { LoginManager } from './agents/login.ts';
-import { builtinRegistry, withFactories, type AgentRegistry } from './agents/registry.ts';
-import { CheckpointStore, type CheckpointStoreOptions } from './checkpoints/store.ts';
-import { fileAgentSettings, memoryAgentSettings, type AgentSettings } from './agents/settings.ts';
-import { SECRET_NAME } from './env.ts';
-import { MCP_CATALOG, findNode, mcpCatalog, type McpCatalog } from './mcp/catalog.ts';
-import type { McpSecretReader } from './mcp/secrets.ts';
-import { UserMcpCatalog, combinedCatalog, type UserCatalogOptions } from './mcp/user-catalog.ts';
-import { claudeReviewer, type Reviewer } from './quality/reviewer.ts';
-import { codexAvailability } from './quality/codex-reviewer.ts';
-import { routeReviewer, type ReviewerPicker } from './quality/routing.ts';
-import { SessionManager, type ChecksOptions } from './session-manager.ts';
-import { Assembler } from './races/assembler.ts';
-import { RaceManager } from './races/race-manager.ts';
-import { RaceRegistry } from './races/race-registry.ts';
-import { SplitManager } from './races/split-manager.ts';
-import { claudeJudge } from './verify/judge.ts';
-import { claudePlanner, type Planner } from './races/planner.ts';
-import { reviewPlan } from './races/split-review.ts';
-import { claudeDrafter, draftHandoff, type Drafter } from './handoff/drafter.ts';
-import { summaryOf } from './review.ts';
-import { IssueService, openListedIssue } from './pull/issues.ts';
-import { PullService } from './pull/pull.ts';
-import { detectChecks } from './checks/detect.ts';
-import { detectSetup } from './workspace/setup.ts';
+import type { RulesManager } from './rules/manager.ts';
+import type { ChecksOptions, SessionManager } from './session-manager.ts';
+import type { AnalysisRunner, SpaceAnalysis } from './spaces/analysis.ts';
+import type { SpaceManager } from './spaces/manager.ts';
 import { WorktreeManager } from './worktrees/worktrees.ts';
-import { ENGINE_VERSION } from './version.ts';
-import { Brain, sourceShimPath, type BrainOptions } from './brain/brain.ts';
-import { contextTool } from './brain/tools/context.ts';
-import { ConsultManager } from './consult/manager.ts';
-import { consultTools } from './consult/tools.ts';
-import { RulesManager } from './rules/manager.ts';
-import { rulesTools } from './rules/tools.ts';
-import { MemoryService } from './memory/manager.ts';
-import { memoryTools } from './memory/tools.ts';
-import { SpaceManager } from './spaces/manager.ts';
-import { SpaceAnalysis, type AnalysisRunner } from './spaces/analysis.ts';
-import { claudeAnalysis } from './spaces/claude-analysis.ts';
 
 export interface EngineOptions {
   spaceAnalyzer?: AnalysisRunner;
@@ -120,10 +140,8 @@ export interface EngineOptions {
   pulls?: PullService;
 }
 
-/** Quem dá a segunda opinião: um só para tudo, ou um por fabricante (o oposto do agente da sessão). */
 function reviewersFor(options: EngineOptions): {
   manager: { reviewer?: Reviewer; reviewerFor?: ReviewerPicker };
-  /** O revisor do resultado integrado das partes (sem agente de sessão: o Claude). */
   integration: Reviewer | undefined;
 } {
   if (options.reviewer === false) return { manager: {}, integration: undefined };
@@ -147,35 +165,24 @@ function reviewersFor(options: EngineOptions): {
   };
 }
 
-type Handlers = {
-  [C in EngineCommandName]: (payload: EngineCommandPayload<C>) => Promise<EngineCommandResult<C>>;
-};
-
 /** O motor recebe envelopes de pedido e devolve envelopes de resposta. Não sabe do Electron. */
 export class Engine {
+  readonly kernel: EngineKernel;
+  readonly circuits: CircuitRegistry;
   readonly spaces: SpaceManager;
-  /** As regras do projeto escritas na Solline (iguais para todos os agentes). */
   readonly rules: RulesManager;
   readonly memory: MemoryService;
-  /** "Perguntar a…" e "Delegar": os pedidos dos agentes à espera do utilizador e as sessões que abrem. */
   readonly consult: ConsultManager;
   readonly analysis: SpaceAnalysis;
   readonly sessions: SessionManager;
   readonly issues: IssueService;
   readonly pulls: PullService;
-  /** O catálogo de servidores MCP do utilizador (aprovação, sonda e escolha por projeto). */
   readonly mcp: UserMcpCatalog;
   readonly races: RaceManager;
   readonly splits: SplitManager;
-  /** Onde vivem as corridas e as repartições (um só registo para as duas). */
   readonly registry: RaceRegistry;
   readonly logins: LoginManager;
-  readonly #handlers: Handlers;
   readonly #checkpoints: CheckpointStore | undefined;
-  readonly #planner: Planner | undefined;
-  readonly #drafter: Drafter | undefined;
-  readonly #brain: Brain | undefined;
-  /** Os rascunhos a escrever (um por sessão de origem): um novo cancela o anterior. */
   readonly #drafts = new Map<string, AbortController>();
   readonly #epoch = randomUUID();
   readonly #journal: DurableJournal<RecoveryRecord> | undefined;
@@ -199,33 +206,18 @@ export class Engine {
             options.recoveryKey,
           )
         : undefined;
-    const base =
-      options.registry ??
-      builtinRegistry({
-        claudeExecutable: options.claudeExecutable,
-        isolated: options.isolated,
-        dataDir: options.dataDir,
-        packaged: options.packaged,
-      });
-    const registry = options.adapters ? withFactories(base, options.adapters) : base;
-    const builtinMcp = options.mcp ?? mcpCatalog({ dataDir: options.dataDir });
-    this.#checkpoints =
-      options.checkpoints === false
-        ? undefined
-        : new CheckpointStore({
-            root: options.dataDir ? path.join(options.dataDir, 'checkpoints') : undefined,
-            durable: Boolean(options.dataDir),
-            ...options.checkpoints,
-          });
     const emit = options.emit ?? (() => undefined);
-    const settings =
-      options.settings ??
-      (options.dataDir ? fileAgentSettings(options.dataDir) : memoryAgentSettings());
-    const env = options.env ?? process.env;
-    this.issues = options.issues ?? new IssueService();
-    this.pulls = options.pulls ?? new PullService();
-    // As corridas seguem as sessões pelos eventos delas (o estado de cada pista).
-    const box: { races?: RaceManager; splits?: SplitManager } = {};
+    this.circuits = new CircuitRegistry();
+    const bus = new EngineEventBus({
+      onError: (error) => {
+        emit({
+          kind: 'event',
+          type: 'engine.error',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      },
+    });
+
     const emitAll = (event: EngineEvent) => {
       if (this.#disposed) return;
       this.sessions?.observeRecovery(event);
@@ -253,13 +245,19 @@ export class Engine {
         return;
       }
       emit(sequenced);
-      // Uma consulta ou delegação acaba quando o primeiro turno da sessão que abriu acaba.
-      this.consult?.observe(event);
-      box.races?.observe(event);
-      box.splits?.observe(event);
-      this.spaces?.observe(event);
+      this.kernel.bus.emit(sequenced);
     };
-    // Nos testes isolados não se correm comandos do repositório da própria Solline.
+
+    this.kernel = new EngineKernel({ bus, circuits: this.circuits, emitExternal: emitAll });
+
+    this.#checkpoints =
+      options.checkpoints === false
+        ? undefined
+        : new CheckpointStore({
+            root: options.dataDir ? path.join(options.dataDir, 'checkpoints') : undefined,
+            durable: Boolean(options.dataDir),
+            ...options.checkpoints,
+          });
     const worktrees =
       options.worktrees === false
         ? undefined
@@ -267,168 +265,81 @@ export class Engine {
           (options.dataDir
             ? new WorktreeManager({ root: path.join(options.dataDir, 'worktrees') })
             : undefined));
-    const reviewing = reviewersFor(options);
-    this.rules = new RulesManager({
-      save: (rules) => emitAll({ kind: 'event', type: 'rules.changed', rules }),
-    });
-    // A memória vive no estado dos Espaços (criado mais abaixo): ligam-se na hora de usar.
-    this.memory = new MemoryService({
-      store: {
-        snapshot: () => this.spaces.snapshot(),
-        change: (update) => this.spaces.change(update),
-        root: (projectId) => this.spaces.projectPath(projectId),
-      },
-      rules: this.rules,
-    });
-    this.consult = new ConsultManager({ emit: emitAll, registry, worktrees });
-    // O catálogo do utilizador (servidores acrescentados do registo ou à mão) ao lado do fixo.
-    this.mcp = new UserMcpCatalog({
-      dataDir: options.dataDir,
-      secrets: options.mcpSecrets,
-      node: () => findNode(),
-      reserved: () => (options.mcp ? [] : MCP_CATALOG.map((e) => e.name)),
-      builtinIds: async () => (await builtinMcp.list()).map((d) => d.id),
-      onChange: (state) => emitAll({ kind: 'event', type: 'mcp.changed', mcp: state }),
-      ...options.mcpUser,
-    });
-    const mcp = combinedCatalog(builtinMcp, this.mcp);
-    this.#brain = options.brain
-      ? new Brain({
-          ...options.brain,
-          tools: options.brain.tools ?? [
-            contextTool,
-            ...rulesTools(this.rules),
-            ...memoryTools(this.memory),
-            ...consultTools(this.consult),
-          ],
-          shim: options.brain.shim ?? sourceShimPath(),
-        })
-      : undefined;
-    this.sessions = new SessionManager({
-      beforeEffect: (command, sessionId, text) =>
-        this.#prepare(command, { sessionId, ...(text ? { text } : {}) }),
-      emit: emitAll,
-      registry,
-      mcp,
-      brain: this.#brain,
-      consult: this.consult,
-      rules: this.rules,
-      memories: this.memory,
+
+    const runtime: EngineRuntime = {
+      options,
+      env: options.env ?? process.env,
+      settings:
+        options.settings ??
+        (options.dataDir ? fileAgentSettings(options.dataDir) : memoryAgentSettings()),
+      builtinMcp: options.mcp ?? mcpCatalog({ dataDir: options.dataDir }),
       checkpoints: this.#checkpoints,
-      keysFor: (agent) => settings.keys(agent),
-      // Nos testes isolados não se gasta a subscrição a rever turnos falsos.
-      ...reviewing.manager,
       worktrees,
-      checks:
-        options.checks === false
+      planner:
+        options.planner === false
           ? undefined
-          : (options.checks ?? (options.isolated ? undefined : {})),
-    });
-    this.consult.attach(this.sessions);
-    this.registry = new RaceRegistry(emitAll);
-    this.races = new RaceManager({
-      beforeEffect: (command, raceId) => this.#prepare(command, { raceId }),
-      sessions: this.sessions,
-      emit: emitAll,
-      registry: this.registry,
-      ...(worktrees ? { assembler: new Assembler({ worktrees }) } : {}),
-      // O juiz só desempata; nos testes isolados não se gasta a subscrição com ele.
-      ...(options.isolated || options.reviewer === false
-        ? {}
-        : { judge: claudeJudge({ claudeExecutable: options.claudeExecutable }) }),
-    });
-    // Como o juiz: nos testes isolados não se gasta a subscrição a planear.
-    this.#planner =
-      options.planner === false
-        ? undefined
-        : (options.planner ??
-          (options.isolated || options.reviewer === false
-            ? undefined
-            : claudePlanner({ claudeExecutable: options.claudeExecutable })));
-    // Como o planeador: nos testes isolados não se gasta a subscrição a escrever rascunhos.
-    this.#drafter =
-      options.drafter === false
-        ? undefined
-        : (options.drafter ??
-          (options.isolated
-            ? undefined
-            : claudeDrafter({ claudeExecutable: options.claudeExecutable })));
-    this.splits = new SplitManager({
-      sessions: this.sessions,
-      emit: emitAll,
-      registry: this.registry,
-      worktrees,
-      // As partes integram-se com as verificações do projeto e, no fim, a mesma segunda opinião.
-      ...(worktrees
-        ? {
-            integration: {
-              sessions: this.sessions,
-              worktrees,
-              reviewer: reviewing.integration,
-            },
-          }
-        : {}),
-    });
-    box.races = this.races;
-    box.splits = this.splits;
-    this.sessions.claimWorktrees(() => [
-      ...this.races.worktreePaths(),
-      ...this.splits.worktreePaths(),
-    ]);
-    this.spaces = new SpaceManager({
-      save: (spaces) => emitAll({ kind: 'event', type: 'spaces.changed', spaces }),
-      create: async (start) => (await this.sessions.create(start)).session.id,
-      send: (id, text, turnId) => this.sessions.send(id, text, 'queue', turnId),
-      projectOf: (id) =>
-        this.sessions.recovery().find((s) => s.view.session.id === id)?.view.session.projectId,
-      view: (id) => this.sessions.recovery().find((s) => s.view.session.id === id)?.view,
-      pending: (id, turnId) =>
-        this.sessions
-          .recovery()
-          .some(
-            (s) =>
-              s.view.session.id === id && s.view.queue.items.some((item) => item.id === turnId),
-          ),
-    });
-    this.analysis = new SpaceAnalysis({
-      manager: this.spaces,
-      idle: () =>
-        this.sessions
-          .recovery()
-          .every((s) => s.view.session.state === 'idle' && !s.view.queue.items.length),
-      history: () => {
-        const tasks = this.spaces.snapshot().tasks.map((t) => ({
-          id: `task:${t.id}`,
-          projectId: t.projectId,
-          text: `${t.title}\n${t.description}\nEstado: ${t.status}`,
-        }));
-        const turns = this.sessions.recovery().flatMap((s) =>
-          s.view.turns
-            .filter((t) => t.role === 'user')
-            .slice(-10)
-            .map((t) => ({
-              id: `chat:${s.view.session.id}:${t.id}`,
-              projectId:
-                s.view.session.projectId === '__general__' ? null : s.view.session.projectId,
-              text: t.blocks
-                .filter((b) => b.kind === 'text')
-                .map((b) => (b.kind === 'text' ? b.text : ''))
-                .join('\n'),
-            })),
-        );
-        return [...tasks.slice(0, 50), ...turns.slice(-50)];
-      },
-      run: async (input) => {
-        const detected = await registry.get(input.agent)?.detect({ refresh: true });
-        if (detected?.status !== 'ready')
-          throw new Error(
-            'O agente de análise precisa de atenção: verifica o login e a disponibilidade.',
-          );
-        if (options.isolated && !options.spaceAnalyzer)
-          throw new Error('A análise real está desligada neste ambiente de teste.');
-        return (options.spaceAnalyzer ?? claudeAnalysis(options.claudeExecutable))(input);
-      },
-    });
+          : (options.planner ??
+            (options.isolated || options.reviewer === false
+              ? undefined
+              : claudePlanner({ claudeExecutable: options.claudeExecutable }))),
+      drafter:
+        options.drafter === false
+          ? undefined
+          : (options.drafter ??
+            (options.isolated
+              ? undefined
+              : claudeDrafter({ claudeExecutable: options.claudeExecutable }))),
+      reviewing: reviewersFor(options),
+      journal: this.#journal,
+      operations: this.#operations,
+      recordedSessions: this.#recordedSessions,
+      drafts: this.#drafts,
+      emit,
+      emitAll,
+      beforeEffect: (command, input) => this.#prepare(command, input),
+      snapshot: () => this.#state().snapshot,
+      flush: () => this.flush(),
+      shutdown: () => this.shutdown(),
+      health: () => this.kernel.health(),
+      toggleModule: (id, enabled) => this.kernel.setModuleEnabled(id, enabled),
+    };
+
+    for (const mod of [
+      recoveryModule(runtime),
+      agentsModule(),
+      mcpModule(),
+      rulesModule(),
+      memoryModule(),
+      consultModule(),
+      brainModule(),
+      sessionsModule(),
+      racesModule(),
+      splitsModule(),
+      spacesModule(),
+      analysisModule(),
+      pullModule(),
+    ]) {
+      this.kernel.register(mod);
+    }
+
+    this.kernel.initSync();
+
+    this.spaces = this.kernel.inject(SPACES_MANAGER);
+    this.rules = this.kernel.inject(RULES_MANAGER);
+    this.memory = this.kernel.inject(MEMORY_SERVICE);
+    this.consult = this.kernel.inject(CONSULT_MANAGER);
+    this.analysis = this.kernel.inject(ANALYSIS_MANAGER);
+    this.sessions = this.kernel.inject(SESSION_MANAGER);
+    this.issues = this.kernel.inject(ISSUE_SERVICE);
+    this.pulls = this.kernel.inject(PULL_SERVICE);
+    this.mcp = this.kernel.inject(USER_MCP);
+    this.races = this.kernel.inject(RACE_MANAGER);
+    this.splits = this.kernel.inject(SPLIT_MANAGER);
+    this.registry = this.kernel.inject(RACE_REGISTRY);
+    this.logins = this.kernel.inject(LOGIN_MANAGER);
+    // Garante que `registry` de agentes (se não usado diretamente aqui) ficou inicializado.
+    void this.kernel.inject(AGENT_REGISTRY);
+
     const restored = replay(this.#journal?.records ?? [], this.#state());
     if (this.#journal) this.#journal.records.length = 0;
     this.sessions.restoreRecovery(restored.sessions, restored.setups);
@@ -444,344 +355,16 @@ export class Engine {
       .then(() => this.sessions.preserveRecovery())
       .then(() => {
         if (this.#journal) this.#journal.snapshot({ kind: 'snapshot', state: this.#state() });
-      });
+      })
+      .then(() => this.kernel.start());
     // Startup failure remains observable to every request without an unhandled rejection.
     void this.#ready.catch((error) => {
       this.#persistenceError = error instanceof Error ? error : new Error(String(error));
       emit({ kind: 'event', type: 'engine.error', message: this.#persistenceError.message });
     });
-    this.logins = new LoginManager({
-      onChange: (agent, error) =>
-        emit({ kind: 'event', type: 'agents.changed', agent, ...(error ? { error } : {}) }),
-    });
-    const logins = this.logins;
-    const definitionOf = (id: string) => {
-      const found = registry.get(id);
-      if (!found) throw new Error(`Agente desconhecido: ${id}`);
-      return found;
-    };
-    const configurable = (id: string) => {
-      const definition = definitionOf(id);
-      if (!definition.configurableKeys) throw new Error('Este agente não deixa escolher variáveis');
-      return definition;
-    };
-    const s = this.sessions;
-    const ok = {} as Record<string, never>;
-    this.#handlers = {
-      'spaces.syncProjects': async (p) => {
-        const before = JSON.stringify(this.spaces.projects());
-        this.spaces.syncProjects(p.projects, p.generalCwd);
-        if (before !== JSON.stringify(this.spaces.projects())) this.analysis.cancel();
-        return {};
-      },
-      'spaces.snapshot': async () => {
-        // Quem abre a memória vê já o que passou a "a confirmar".
-        await this.memory.sweepIfDue();
-        return this.spaces.snapshot();
-      },
-      'spaces.taskCreate': async (p) => this.spaces.createTask(p),
-      'spaces.taskUpdate': async (p) => this.spaces.updateTask(p),
-      'spaces.dispatch': (p) => this.spaces.delegate(p, p.start),
-      'spaces.configure': async (p) => {
-        this.analysis.cancel();
-        return this.spaces.configure(p);
-      },
-      'spaces.memorySave': async (p) => {
-        const before = p.id
-          ? this.spaces.snapshot().memories.find((m) => m.id === p.id)
-          : undefined;
-        // Ativar uma proposta (ou uma memória a confirmar) é aprová-la: renova a prova e o relógio.
-        if (p.id && before && before.state !== 'active' && p.state === 'active') {
-          this.spaces.saveMemory({ ...p, state: before.state });
-          return this.memory.approve({ ids: [p.id] });
-        }
-        return this.spaces.saveMemory(p);
-      },
-      'spaces.memoryDelete': async (p) => this.spaces.deleteMemory(p.id),
-      'memory.approve': async (p) => this.memory.approve(p),
-      'memory.reject': async (p) => this.spaces.deleteMemories(p.ids),
-      'memory.confirm': async (p) => this.memory.confirm(p.ids),
-      'memory.toRule': async (p) => this.memory.toRule(p),
-      'spaces.insightDecision': async (p) => this.spaces.decideInsight(p.id, p.decision),
-      'spaces.analyze': () => this.analysis.analyze(false),
-      'spaces.tick': () => this.analysis.analyze(true),
-      'rules.list': async (p) => this.rules.view(p.projectId),
-      'rules.save': async (p) => this.rules.save(p),
-      'rules.delete': async (p) => this.rules.delete(p.projectId, p.id),
-      'rules.undo': async (p) => this.rules.undo(p.projectId),
-      'rules.preview': async (p) => this.rules.preview(p.projectId),
-      'engine.snapshot': async () => {
-        // Os pedidos de consulta à espera só vão a quem liga agora; nunca para o diário.
-        const consults = this.consult.pending();
-        return { ...this.#state().snapshot, ...(consults.length ? { consults } : {}) };
-      },
-      'consult.answer': async (p) => (
-        this.consult.answer(p.sessionId, p.requestId, p.decision),
-        ok
-      ),
-      'engine.flush': async () => {
-        await this.flush();
-        return {};
-      },
-      'engine.shutdown': async () => {
-        await this.shutdown();
-        return {};
-      },
-      'engine.ping': async () => ({
-        pong: true,
-        engineVersion: ENGINE_VERSION,
-        pid: process.pid,
-        receivedAt: Date.now(),
-      }),
-      'mcp.list': async () => ({ servers: await mcp.list() }),
-      'mcp.catalog': async () => this.mcp.state(),
-      'mcp.search': async (p) => this.mcp.search(p.query, p.cursor),
-      'mcp.setProject': async (p) => this.mcp.setProject(p.projectId, p.serverIds),
-      'mcp.probe': async (p) => ({ server: await this.mcp.probe(p.id) }),
-      'mcp.draft': async (p) => ({ spec: await this.mcp.draft(p.source) }),
-      'mcp.get': async (p) => ({ server: this.mcp.get(p.id) }),
-      'mcp.addNow': async (p) => ({ server: this.mcp.add(p.id, p.spec) }),
-      'mcp.updateNow': async (p) => ({ server: this.mcp.update(p.id, p.spec) }),
-      'mcp.approveNow': async (p) =>
-        this.mcp.approve(p.id, { fingerprint: p.fingerprint, toolsHash: p.toolsHash }),
-      'mcp.removeNow': async (p) => ({ removed: this.mcp.remove(p.id) }),
-      'agents.list': async (p) => ({
-        agents: await Promise.all(
-          registry.list().map(async (d) => ({
-            id: d.id,
-            label: d.label,
-            transport: d.transport,
-            experimental: d.experimental === true,
-            untrustedProjects: d.untrustedProjects,
-            mcp: d.mcp === true,
-            ...(d.login ? { login: { label: d.login.label, pending: logins.pending(d.id) } } : {}),
-            ...(d.configurableKeys ? { keys: await settings.keys(d.id) } : {}),
-            ...(await d
-              .detect({ refresh: p.refresh === true })
-              .catch((error: unknown): { status: 'error'; detail: string } => ({
-                status: 'error',
-                detail: error instanceof Error ? error.message : String(error),
-              }))),
-          })),
-        ),
-      }),
-      'agents.loginStart': async (p) => {
-        const login = definitionOf(p.agent).login;
-        if (!login) throw new Error('Este agente não tem login dentro da app');
-        return { url: (await logins.start(p.agent, () => login.start())).url };
-      },
-      'agents.loginCancel': async (p) => (await logins.cancel(p.agent), ok),
-      'agents.keys': async (p) => {
-        const definition = configurable(p.agent);
-        return { label: definition.label, keys: await settings.keys(p.agent) };
-      },
-      'agents.saveKeys': async (p) => {
-        configurable(p.agent);
-        await settings.setKeys(p.agent, p.keys);
-        emit({ kind: 'event', type: 'agents.changed', agent: p.agent });
-        return ok;
-      },
-      // Só nomes, nunca valores: para o painel sugerir o que escolher.
-      'agents.keyCandidates': async () => ({
-        names: Object.keys(env)
-          .filter((name) => SECRET_NAME.test(name) && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name))
-          .sort(),
-      }),
-      'session.start': (p) => s.create(p),
-      'projects.trustChanged': async (p) => (s.setProjectTrust(p.projectId, p.trusted), ok),
-      'projects.detectChecks': async (p) => ({ checks: await detectChecks(p.cwd) }),
-      'projects.detectSetup': async (p) => ({ setup: await detectSetup(p.cwd) }),
-      'projects.setupChanged': async (p) => (s.setProjectSetup(p.projectId, p.setup), ok),
-      'setup.retry': async (p) => (await s.retrySetup(p.sessionId), ok),
-      'projects.checksChanged': async (p) => (await s.setProjectChecks(p.projectId, p.checks), ok),
-      'session.resume': (p) => s.resume(p.sessionId),
-      'session.send': (p) => s.send(p.sessionId, p.text, p.how),
-      'session.unqueue': async (p) => {
-        const removed = s.unqueue(p.sessionId, p.id);
-        if (removed) this.spaces.removeQueued(p.sessionId, p.id);
-        return { removed };
-      },
-      'session.reorder': async (p) => (s.reorder(p.sessionId, p.ids), ok),
-      'session.resumeQueue': async (p) => (s.resumeQueue(p.sessionId), ok),
-      'session.bring': (p) => s.bring(p.sessionId),
-      'race.begin': (p) => this.races.begin(p),
-      'split.begin': async ({ cwd, trusted, checks, setup, ...request }) => {
-        // As partes só valem com uma verificação do projeto: as guardadas ou as que se encontram.
-        // Num projeto sem confiança nada se corre: sem verificações, as partes ficam de fora.
-        const specs = trusted ? (checks ?? (await detectChecks(cwd))) : [];
-        return this.splits.begin({
-          ...request,
-          cwd,
-          trusted,
-          ...(checks !== undefined ? { checks } : {}),
-          ...(setup !== undefined ? { setup } : {}),
-          checkRefs: specs.filter((c) => c.enabled).map((c) => ({ id: c.id, label: c.label })),
-        });
-      },
-      'split.planNow': async (p) => {
-        if (!this.#planner) throw new Error('O planeador não está disponível');
-        const { plan, cost } = await this.#planner({
-          cwd: p.cwd,
-          request: p.text,
-          checks: p.checks,
-        });
-        const checkIds = p.checks.map((c) => c.id);
-        // "Não partir" não lança partes: o custo é o de um só agente.
-        const review =
-          plan.decision === 'split'
-            ? reviewPlan(plan.parts, checkIds)
-            : { sequential: [], dropped: [], hubs: [], costMultiplier: 1, warnings: [] };
-        return { plan, review, cost };
-      },
-      'split.review': async (p) => reviewPlan(p.parts, p.checkIds),
-      'race.get': async (p) => this.registry.get(p.raceId),
-      'race.proposal': (p) => this.races.proposal(p.raceId),
-      'race.assemble': (p) => this.races.assemble(p.raceId, p.picks),
-      'race.bring': (p) =>
-        this.registry.get(p.raceId).kind === 'split'
-          ? this.splits.bring(p.raceId)
-          : this.races.bring(p.raceId),
-      'split.integrate': (p) => this.splits.integrate(p.raceId),
-      'split.resolveNow': ({ raceId, cwd, trusted, checks, setup }) =>
-        this.splits.resolve(raceId, {
-          projectId: this.registry.get(raceId).projectId,
-          cwd,
-          trusted,
-          ...(checks !== undefined ? { checks } : {}),
-          ...(setup !== undefined ? { setup } : {}),
-        }),
-      'split.continue': (p) => this.splits.continueIntegration(p.raceId),
-      'split.stop': (p) => this.splits.stopLaunching(p.raceId),
-      'race.closeNow': (p) =>
-        this.registry.get(p.raceId).kind === 'split'
-          ? this.splits.close(p.raceId, p.keep)
-          : this.races.close(p.raceId, p.keep),
-      'worktrees.list': async () => ({ orphans: await s.orphans() }),
-      'worktrees.bring': (p) => s.bringOrphan(p.id),
-      'worktrees.discardNow': async (p) => (await s.discardOrphan(p.id), ok),
-      'session.closeNow': async (p) => {
-        this.spaces.capture(p.sessionId);
-        const result = await s.close(p.sessionId, p.worktree, p.dropQueue);
-        if (result.closed) this.spaces.sessionClosed(p.sessionId);
-        return result;
-      },
-      'session.interrupt': async (p) => (await s.interrupt(p.sessionId), ok),
-      'session.setMode': async (p) => (await s.setMode(p.sessionId, p.mode), ok),
-      'session.setModel': async (p) => (await s.setModel(p.sessionId, p.model), ok),
-      'session.setEffort': async (p) => (await s.setEffort(p.sessionId, p.effort), ok),
-      'permission.answer': async (p) => (s.answer(p.sessionId, p.requestId, p.answer), ok),
-      'review.timeline': (p) => s.timeline(p.sessionId),
-      'review.diff': async (p) => ({ files: await s.diff(p.sessionId, p.scope) }),
-      'review.apply': (p) => s.review(p.sessionId, p.action, p.path, p.hunkId),
-      'review.undo': (p) => s.undo(p.sessionId),
-      'review.comment': async (p) => ({
-        turnId: await s.comment(p.sessionId, p.comments, p.note),
-      }),
-      'session.rewind': (p) =>
-        s.rewind(p.sessionId, p.turnId, { files: p.files, conversation: p.conversation }),
-      'session.fork': (p) => s.fork(p.sessionId, p.turnId),
-      'quality.get': async (p) => s.quality(p.sessionId),
-      'quality.setEnabled': async (p) => s.setQualityEnabled(p.sessionId, p.enabled),
-      'quality.review': (p) => s.reviewNow(p.sessionId, p),
-      'quality.fix': async (p) => ({ turnId: await s.fix(p.sessionId, p.ids) }),
-      'quality.dismiss': async (p) => s.dismiss(p.sessionId, p.ids),
-      'checks.get': async (p) => s.checks(p.sessionId),
-      'ledger.get': async (p) => s.ledger(p.sessionId),
-      'ledger.budget': async (p) =>
-        s.setBudget(p.sessionId, {
-          maxTurns: p.maxTurns,
-          maxMinutes: p.maxMinutes,
-        }),
-      'repair.set': async (p) => s.setRepair(p.sessionId, p.enabled),
-      'repair.cancel': async (p) => s.cancelRepair(p.sessionId),
-      'checks.run': (p) => s.runChecks(p.sessionId),
-      'checks.fix': async (p) => ({ turnId: await s.fixCheck(p.sessionId, p.id) }),
-      'handoff.draft': async (p) => {
-        const target = definitionOf(p.agent);
-        const source = await s.handoffSource(p.sessionId);
-        this.#drafts.get(p.sessionId)?.abort();
-        const abort = new AbortController();
-        this.#drafts.set(p.sessionId, abort);
-        try {
-          const drafted = await draftHandoff(this.#drafter, {
-            cwd: source.cwd,
-            goal: p.goal,
-            source: { label: source.label, title: source.title },
-            target: { label: target.label, model: p.model },
-            transcript: summaryOf(
-              source.turns,
-              'A conversa da sessão anterior, por ordem (as mensagens mais antigas podem ter ficado de fora):',
-            ),
-            lastRequest: source.lastRequest,
-            files: source.files,
-            signal: abort.signal,
-          });
-          const warning = [drafted.warning, source.filesNote].filter(Boolean).join(' ');
-          return {
-            text: drafted.text,
-            drafted: drafted.drafted,
-            ...(warning ? { warning } : {}),
-            cost: drafted.cost,
-          };
-        } finally {
-          if (this.#drafts.get(p.sessionId) === abort) this.#drafts.delete(p.sessionId);
-        }
-      },
-      'handoff.cancelDraft': async (p) => {
-        const draft = this.#drafts.get(p.sessionId);
-        draft?.abort();
-        return { cancelled: draft !== undefined };
-      },
-      'handoff.start': (p) =>
-        s.handoff(p.sessionId, {
-          agent: p.agent,
-          model: p.model,
-          effort: p.effort,
-          text: p.text,
-        }),
-      'handoff.resume': (p) => s.resumeHere(p.sessionId),
-      'issues.list': async (p) => {
-        const project = this.spaces.project(p.projectId);
-        if (!project) throw new Error('Projeto desconhecido');
-        return this.issues.list(project.path, project.id);
-      },
-      'issues.open': async (p) => {
-        const project = this.spaces.project(p.projectId);
-        if (!project) throw new Error('Projeto desconhecido');
-        const list = await this.issues.list(project.path, project.id);
-        return openListedIssue({
-          project,
-          issueId: p.issueId,
-          list,
-          start: (payload) => s.create(payload).then((created) => created.session.id),
-          send: (sessionId, text) => s.send(sessionId, text).then(() => undefined),
-        });
-      },
-      'commit.save': (p) => s.saveCommit(p.sessionId, p.message),
-      'pr.preview': (p) => s.pullTarget(p.sessionId),
-      'pr.create': async (p) => {
-        const pushed = await s.pushPull(p.sessionId);
-        return this.pulls.open({
-          cwd: pushed.cwd,
-          branch: pushed.branch,
-          sessionId: p.sessionId,
-          title: p.title,
-          body: p.body,
-        });
-      },
-      'ci.read': async (p) => {
-        const state = await this.pulls.state(p.prId);
-        if (state === 'merged') {
-          const sessionId = this.pulls.sessionOf(p.prId);
-          if (sessionId) s.archive(sessionId);
-        }
-        return this.pulls.checks(p.prId);
-      },
-    };
   }
 
   async handle(raw: unknown): Promise<ResponseEnvelope> {
-    // Só passam comandos do motor: os do main e os desconhecidos ficam aqui.
     const parsed = RequestEnvelope.safeParse(raw);
     if (!parsed.success) {
       const id =
@@ -797,7 +380,8 @@ export class Engine {
         this.#stopping &&
         command !== 'engine.snapshot' &&
         command !== 'engine.flush' &&
-        command !== 'engine.shutdown'
+        command !== 'engine.shutdown' &&
+        command !== 'engine.health'
       )
         throw new Error('O motor está a fechar; o trabalho foi preservado.');
       const schema = engineCommandSchemas[command];
@@ -806,9 +390,11 @@ export class Engine {
       if (!readOnly && command !== 'engine.flush') this.#requirePersistence();
       if (!readOnly && 'sessionId' in input && typeof input.sessionId === 'string')
         this.sessions.assertRecoveryReady(input.sessionId);
+      const handler = this.kernel.getCommand(command);
+      if (!handler)
+        throw new Error(`O comando "${command}" está indisponível porque o módulo não está ativo.`);
       const finish =
         !readOnly && !command.startsWith('engine.') ? this.#prepare(command, input, id) : undefined;
-      const handler = this.#handlers[command] as (payload: unknown) => Promise<unknown>;
       const execution = (async () => {
         const result = schema.result.parse(await handler(input));
         if (finish) {
@@ -858,12 +444,9 @@ export class Engine {
       answer?: { decision?: unknown };
       decision?: unknown;
     };
-    // Zod's object strips all non-allowlisted keys, particularly keys/env/provider secrets.
-    // This is explanatory metadata only; recovered operations are never executed.
     const details = RecoveryOperationDetails.parse({
       ...input,
       itemId: typeof input?.id === 'string' ? input.id : undefined,
-      // permission.answer traz a decisão em `answer`; consult.answer traz-a à solta.
       decision: input?.answer?.decision ?? input?.decision,
     });
     const operation: RecoveryOperation = {
@@ -927,16 +510,12 @@ export class Engine {
     this.splits.stopForRecovery();
     await this.logins.cancelAll();
     await this.sessions.stopForRecovery();
-    // An accepted start/send/merge can still be awaiting a provider or Git. Its final
-    // state must reach the journal before shutdown is acknowledged. A timeout belongs
-    // to the caller and must keep the window open, never skip this preservation step.
     await Promise.allSettled([...this.#inFlight]);
     await this.logins.cancelAll();
     await this.sessions.stopForRecovery();
     await this.flush();
     this.#disposed = true;
-    await this.sessions.disposeAll(true);
-    await this.#brain?.dispose();
+    await this.kernel.shutdown();
     await this.#checkpoints?.dispose();
     this.#journal?.close();
   }
@@ -952,6 +531,7 @@ const READ_ONLY = new Set<EngineCommandName>([
   'spaces.syncProjects',
   'engine.ping',
   'engine.snapshot',
+  'engine.health',
   'agents.list',
   'agents.keys',
   'agents.keyCandidates',
@@ -974,4 +554,5 @@ const READ_ONLY = new Set<EngineCommandName>([
   'ledger.get',
   'handoff.draft',
   'handoff.cancelDraft',
+  'session.taskState',
 ]);

@@ -59,7 +59,7 @@ export const MATRIX: readonly MatrixRow[] = [
     milestone: 'M8',
     status: 'present',
     evidence: 'packages/engine/src/agents/catalog.ts',
-    note: 'OMP 18.22.2 entra pelo catálogo como binário nativo com overlay YAML (always-ask e subsistemas sobrepostos desligados) e _session/steering.',
+    note: 'OMP 19.0.0 entra pelo catálogo como binário nativo com overlay YAML (always-ask e subsistemas sobrepostos desligados) e _session/steering.',
   },
   {
     id: 'subscription-login',
@@ -246,9 +246,9 @@ export const MATRIX: readonly MatrixRow[] = [
   {
     id: 'handoff-draft-to-reviewer',
     milestone: 'M5',
-    status: 'absent',
-    evidence: 'packages/engine/src/handoff/drafter.ts',
-    note: 'O rascunho ainda não chega ao revisor da sessão que recebeu o testemunho.',
+    status: 'present',
+    evidence: 'packages/engine/src/sessions/task-state.ts',
+    note: 'O rascunho de passagem fica em quarentena em CanonicalTaskState.handoffSummary; o revisor recebe apenas originalIntent e pedidos humanos posteriores.',
   },
   {
     id: 'native-rules',
@@ -275,7 +275,7 @@ export const MATRIX: readonly MatrixRow[] = [
     id: 'consult-no-handoff',
     milestone: 'M6',
     status: 'present',
-    evidence: 'packages/engine/src/session-manager.ts',
+    evidence: 'packages/engine/src/sessions/handoff-fork.ts',
     note: 'Uma consulta não passa o testemunho. Para continuar, abre-se uma sessão normal.',
   },
   {
@@ -389,5 +389,12 @@ export const MATRIX: readonly MatrixRow[] = [
     status: 'absent',
     evidence: 'packages/protocol/src/conversation.ts',
     note: 'O modelo muda por pedido. Não há percurso económico automático.',
+  },
+  {
+    id: 'engine-microkernel',
+    milestone: 'M9',
+    status: 'present',
+    evidence: 'packages/engine/src/kernel/kernel.ts',
+    note: 'Microkernel interno tipado, circuit breakers nas fronteiras externas e estado canónico de tarefa sem carregar código de terceiros.',
   },
 ];

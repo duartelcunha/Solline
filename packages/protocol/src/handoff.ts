@@ -49,6 +49,8 @@ export const handoffCommandSchemas = {
       ...HandoffTarget,
       effort: z.string().min(1).max(32).optional(),
       text: z.string().min(1).max(200_000),
+      goal: z.string().min(1).max(4_000).optional(),
+      draftedBy: HandoffDraftedBy.optional(),
     }).strict(),
     result: z.object({
       session: SessionInfo,

@@ -76,7 +76,10 @@ describe('linha de base do M8', () => {
       '**/.claude/rules/**',
     ]);
     expect(READ_ONLY_DISALLOWED).toContain('Bash');
-    const session = readFileSync(join(root, 'packages/engine/src/session-manager.ts'), 'utf8');
+    const session = readFileSync(
+      join(root, 'packages/engine/src/sessions/handoff-fork.ts'),
+      'utf8',
+    );
     expect(session).toContain('Uma consulta não passa o testemunho.');
     const codexDoc = readFileSync(
       join(root, 'packages/engine/src/adapters/codex/project-doc.ts'),

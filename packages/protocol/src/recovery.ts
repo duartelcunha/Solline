@@ -8,6 +8,7 @@ import { Race, RaceLaneSpec } from './race.ts';
 import { SpacesState } from './spaces.ts';
 import { RulesState } from './rules.ts';
 import { ConsultRequest } from './consult.ts';
+import { CanonicalTaskState } from './task-state.ts';
 
 /** Human inspection only: an allowlist of intent, never an executable replay payload. */
 export const RecoveryOperationDetails = z.object({
@@ -67,6 +68,8 @@ export const RecoverySession = z
     checks: Checks.nullable(),
     /** Ausente nos diários antigos. */
     ledger: LedgerView.nullable().optional(),
+    /** Estado canónico da tarefa (ausente nos diários anteriores ao M9). */
+    taskState: CanonicalTaskState.optional(),
     conflicts: z.object({ files: z.array(z.string()), into: z.string() }).nullable(),
     interrupted: z.boolean(),
     error: z.string().nullable(),
