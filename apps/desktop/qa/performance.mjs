@@ -26,7 +26,9 @@ const repo = resolve(desktop, '../..');
 const label = process.argv[2] ?? 'performance-porcelain';
 if (!/^[a-z0-9-]{1,48}$/.test(label)) throw new Error('Invalid evidence label');
 const output = join(desktop, 'qa-evidence', label);
-const baseline = 'f35c02aa94933d558b50c88153b12e1350816d23';
+const baseline = process.env.SOLLINE_PERF_BASELINE ?? 'f35c02aa94933d558b50c88153b12e1350816d23';
+if (!/^(?:[0-9a-f]{7,40}|HEAD(?:~\d+)?|main(?:~\d+)?)$/i.test(baseline))
+  throw new Error('Invalid SOLLINE_PERF_BASELINE revision');
 const browserPath =
   process.env.SOLLINE_QA_BROWSER ??
   join(process.env.LOCALAPPDATA, 'ms-playwright/chromium-1247/chrome-win64/chrome.exe');

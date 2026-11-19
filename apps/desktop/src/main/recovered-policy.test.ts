@@ -112,7 +112,7 @@ describe('recovered project policy', () => {
       payload: { projectId: 'project', trusted: false },
     });
   });
-  it.each(['engine.snapshot', 'checks.get', 'review.timeline'] as const)(
+  it.each(['engine.snapshot', 'checks.get', 'review.timeline', 'app.checkUpdate'] as const)(
     'keeps %s readable without policy writes',
     async (command) => {
       const f = fixture();
@@ -121,7 +121,9 @@ describe('recovered project policy', () => {
         f.engine,
         f.projects,
         command,
-        command === 'engine.snapshot' ? {} : { sessionId: 'session' },
+        command === 'engine.snapshot' || command === 'app.checkUpdate'
+          ? {}
+          : { sessionId: 'session' },
       );
       expect(f.calls).toEqual([]);
       expect(f.projects.get).not.toHaveBeenCalled();

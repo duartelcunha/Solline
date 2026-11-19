@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Settings, X } from 'lucide-react';
-import type { StartupView } from '@solline/protocol';
+import { RefreshCw, Settings, X } from 'lucide-react';
+import type { CommandResult, StartupView } from '@solline/protocol';
 import './navigation.css';
 
 const choices: { value: StartupView; label: string; detail: string }[] = [
@@ -32,12 +32,49 @@ export function NavigationSettings({
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateResult, setUpdateResult] = useState<CommandResult<'app.checkUpdate'> | null>(null);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+
   async function save(next: StartupView) {
     setSaving(true);
     try {
       await onChange(next);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function checkUpdates() {
+    setCheckingUpdate(true);
+    setUpdateMessage(null);
+    try {
+      const result = await window.solline.request('app.checkUpdate', {});
+      setUpdateResult(result);
+    } catch (err) {
+      setUpdateMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
+  async function installUpdate(version: string) {
+    setInstallingUpdate(true);
+    setUpdateMessage(null);
+    try {
+      const result = await window.solline.request('app.installUpdate', { version });
+      if (result.started) {
+        setUpdateMessage(
+          result.openedReleasePage
+            ? 'Página do lançamento aberta no browser.'
+            : 'Instalador verificado e aberto.',
+        );
+      }
+    } catch (err) {
+      setUpdateMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInstallingUpdate(false);
     }
   }
   return (
@@ -97,6 +134,70 @@ export function NavigationSettings({
                 ? 'A guardar…'
                 : 'A escolha aplica-se na próxima abertura.'}
           </p>
+          <section className="mt-5 border-t border-line pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-[13px] font-semibold">Atualizações</h3>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-control border border-line px-2.5 py-1 text-xs font-medium hover:bg-surface-hover disabled:opacity-50"
+                onClick={() => void checkUpdates()}
+                disabled={checkingUpdate || installingUpdate}
+                data-testid="check-updates"
+              >
+                <RefreshCw size={12} className={checkingUpdate ? 'animate-spin' : undefined} />
+                {checkingUpdate ? 'A verificar…' : 'Verificar atualizações'}
+              </button>
+            </div>
+            <div role="status" className="mt-2 space-y-2 text-xs text-muted">
+              {updateResult ? (
+                updateResult.status === 'available' && updateResult.latestVersion ? (
+                  <>
+                    <p className="font-medium text-fg">
+                      Nova versão disponível: v{updateResult.latestVersion} (atual: v
+                      {updateResult.currentVersion})
+                    </p>
+                    {updateResult.notes ? (
+                      <pre className="max-h-24 overflow-auto rounded-control border border-line bg-surface-sunken p-2 font-sans text-xs whitespace-pre-wrap text-muted">
+                        {updateResult.notes}
+                      </pre>
+                    ) : null}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        className="rounded-control bg-fg px-2.5 py-1 text-xs font-medium text-bg disabled:opacity-50"
+                        disabled={installingUpdate}
+                        onClick={() => void installUpdate(updateResult.latestVersion ?? '')}
+                        data-testid="install-update"
+                      >
+                        {installingUpdate
+                          ? 'A transferir…'
+                          : updateResult.installer
+                            ? 'Transferir e instalar'
+                            : 'Abrir lançamento'}
+                      </button>
+                      {updateResult.releaseUrl ? (
+                        <button
+                          type="button"
+                          className="rounded-control border border-line px-2.5 py-1 text-xs hover:bg-surface-hover"
+                          onClick={() => window.open(updateResult.releaseUrl ?? undefined)}
+                        >
+                          Ver no GitHub
+                        </button>
+                      ) : null}
+                    </div>
+                  </>
+                ) : updateResult.status === 'up-to-date' ? (
+                  <p>
+                    {updateResult.detail ??
+                      `O Solline está atualizado (v${updateResult.currentVersion}).`}
+                  </p>
+                ) : (
+                  <p>{updateResult.detail ?? 'Não foi possível verificar atualizações.'}</p>
+                )
+              ) : null}
+              {updateMessage ? <p className="text-fg">{updateMessage}</p> : null}
+            </div>
+          </section>
           <button
             type="button"
             className="mt-5 rounded-control border border-line px-3 py-2 text-sm hover:bg-surface-hover"

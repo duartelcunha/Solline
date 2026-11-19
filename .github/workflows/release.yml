@@ -1,0 +1,107 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Create release as draft when running on a tag
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build & verify Windows NSIS installer
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install
+        run: corepack pnpm@10.34.6 install --frozen-lockfile
+      - name: Verify tag matches desktop version
+        if: github.ref_type == 'tag'
+        run: |
+          node -e "
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('apps/desktop/package.json', 'utf8'));
+          const expected = 'v' + pkg.version;
+          const actual = process.env.GITHUB_REF_NAME;
+          if (actual !== expected) {
+            console.error('Tag ' + actual + ' does not match apps/desktop/package.json version ' + expected);
+            process.exit(1);
+          }
+          "
+      - name: Typecheck & Lint
+        run: |
+          corepack pnpm typecheck
+          corepack pnpm lint
+      - name: UI tests
+        working-directory: packages/ui
+        run: corepack pnpm exec vitest run --configLoader runner
+      - name: Engine tests
+        working-directory: packages/engine
+        run: corepack pnpm exec vitest run --configLoader runner
+        env:
+          SOLLINE_SKIP_SDK: '1'
+      - name: Desktop unit tests
+        working-directory: apps/desktop
+        run: corepack pnpm exec vitest run --configLoader runner
+        env:
+          SOLLINE_VAULT: skip
+      - name: Build Windows installer
+        run: corepack pnpm dist
+      - name: Verify unpacked ASAR, fuses & runtime dependencies
+        working-directory: apps/desktop
+        run: node qa/distribution.mjs release/win-unpacked
+      - name: Generate SHA256SUMS.txt
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+          const crypto = require('crypto');
+          const dir = 'apps/desktop/release';
+          const files = fs.readdirSync(dir).filter((f) => /^Solline-Setup-.*\.exe$/.test(f)).sort();
+          if (files.length === 0) throw new Error('No Solline-Setup-*.exe found in ' + dir);
+          const lines = files.map((file) => {
+            const hash = crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, file))).digest('hex');
+            return hash + '  ' + file + '\n';
+          });
+          fs.writeFileSync(path.join(dir, 'SHA256SUMS.txt'), lines.join(''), 'utf8');
+          "
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: solline-windows-installer
+          path: |
+            apps/desktop/release/Solline-Setup-*.exe
+            apps/desktop/release/SHA256SUMS.txt
+          retention-days: 30
+      - name: Create or update GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          DRAFT: ${{ inputs.draft == true && 'true' || 'false' }}
+        run: |
+          $assets = @(Get-ChildItem 'apps/desktop/release/Solline-Setup-*.exe' | ForEach-Object { $_.FullName })
+          $assets += (Resolve-Path 'apps/desktop/release/SHA256SUMS.txt').Path
+          $exists = $false
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) { $exists = $true }
+          if ($exists) {
+            gh release upload $env:TAG @assets --clobber
+          } else {
+            $args = @($env:TAG) + $assets + @('--title', $env:TAG, '--generate-notes')
+            if ($env:DRAFT -eq 'true') { $args += '--draft' }
+            gh release create @args
+          }

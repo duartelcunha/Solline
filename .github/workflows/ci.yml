@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     name: ${{ matrix.os }} / node ${{ matrix.node }}
@@ -29,6 +33,9 @@ jobs:
         run: corepack pnpm typecheck
       - name: Lint
         run: corepack pnpm lint
+      - name: UI
+        working-directory: packages/ui
+        run: corepack pnpm exec vitest run
       - name: Engine
         working-directory: packages/engine
         run: corepack pnpm exec vitest run
@@ -40,3 +47,35 @@ jobs:
         env:
           # O cofre de credenciais do Windows não existe neste runner.
           SOLLINE_VAULT: ${{ runner.os == 'Windows' && 'skip' || '' }}
+
+  qa-fast:
+    name: qa-fast (renderer + distribution)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install
+        run: corepack pnpm@10.34.6 install --frozen-lockfile
+      - name: Install Playwright Chromium
+        working-directory: apps/desktop
+        run: corepack pnpm exec playwright install --with-deps chromium
+      - name: Renderer QA
+        run: corepack pnpm qa:renderer
+        env:
+          SOLLINE_QA_FRESH: '1'
+      - name: Production build
+        run: corepack pnpm --filter @solline/desktop build
+      - name: Distribution check
+        run: corepack pnpm qa:distribution
+      - name: Upload QA report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-fast-report
+          path: |
+            apps/desktop/qa-report
+            apps/desktop/test-results/qa
+          retention-days: 7

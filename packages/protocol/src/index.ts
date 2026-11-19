@@ -26,3 +26,4 @@ export * from './secrets.ts';
 export * from './host-link.ts';
 export * from './kernel.ts';
 export * from './task-state.ts';
+export * from './updates.ts';

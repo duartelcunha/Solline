@@ -35,6 +35,7 @@ import { PullRequest, pullCommandSchemas } from './pull.ts';
 import { mcpCommandSchemas, mcpInternalSchemas } from './mcp-catalog.ts';
 import { kernelCommandSchemas, kernelInternalSchemas } from './kernel.ts';
 import { taskStateCommandSchemas } from './task-state.ts';
+import { updatesCommandSchemas } from './updates.ts';
 
 /**
  * Contrato dos comandos da Ponte: interface -> main -> motor.
@@ -376,6 +377,7 @@ export const commandSchemas = {
   ...consultCommandSchemas,
   ...kernelCommandSchemas,
   ...taskStateCommandSchemas,
+  ...updatesCommandSchemas,
 } as const;
 
 /**
@@ -405,6 +407,8 @@ export const MAIN_COMMANDS = [
   'mcp.setSecret',
   'mcp.remove',
   'mcp.approve',
+  'app.checkUpdate',
+  'app.installUpdate',
 ] as const satisfies CommandName[];
 export type MainCommandName = (typeof MAIN_COMMANDS)[number];
 export function isMainCommand(command: CommandName): command is MainCommandName {

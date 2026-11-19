@@ -1,0 +1,72 @@
+name: dependabot-automerge
+
+on:
+  pull_request_target:
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  automerge:
+    name: Auto-merge safe devDependency patches
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable auto-merge for safe devDependency semver-patch updates
+        if: >-
+          steps.metadata.outputs.package-ecosystem == 'npm-and-yarn' &&
+          steps.metadata.outputs.dependency-type == 'direct:development' &&
+          steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+        run: |
+          node -e '
+            const raw = process.env.DEPENDENCY_NAMES ?? "";
+            let names = [];
+            try {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) names = parsed.map(String);
+            } catch {
+              names = raw.split(/[\s,]+/).filter(Boolean);
+            }
+            const protectedPrefixes = ["@electron/", "@anthropic-ai/", "@openai/", "@agentclientprotocol/"];
+            const protectedExact = new Set([
+              "electron",
+              "electron-builder",
+              "electron-vite",
+              "@playwright/test",
+              "zod",
+              "react",
+              "react-dom",
+              "vite",
+            ]);
+            const blocked = names.filter(
+              (name) => protectedExact.has(name) || protectedPrefixes.some((p) => name.startsWith(p)),
+            );
+            if (names.length === 0 || blocked.length > 0) {
+              console.log("Skipping auto-merge; protected or empty dependencies:", { names, blocked });
+              process.exit(0);
+            }
+            const { spawnSync } = require("node:child_process");
+            const res = spawnSync("gh", ["pr", "merge", "--auto", "--squash", process.env.PR_URL], {
+              encoding: "utf8",
+            });
+            if (res.stdout) process.stdout.write(res.stdout);
+            if (res.stderr) process.stderr.write(res.stderr);
+            if (res.status !== 0) {
+              const msg = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
+              if (/Pull request auto merge is not allowed|enable pull request auto-merge/i.test(msg)) {
+                console.warn("::warning::Repository auto-merge is not enabled; leaving PR ready for 1-click manual merge.");
+                process.exit(0);
+              }
+              process.exit(res.status ?? 1);
+            }
+          '

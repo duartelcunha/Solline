@@ -1549,6 +1549,19 @@ ${goal}
             { id: 'ci-lint', name: 'lint', state: 'passed', summary: '' },
           ],
         };
+      case 'app.checkUpdate':
+        return {
+          status: 'up-to-date',
+          currentVersion: '0.0.1',
+          latestVersion: '0.0.1',
+          publishedAt: null,
+          releaseUrl: null,
+          notes: '',
+          installer: null,
+          checkedAt: Date.now(),
+        };
+      case 'app.installUpdate':
+        return { started: false };
       default:
         throw new Error(`QA: comando sem cenário: ${command}`);
     }

@@ -13,6 +13,13 @@
     "lint": "corepack pnpm -r lint",
     "test": "corepack pnpm -r test",
     "dist": "corepack pnpm --filter @solline/desktop dist",
+    "qa:renderer": "corepack pnpm --filter @solline/desktop qa:renderer",
+    "qa:electron": "corepack pnpm --filter @solline/desktop qa:electron",
+    "qa:canary": "corepack pnpm --filter @solline/desktop qa:canary",
+    "qa:recovery-canary": "corepack pnpm --filter @solline/desktop qa:recovery-canary",
+    "qa:distribution": "corepack pnpm --filter @solline/desktop qa:distribution",
+    "qa:verify": "corepack pnpm --filter @solline/desktop qa:verify",
+    "updates:check": "node scripts/check-updates.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

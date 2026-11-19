@@ -45,6 +45,7 @@ import { AttentionWindow } from './attention-window.ts';
 import { WindowRecovery } from './window-recovery.ts';
 import { DraftUpdateSchema, WindowActionSchema } from './window-schemas.ts';
 import { NavigationPreferencesStore } from './navigation-preferences.ts';
+import { AppUpdater } from './updates.ts';
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId(`app.${APP_NAME.toLowerCase()}`);
@@ -120,6 +121,13 @@ function notify(notice: Attention): void {
 }
 const projects = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
 const navigation = new NavigationPreferencesStore(join(app.getPath('userData'), 'navigation.json'));
+const updater = new AppUpdater({
+  currentVersion: () => app.getVersion(),
+  userDataDir: () => app.getPath('userData'),
+  confirm,
+  openExternal: (url) => openExternalSafely(url),
+  openPath: (filePath) => shell.openPath(filePath),
+});
 const generalCwd = join(app.getPath('userData'), 'general-workspace');
 const policyProjects = {
   get: async (id: string) =>
@@ -482,6 +490,10 @@ async function handleMain(command: MainCommandName, payload: unknown): Promise<u
         create: () => engine.request('pr.create', request),
       });
     }
+    case 'app.checkUpdate':
+      return updater.check();
+    case 'app.installUpdate':
+      return updater.install((payload as CommandPayload<'app.installUpdate'>).version);
   }
 }
 
