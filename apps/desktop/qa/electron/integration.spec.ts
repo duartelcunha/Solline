@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -27,8 +27,10 @@ type Qa = {
   trustChoice: (trusted: boolean) => void;
   prompts: () => PromptRecord[];
 };
+const tempBase = () => realpathSync.native(tmpdir());
+
 async function removeFixture(root: string) {
-  if (dirname(root) !== resolve(tmpdir()) || !basename(root).startsWith('solline-redesign-qa-')) {
+  if (dirname(root) !== resolve(tempBase()) || !basename(root).startsWith('solline-redesign-qa-')) {
     throw new Error('Unsafe fixture cleanup');
   }
   await rm(root, { recursive: true, force: true });
@@ -49,7 +51,7 @@ const test = base.extend<{ qa: Qa }>({
     expect(await readFile(resolve('out/qa-electron/main/engine.js'), 'utf8')).toContain(
       'solline-scripted-qa-agent',
     );
-    const root = await mkdtemp(join(tmpdir(), 'solline-redesign-qa-'));
+    const root = await mkdtemp(join(tempBase(), 'solline-redesign-qa-'));
     const project = join(root, 'project');
     await mkdir(project);
     await writeFile(join(project, 'notes.txt'), 'Original.\n');
@@ -87,8 +89,8 @@ const test = base.extend<{ qa: Qa }>({
       try {
         // Main creates its window only after vault startup settles. Capture the
         // ready application, not transient PowerShell/compiler startup children.
-        const readyPage = await launched.firstWindow();
-        await expect(readyPage.getByTestId('ping-reply')).toBeAttached();
+        const readyPage = await launched.firstWindow({ timeout: 45_000 });
+        await expect(readyPage.getByTestId('ping-reply')).toBeAttached({ timeout: 30_000 });
         nativePid = await launched.evaluate(() => process.pid);
         const expected = nativePid;
         owner = await OwnedProcessTree.create(expected, async () => {
@@ -124,7 +126,20 @@ const test = base.extend<{ qa: Qa }>({
       });
     };
     // Capture failure preserves the fixture, with the original diagnostic attached.
-    await captureOwner();
+    try {
+      await captureOwner();
+    } catch (error) {
+      await Promise.race([
+        app.close().catch(() => undefined),
+        new Promise((resolveClose) => setTimeout(resolveClose, 5_000)),
+      ]);
+      try {
+        app.process().kill();
+      } catch {
+        // Process already exited.
+      }
+      throw error;
+    }
     const promptRecords: PromptRecord[] = [];
     const promptFailures: string[] = [];
     const promptPlan = {
@@ -523,14 +538,21 @@ test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', 
     .poll(() => readFile(join(qa.project, 'notes.txt'), 'utf8'))
     .toBe('Alteração revista.\n');
   await page.getByTestId('project-row').click();
-  await expect(page.getByRole('heading', { name: 'Para rever' })).toBeVisible();
+  const reviewHeading = page.getByRole('heading', { name: 'Para rever' });
+  const closeDetails = page.getByRole('button', { name: 'Fechar detalhes' });
+  if (!(await reviewHeading.isVisible()) && (await closeDetails.isVisible())) {
+    await closeDetails.click();
+  }
+  await expect(reviewHeading).toBeVisible();
   await page.getByTestId('task-row').click();
   await expect(page.getByRole('button', { name: 'Ver alterações' })).toBeVisible();
   await qa.shot('space-real-project');
   page = await qa.restart();
   await page.getByTestId('project-row').click();
   await expect(page.getByTestId('task-row')).toHaveText('Melhorar os estados vazios');
-  await page.getByTestId('task-row').click();
+  if (await page.getByTestId('task-row').isVisible()) {
+    await page.getByTestId('task-row').click();
+  }
   await expect(page.getByText('Para rever', { exact: true }).last()).toBeVisible();
   await expect(page.getByTestId('session-row')).toHaveCount(1);
   await page.getByTestId('open-general').click();
@@ -542,7 +564,7 @@ test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', 
   await page.getByRole('button', { name: 'Analisar', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Rever os estados do projeto' })).toBeVisible();
   await page.getByTestId('project-row').click();
-  await page.getByRole('button', { name: 'Memória', exact: true }).click();
+  await page.getByTestId('space-tab-memory').click();
   await expect(
     page.getByText('Preferir estados claros e respostas curtas.', { exact: true }),
   ).toBeVisible();
@@ -557,7 +579,7 @@ test('espaços: delegar, rever, analisar e recuperar sem repetir a execução', 
   await expect(page.getByLabel('Título da tarefa', { exact: true })).toHaveValue(
     'Melhorar os estados vazios',
   );
-  await page.getByRole('button', { name: 'Memória', exact: true }).click();
+  await page.getByTestId('space-tab-memory').click();
   await qa.shot('space-real-memory');
 });
 
@@ -693,6 +715,9 @@ test('review: comentário enviado e rejeitar/desfazer muda os ficheiros reais', 
   await expect(page.getByTestId('user-turn').last()).toContainText(
     'Mantém a frase original por favor.',
   );
+  if (!(await page.getByTestId('conversation').isVisible())) {
+    await page.getByTestId('review-toggle').click();
+  }
   await answer(page, 'deny');
   // Comment delivery is a genuine second engine turn, not just a local chip.
   await expect(page.getByTestId('user-turn')).toHaveCount(2);

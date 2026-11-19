@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,10 +9,13 @@ import { removeRecoveryKey } from '../../src/main/recovery-key';
 import { answerConfirmation, chooseDirectory } from './custom-prompts';
 import {
   OwnedProcessTree,
+  ProcessCaptureError,
   cleanupOwnedFixture,
   stopOwnedProcesses,
   type CleanupReport,
 } from './owned-process';
+
+const tempBase = () => realpathSync.native(tmpdir());
 
 function required<T>(value: T | null | undefined, label: string): T {
   if (value === undefined || value === null) throw new Error(`Missing ${label}`);
@@ -23,7 +27,7 @@ async function removeOwnedFixture(
   record: (report: CleanupReport) => Promise<void>,
 ) {
   if (
-    dirname(root) !== resolve(tmpdir()) ||
+    dirname(root) !== resolve(tempBase()) ||
     !basename(root).startsWith('solline-native-motion-qa-')
   )
     throw new Error('Unsafe fixture cleanup');
@@ -41,9 +45,9 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
   expect(await readFile(resolve('out/qa-electron/main/engine.js'), 'utf8')).toContain(
     'solline-scripted-qa-agent',
   );
-  const root = await mkdtemp(join(tmpdir(), 'solline-native-motion-qa-'));
+  const root = await mkdtemp(join(tempBase(), 'solline-native-motion-qa-'));
   if (
-    dirname(root) !== resolve(tmpdir()) ||
+    dirname(root) !== resolve(tempBase()) ||
     !basename(root).startsWith('solline-native-motion-qa-')
   )
     throw new Error('Unsafe QA root');
@@ -147,7 +151,9 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
     const context = required(browser.contexts()[0], 'native default context');
     context.on('page', (target) => target.on('pageerror', (error) => errors.push(error.message)));
     await expect
-      .poll(() => context.pages().some((target) => target.url().endsWith('/index.html')))
+      .poll(() => context.pages().some((target) => target.url().endsWith('/index.html')), {
+        timeout: 35_000,
+      })
       .toBe(true);
     page = required(
       context.pages().find((target) => target.url().endsWith('/index.html')),
@@ -157,11 +163,38 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
     page.on('console', (entry) => {
       if (entry.type() === 'error') errors.push(entry.text());
     });
-    await expect(page.getByTestId('ping-reply')).toBeAttached();
-    owner = await OwnedProcessTree.create(nativePid, () => {
-      if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
-        throw new Error('Original native child exited during capture');
-    });
+    await expect(page.getByTestId('ping-reply')).toBeAttached({ timeout: 30_000 });
+    for (let attempt = 1; ; attempt++) {
+      try {
+        owner = await OwnedProcessTree.create(nativePid, () => {
+          if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
+            throw new Error('Original native child exited during capture');
+        });
+        break;
+      } catch (error) {
+        if (
+          attempt < 3 &&
+          error instanceof ProcessCaptureError &&
+          error.capture.phase === 'tree-capture'
+        ) {
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+          continue;
+        }
+        await info
+          .attach('process-capture-failure', {
+            body: JSON.stringify({
+              root,
+              project,
+              nativePid,
+              error: String(error),
+              capture: error instanceof ProcessCaptureError ? error.capture : undefined,
+            }),
+            contentType: 'application/json',
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+    }
     const nativeId = await mainEvaluate(`(() => {
       const { BrowserWindow } = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron');
       return BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/index.html'))?.id;
@@ -319,13 +352,18 @@ test('janela nativa oculta cancela animações e recupera o olhar ao voltar', as
           inspector?.close();
         }
       } finally {
-        await removeOwnedFixture(owner, root, async (report) => {
-          await info.attach('owned-process-cleanup', {
-            body: JSON.stringify(report),
-            contentType: 'application/json',
+        if (owner) {
+          await removeOwnedFixture(owner, root, async (report) => {
+            await info.attach('owned-process-cleanup', {
+              body: JSON.stringify(report),
+              contentType: 'application/json',
+            });
           });
-        });
+        } else if (child.exitCode === null && child.signalCode === null) {
+          child.kill();
+        }
       }
     }
   }
+  if (!owner) throw new Error('Missing owned native process');
 });

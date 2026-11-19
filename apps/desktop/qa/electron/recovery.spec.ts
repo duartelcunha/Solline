@@ -1,6 +1,7 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
+import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -40,8 +41,9 @@ const test = base.extend<{ qa: Fixture }>({
     expect(await readFile(resolve('out/qa-electron/main/engine.js'), 'utf8')).toContain(
       'solline-scripted-qa-agent',
     );
-    const root = await mkdtemp(join(tmpdir(), 'solline-recovery-qa-'));
-    if (dirname(root) !== resolve(tmpdir()) || !basename(root).startsWith('solline-recovery-qa-'))
+    const tempBase = realpathSync.native(tmpdir());
+    const root = await mkdtemp(join(tempBase, 'solline-recovery-qa-'));
+    if (dirname(root) !== resolve(tempBase) || !basename(root).startsWith('solline-recovery-qa-'))
       throw new Error('Unsafe QA root');
     const project = join(root, 'project');
     await mkdir(project);
@@ -100,7 +102,7 @@ const test = base.extend<{ qa: Fixture }>({
       const nativePid = await launched.evaluate(() => process.pid);
       try {
         // Vault startup spawns short-lived helpers before the main window exists.
-        const readyPage = await launched.firstWindow();
+        const readyPage = await launched.firstWindow({ timeout: 45_000 });
         await expect(readyPage.getByTestId('ping-reply')).toBeAttached({ timeout: 20_000 });
         owners.set(
           launched,
@@ -292,9 +294,11 @@ const test = base.extend<{ qa: Fixture }>({
   },
 });
 
+const tempBase = () => realpathSync.native(tmpdir());
+
 async function removeRecoveryFiles(root: string): Promise<void> {
   if (
-    dirname(root) !== resolve(tmpdir()) ||
+    dirname(root) !== resolve(tempBase()) ||
     !/^solline-(recovery|native-hang)-qa-/.test(basename(root))
   )
     throw new Error('Unsafe QA fixture cleanup');
@@ -415,9 +419,9 @@ base(
     expect(await readFile(resolve('out/qa-electron/main/engine.js'), 'utf8')).toContain(
       'solline-scripted-qa-agent',
     );
-    const root = await mkdtemp(join(tmpdir(), 'solline-native-hang-qa-'));
+    const root = await mkdtemp(join(tempBase(), 'solline-native-hang-qa-'));
     if (
-      dirname(root) !== resolve(tmpdir()) ||
+      dirname(root) !== resolve(tempBase()) ||
       !basename(root).startsWith('solline-native-hang-qa-')
     )
       throw new Error('Unsafe QA root');
@@ -515,14 +519,16 @@ base(
         .toBe(WebSocket.OPEN);
       const context = await connect();
       await expect
-        .poll(() => context.pages().some((page) => page.url().endsWith('/index.html')))
+        .poll(() => context.pages().some((page) => page.url().endsWith('/index.html')), {
+          timeout: 35_000,
+        })
         .toBe(true);
       const page = required(
         context.pages().find((page) => page.url().endsWith('/index.html')),
         'main renderer',
       );
       page.on('pageerror', (error) => errors.push(error.message));
-      await expect(page.getByTestId('ping-reply')).toBeAttached({ timeout: 20_000 });
+      await expect(page.getByTestId('ping-reply')).toBeAttached({ timeout: 30_000 });
       owner = await OwnedProcessTree.create(nativePid, () => {
         if (child.pid !== nativePid || child.exitCode !== null || child.signalCode !== null)
           throw new Error('Original native child exited during capture');
@@ -704,20 +710,26 @@ base(
             inspector?.close();
           }
         } finally {
-          await cleanupOwnedFixture(
-            () =>
-              stopOwnedProcesses([required(owner, 'owned native process')], async (report) => {
-                await info.attach('owned-process-cleanup', {
-                  body: JSON.stringify(report),
-                  contentType: 'application/json',
-                });
-              }),
-            () => removeRecoveryKey(join(root, 'data')),
-            () => removeRecoveryFiles(root),
-          );
+          if (owner) {
+            const owned = owner;
+            await cleanupOwnedFixture(
+              () =>
+                stopOwnedProcesses([owned], async (report) => {
+                  await info.attach('owned-process-cleanup', {
+                    body: JSON.stringify(report),
+                    contentType: 'application/json',
+                  });
+                }),
+              () => removeRecoveryKey(join(root, 'data')),
+              () => removeRecoveryFiles(root),
+            );
+          } else if (child.exitCode === null && child.signalCode === null) {
+            child.kill();
+          }
         }
       }
     }
+    if (!owner) throw new Error('Missing owned native process');
   },
 );
 

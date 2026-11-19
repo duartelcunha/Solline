@@ -1,6 +1,7 @@
+import { realpathSync } from 'node:fs';
 import { cp, mkdtemp, mkdir, readFile, writeFile, symlink, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -12,9 +13,10 @@ if (!/^[a-z0-9-]{1,48}$/.test(label)) throw new Error('Invalid evidence label');
 const output = join(desktop, 'qa-evidence', label);
 await mkdir(dirname(output), { recursive: true });
 await mkdir(output);
-const scratch = await mkdtemp(join(tmpdir(), 'solline-canary-'));
+const tempBase = realpathSync.native(tmpdir());
+const scratch = await mkdtemp(join(tempBase, 'solline-canary-'));
 const target = join(scratch, 'apps/desktop');
-if (!resolve(scratch).startsWith(resolve(tmpdir()) + '\\solline-canary-'))
+if (!resolve(scratch).startsWith(resolve(tempBase) + sep + 'solline-canary-'))
   throw new Error('Invalid temporary directory');
 await mkdir(target, { recursive: true });
 const junctions = [];
