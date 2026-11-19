@@ -162,7 +162,7 @@ describe('AcpAdapter', () => {
     await a.close();
   });
 
-  it('interromper manda session/cancel e o turno fecha como interrompido', async () => {
+  it('interromper manda session/cancel e o turno fecha como interrompido, mantendo a sessão utilizável', async () => {
     const fake = fakeAcp();
     const { adapter: a, sink } = adapter(fake);
     await a.start();
@@ -174,6 +174,70 @@ describe('AcpAdapter', () => {
     expect(sink.deltas.find((d) => d.type === 'turn.end')).toMatchObject({
       outcome: 'interrupted',
     });
+    // O turno seguinte corre normalmente depois do cancelamento.
+    const prevEnds = sink.deltas.filter((d) => d.type === 'turn.end').length;
+    await a.send('olá');
+    await waitFor(() => sink.deltas.filter((d) => d.type === 'turn.end').length > prevEnds);
+    expect(sink.deltas.filter((d) => d.type === 'turn.end').at(-1)).toMatchObject({
+      outcome: 'done',
+    });
+    await a.close();
+  });
+
+  it('steering ACP (_session/steering): anuncia capacidade, injeta a meio do turno e absorve', async () => {
+    // Sem _meta.steering.supported não anuncia feature e recusa com too-late.
+    const plainFake = fakeAcp();
+    const plain = adapter(plainFake);
+    const plainStarted = await plain.adapter.start();
+    expect(plainStarted.capabilities.features.steer).toBeUndefined();
+    await expect(plain.adapter.steer('x', 'st-0')).resolves.toBe('too-late');
+    await plain.adapter.close();
+
+    // Com _meta.steering.supported: true anuncia features.steer e gere waiting -> absorbed.
+    const fake = fakeAcp({ steering: true });
+    const { adapter: a, sink } = adapter(fake);
+    const started = await a.start();
+    expect(started.capabilities.features.steer).toBe(true);
+
+    // Em repouso (sem turno ativo), outcome promptRequired devolve too-late sem emitir SteerBlock.
+    await expect(a.steer('em repouso', 'st-idle')).resolves.toBe('too-late');
+    expect(sink.deltas.some((d) => d.type === 'block.upsert' && d.block.kind === 'steer')).toBe(false);
+
+    // Durante um turno ativo, injeta como waiting e passa a absorbed ao chegar chunk seguinte.
+    await a.send('slow task');
+    await waitFor(() => sink.deltas.some((d) => d.type === 'block.append'));
+    await expect(a.steer('emit-reply: muda o foco', 'st-1')).resolves.toBe('joined');
+    expect(fake.received.find((m) => m.method === '_session/steering')?.params).toEqual({
+      sessionId: 'sess-1',
+      prompt: [{ type: 'text', text: 'emit-reply: muda o foco' }],
+      _meta: { steering: { idleBehavior: 'promptRequired' } },
+    });
+    await waitFor(() =>
+      sink.deltas.some(
+        (d) => d.type === 'block.upsert' && d.block.kind === 'steer' && d.block.status === 'absorbed',
+      ),
+    );
+    const steerDeltas = sink.deltas.filter(
+      (d) => d.type === 'block.upsert' && d.block.kind === 'steer' && d.block.id === 'st-1',
+    );
+    expect(steerDeltas.map((d) => (d as { block: { status: string } }).block.status)).toEqual([
+      'waiting',
+      'absorbed',
+    ]);
+
+    // Segundo steer sem chunk intermédio é absorvido automaticamente no turn.end.
+    await expect(a.steer('ultimo aviso', 'st-2')).resolves.toBe('joined');
+    await a.interrupt();
+    await waitFor(() => sink.deltas.some((d) => d.type === 'turn.end'));
+    expect(
+      sink.deltas.some(
+        (d) =>
+          d.type === 'block.upsert' &&
+          d.block.kind === 'steer' &&
+          d.block.id === 'st-2' &&
+          d.block.status === 'absorbed',
+      ),
+    ).toBe(true);
     await a.close();
   });
 

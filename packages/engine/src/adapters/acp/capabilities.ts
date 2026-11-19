@@ -84,7 +84,7 @@ export function acpSettings(config: AcpConfig): AcpSettings {
 /** O que a Solline mostra de um agente ACP: modelos, modos (sem acesso total) e effort. */
 export function capabilitiesFromAcp(
   config: AcpConfig,
-  features: { resume: boolean; cost: boolean },
+  features: { resume: boolean; cost: boolean; steer?: boolean },
 ): AgentCapabilities {
   const efforts = config.effort ? selectOptions(config.effort).map((o) => o.value) : [];
   const models: ModelOption[] = config.model
@@ -122,7 +122,13 @@ export function capabilitiesFromAcp(
     modes,
     effort: efforts.length > 0,
     effortOrder: efforts,
-    features: { cost: features.cost, context: true, resume: features.resume, rewind: false },
+    features: {
+      cost: features.cost,
+      context: true,
+      resume: features.resume,
+      rewind: false,
+      ...(features.steer ? { steer: true } : {}),
+    },
   };
 }
 

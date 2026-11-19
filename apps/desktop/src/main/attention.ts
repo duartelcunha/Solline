@@ -23,7 +23,7 @@ export interface Attention {
   urgent: boolean;
 }
 
-const LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
+const LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex', omp: 'OMP' };
 
 export function agentLabel(agent: string): string {
   return LABELS[agent] ?? agent.charAt(0).toUpperCase() + agent.slice(1);

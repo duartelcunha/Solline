@@ -19,6 +19,9 @@ export interface FakeAcpOptions {
   resume?: boolean;
   authRequired?: boolean;
   protocolVersion?: number;
+  /** Anuncia _meta.steering.supported e responde a _session/steering. */
+  steering?: boolean;
+  steeringOutcome?: 'injected' | 'queued' | 'promptRequired';
   /** Ignora o texto do pedido e faz sempre este cenário (suite de contrato). */
   scenario?: 'plain' | 'edit';
 }
@@ -208,6 +211,7 @@ export function runFakeAcpAgent(input: Readable, output: Writable, options: Fake
               },
               authMethods: [],
               agentInfo: { name: 'fake', version: '1.0.0' },
+              ...(options.steering ? { _meta: { steering: { supported: true } } } : {}),
             },
           });
           break;
@@ -249,6 +253,25 @@ export function runFakeAcpAgent(input: Readable, output: Writable, options: Fake
           cancel?.();
           cancel = null;
           break;
+        case '_session/steering': {
+          if (!options.steering) {
+            send({ id: msg.id, error: { code: -32601, message: 'não' } });
+            break;
+          }
+          const outcome =
+            options.steeringOutcome ?? (cancel !== null ? 'injected' : 'promptRequired');
+          const steerText = String((params.prompt as { text?: string }[] | undefined)?.[0]?.text ?? '');
+          send({ id: msg.id, result: { outcome, queue: 'steering' } });
+          if (outcome === 'injected' && steerText.includes('emit-reply')) {
+            setImmediate(() => {
+              update(params.sessionId, {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: 'Segui o steer.' },
+              });
+            });
+          }
+          break;
+        }
         default:
           if (msg.id !== undefined) send({ id: msg.id, error: { code: -32601, message: 'não' } });
       }

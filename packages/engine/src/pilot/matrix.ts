@@ -55,6 +55,13 @@ export const MATRIX: readonly MatrixRow[] = [
     note: 'OpenCode entra pelo catálogo, na versão revista. Não há UI para juntar executáveis.',
   },
   {
+    id: 'acp-omp',
+    milestone: 'M8',
+    status: 'present',
+    evidence: 'packages/engine/src/agents/catalog.ts',
+    note: 'OMP 18.22.2 entra pelo catálogo como binário nativo com overlay YAML (always-ask e subsistemas sobrepostos desligados) e _session/steering.',
+  },
+  {
     id: 'subscription-login',
     milestone: 'M1',
     status: 'present',
