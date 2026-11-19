@@ -105,8 +105,8 @@ export const CATALOG: readonly CatalogEntry[] = [
     binary: {
       executables: (platform) => (platform === 'win32' ? ['omp.exe'] : ['omp']),
       fallbackPaths: (env, platform) =>
-        platform === 'win32' && env.LOCALAPPDATA && path.win32.isAbsolute(env.LOCALAPPDATA)
-          ? [path.win32.join(env.LOCALAPPDATA, 'omp', 'omp.exe')]
+        platform === 'win32' && env.LOCALAPPDATA && path.isAbsolute(env.LOCALAPPDATA)
+          ? [path.join(env.LOCALAPPDATA, 'omp', 'omp.exe')]
           : [],
       versionArgs: ['--version'],
       parseVersion: (stdout) => stdout.match(/\bomp\/([0-9]+\.[0-9]+\.[0-9]+)\b/i)?.[1] ?? null,
